@@ -1,0 +1,59 @@
+name: InboxAndChill
+options:
+  bundleIdPrefix: lol.bgreen
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+packages:
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 2.0.0
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    CODE_SIGN_IDENTITY: "-"
+targets:
+  InboxAndChill:
+    type: application
+    platform: macOS
+    sources: [Sources/App]
+    dependencies:
+      - package: KeyboardShortcuts
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: lol.bgreen.inboxandchill
+        PRODUCT_NAME: Inbox & Chill
+        PRODUCT_MODULE_NAME: InboxAndChill
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_LSUIElement: true
+        INFOPLIST_KEY_CFBundleDisplayName: Inbox & Chill
+        ENABLE_HARDENED_RUNTIME: true
+        ENABLE_USER_SCRIPT_SANDBOXING: false
+  inchill:
+    type: tool
+    platform: macOS
+    sources: [Sources/CLI]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: lol.bgreen.inboxandchill.cli
+        PRODUCT_NAME: inchill
+  InboxAndChillTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests]
+    dependencies:
+      - target: InboxAndChill
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: lol.bgreen.inboxandchill.tests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Inbox & Chill.app/Contents/MacOS/Inbox & Chill"
+schemes:
+  InboxAndChill:
+    build:
+      targets:
+        InboxAndChill: all
+        inchill: all
+    test:
+      targets: [InboxAndChillTests]
