@@ -79,6 +79,35 @@ struct TriageTests {
         #expect(purged == 1)
     }
 
+    @Test func newActivityResurrectsUserDoneItem() async throws {
+        // Slack-style reused external ids: a fresh message in a conversation
+        // the user previously did away must bring the item back.
+        let store = try makeStore()
+        let dm = RemoteItem(
+            externalID: "dm-C1", kind: "dm", title: "DM: maria",
+            occurredAt: .now.addingTimeInterval(-100))
+        _ = try await store.apply(
+            event: .upsert([dm]), sourceID: "s", sourceKind: "slack",
+            remoteTruth: true)
+        try await store.markDone(uid: "slack:dm-C1")
+
+        // Same-age upsert (e.g. reconnect replay) must NOT resurrect.
+        _ = try await store.apply(
+            event: .upsert([dm]), sourceID: "s", sourceKind: "slack",
+            remoteTruth: true)
+        var counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 0)
+
+        // Newer activity must resurrect.
+        var fresh = dm
+        fresh.occurredAt = .now.addingTimeInterval(100)
+        _ = try await store.apply(
+            event: .upsert([fresh]), sourceID: "s", sourceKind: "slack",
+            remoteTruth: true)
+        counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 1)
+    }
+
     @Test func snoozeWakeFiresOnce() async throws {
         let store = try makeStore()
         let a = RemoteItem(

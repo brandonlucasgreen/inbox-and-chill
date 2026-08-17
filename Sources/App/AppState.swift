@@ -64,16 +64,26 @@ final class AppState {
     // MARK: Connector bootstrap
 
     func bootstrapConnectors() async {
-        let configs =
+        var configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []
+        // The local source (terminal + Claude Code) is built-in: create it on
+        // first run. Banners default on for local (decision §2.1.4).
+        if !configs.contains(where: { $0.kind == "local" }) {
+            let local = SourceConfig(
+                kind: "local", displayName: "Terminal & Claude Code",
+                bannersEnabled: true)
+            container.mainContext.insert(local)
+            try? container.mainContext.save()
+            configs.append(local)
+        }
         for config in configs where config.isEnabled {
             if let connector = ConnectorFactory.make(config: config) {
                 await engine.register(connector)
             }
         }
         #if DEBUG
-            if configs.isEmpty,
+            if configs.allSatisfy({ $0.kind == "local" }),
                 ProcessInfo.processInfo.environment["INCHILL_NO_FAKE"] == nil {
                 await engine.register(FakeConnector())
             }
@@ -140,10 +150,22 @@ final class AppState {
 
     func undoDone() {
         guard let uid = undoStack.popLast() else { return }
-        Task {
-            let sourceID = String(uid.split(separator: ":").first ?? "")
-            await engine.undoDone(uid: uid, sourceID: sourceID)
-        }
+        restore(uid: uid)
+    }
+
+    /// Bring a done item back to the queue (⌘Z and archive Restore).
+    func restore(uid: String) {
+        undoStack.removeAll { $0 == uid }
+        let sourceID = sourceID(forUID: uid)
+        Task { await engine.undoDone(uid: uid, sourceID: sourceID) }
+    }
+
+    private func sourceID(forUID uid: String) -> String {
+        var descriptor = FetchDescriptor<Item>(
+            predicate: #Predicate { $0.uid == uid })
+        descriptor.fetchLimit = 1
+        return (try? container.mainContext.fetch(descriptor).first?.sourceID)
+            ?? ""
     }
 
     func snooze(_ item: Item, until: Date) {
@@ -190,12 +212,35 @@ final class AppState {
     }
 }
 
-/// Builds a connector from a stored config. Real kinds land in M1–M4.
+/// Builds a connector from a stored config.
 enum ConnectorFactory {
     static func make(config: SourceConfig) -> (any Connector)? {
+        let settings = config.settings
         switch config.kind {
-        case "fake": return FakeConnector(sourceID: config.id)
-        default: return nil
+        case "fake":
+            return FakeConnector(sourceID: config.id)
+        case "linear":
+            return LinearConnector(sourceID: config.id)
+        case "github":
+            return GitHubConnector(sourceID: config.id)
+        case "local":
+            return LocalConnector(sourceID: config.id)
+        case "jsonPoller":
+            return JSONPollerConnector(
+                sourceID: config.id, urlString: settings["url"] ?? "",
+                mapping: settings["mapping"] ?? "")
+        case "campsite":
+            return CampsiteConnector(
+                sourceID: config.id, baseURL: settings["baseURL"] ?? "",
+                orgSlug: settings["orgSlug"] ?? "")
+        case "slack":
+            return SlackConnector(
+                sourceID: config.id,
+                saveEmoji: settings["saveEmoji"].flatMap {
+                    $0.isEmpty ? nil : $0
+                } ?? "pushpin")
+        default:
+            return nil
         }
     }
 }

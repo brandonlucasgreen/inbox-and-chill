@@ -17,9 +17,9 @@ struct SettingsView: View {
             }
             .tabItem { Label("General", systemImage: "gearshape") }
 
-            Text("Sources — coming in M1")
+            SourcesPane()
                 .tabItem { Label("Sources", systemImage: "tray.2") }
         }
-        .frame(width: 480, height: 320)
+        .frame(width: 520, height: 400)
     }
 }

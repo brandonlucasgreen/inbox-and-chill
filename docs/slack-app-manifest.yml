@@ -1,0 +1,49 @@
+# Inbox & Chill — Slack app manifest
+#
+# Create the app: https://api.slack.com/apps → "Create New App" →
+# "From an app manifest" → pick the Buffer workspace → paste this file.
+# Then: Install to Workspace (this may trigger an admin approval request).
+#
+# After install, collect two tokens for the app's Slack source settings:
+#   1. User OAuth Token (xoxp-…): OAuth & Permissions page
+#   2. App-Level Token (xapp-…): Basic Information → App-Level Tokens →
+#      Generate, with scope connections:write (for Socket Mode)
+#
+# This app is INTERNAL to the workspace (never distributed), which keeps it
+# in Slack's normal rate-limit tier and allows Socket Mode.
+display_information:
+  name: Inbox & Chill
+  description: "Personal notification triage: surfaces my own mentions, unread DMs, and emoji-saved messages in a private menu bar app. Read-mostly; acts only on my own account."
+  background_color: "#2b2d31"
+oauth_config:
+  scopes:
+    user:
+      - channels:read      # list channels I'm in, read last_read
+      - channels:history   # detect @-mentions in channel messages
+      - groups:read        # same for private channels
+      - groups:history
+      - im:read            # unread counts for DMs
+      - im:history
+      - mpim:read          # group DMs
+      - mpim:history
+      - users:read         # display names for DM titles
+      - reactions:read     # emoji-save gesture (reaction events)
+      - reactions:write    # un-save = remove my own reaction
+settings:
+  event_subscriptions:
+    user_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+      - reaction_added
+      - reaction_removed
+      - im_marked
+      - channel_marked
+      - group_marked
+      - mpim_marked
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

@@ -20,6 +20,15 @@ targets:
     sources: [Sources/App]
     dependencies:
       - package: KeyboardShortcuts
+      - target: inchill
+        embed: false
+    postBuildScripts:
+      - name: Embed inchill CLI
+        script: |
+          cp "$BUILT_PRODUCTS_DIR/inchill" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/inchill"
+          codesign --force --sign - "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/inchill"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/inchill
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: lol.bgreen.inboxandchill

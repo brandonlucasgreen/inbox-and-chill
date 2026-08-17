@@ -36,15 +36,8 @@ actor Store {
             let uid = remote.uid(sourceKind: sourceKind)
             seen.insert(uid)
             if let item = existing.first(where: { $0.uid == uid }) {
+                resurrectIfNeeded(item, from: remote)
                 update(item, from: remote)
-                // A previously remote-cleared item reappearing (e.g. new
-                // unreads in a channel) resurrects — unless the user
-                // explicitly did it away.
-                if item.doneAt != nil && item.doneReason == "remote" {
-                    item.doneAt = nil
-                    item.doneReason = nil
-                    item.updatedAt = .now
-                }
             } else {
                 let item = Item(
                     uid: uid, sourceID: sourceID, sourceKind: sourceKind,
@@ -87,11 +80,8 @@ actor Store {
             for remote in remotes {
                 let uid = remote.uid(sourceKind: sourceKind)
                 if let item = existing.first(where: { $0.uid == uid }) {
+                    resurrectIfNeeded(item, from: remote)
                     update(item, from: remote)
-                    if item.doneAt != nil && item.doneReason == "remote" {
-                        item.doneAt = nil
-                        item.doneReason = nil
-                    }
                 } else {
                     let item = Item(
                         uid: uid, sourceID: sourceID, sourceKind: sourceKind,
@@ -212,6 +202,19 @@ actor Store {
             predicate: #Predicate { $0.uid == uid })
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
+    }
+
+    /// A done item comes back when (a) the remote cleared it and it
+    /// reappeared, or (b) NEW activity arrived after the user did it away —
+    /// external ids like Slack "dm-<channel>" are reused per conversation,
+    /// so a fresh message must resurrect an explicitly-done item.
+    private func resurrectIfNeeded(_ item: Item, from remote: RemoteItem) {
+        guard let doneAt = item.doneAt else { return }
+        if item.doneReason == "remote" || remote.occurredAt > doneAt {
+            item.doneAt = nil
+            item.doneReason = nil
+            item.updatedAt = .now
+        }
     }
 
     private func update(_ item: Item, from remote: RemoteItem) {
