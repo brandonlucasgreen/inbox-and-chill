@@ -75,6 +75,7 @@ struct SourceEditorSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button(existing == nil ? "Add" : "Save") { save() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)

@@ -19,7 +19,7 @@ struct PanelView: View {
     @State private var selectedUID: String?
     @State private var filterText = ""
     @State private var isFiltering = false
-    @State private var showSnoozed = false
+    @AppStorage("panel.showSnoozed") private var showSnoozed = false
     @State private var showArchive = false
     @State private var snoozeTargetUID: String?
     @State private var isRefreshing = false
@@ -148,7 +148,8 @@ struct PanelView: View {
             }
             .buttonStyle(.plain)
             .help(showSnoozed ? "Hide snoozed items" : "Show snoozed items")
-            .accessibilityLabel("Snoozed, \(snoozedItems.count) items")
+            .accessibilityLabel(
+                "Snoozed, ^[\(snoozedItems.count) item](inflect: true)")
             .accessibilityAddTraits(showSnoozed ? [.isSelected] : [])
         }
     }
@@ -230,13 +231,16 @@ struct PanelView: View {
                     systemName: showArchive
                         ? "archivebox.fill" : "archivebox")
             }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
             .help(
                 showArchive
-                    ? "Back to the queue" : "Archive — done items, last 90 days")
+                    ? "Back to the queue"
+                    : "Archive — done items, last 90 days (⇧⌘A)")
             .accessibilityLabel(showArchive ? "Back to the queue" : "Archive")
 
             Button {
                 openWindow(id: "main")
+                NSApp.activate()
                 dismiss()
             } label: {
                 Image(systemName: "macwindow")
@@ -246,8 +250,18 @@ struct PanelView: View {
             .accessibilityLabel("Open as window")
 
             SettingsLink { Image(systemName: "gearshape") }
+                .keyboardShortcut(",", modifiers: .command)
                 .help("Settings (⌘,)")
                 .accessibilityLabel("Settings")
+
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                Image(systemName: "power")
+            }
+            .keyboardShortcut("q", modifiers: .command)
+            .help("Quit Inbox & Chill (⌘Q)")
+            .accessibilityLabel("Quit Inbox & Chill")
         }
         .font(.system(size: 12))
         .buttonStyle(.borderless)
@@ -267,8 +281,10 @@ struct PanelView: View {
                 .keyboardShortcut("p", modifiers: .command)
             Button("Copy") { copySelected() }
                 .keyboardShortcut("c", modifiers: .command)
+                .disabled(focus == .filter)
             Button("Undo Done") { appState.undoDone() }
                 .keyboardShortcut("z", modifiers: .command)
+                .disabled(focus == .filter)
             Button("Find") {
                 isFiltering = true
                 focus = .filter
@@ -302,6 +318,9 @@ struct PanelView: View {
             }
             return .handled
         }
+        // Archive mode has no visible queue selection; only Esc (handled
+        // above) should reach past it.
+        if showArchive { return .ignored }
         if character == KeyEquivalent.upArrow.character {
             moveSelection(-1)
             return .handled
@@ -323,11 +342,14 @@ struct PanelView: View {
             if filterText.isEmpty { isFiltering = false }
             return .handled
         }
+        // Bare E/S are commands only before a filter has begun; once typing
+        // has started, every printable character — including e/s — extends
+        // the filter instead (so e.g. "slack" can be typed).
         switch character {
-        case "e", "E":
+        case "e", "E" where filterText.isEmpty && !isFiltering:
             doneSelected()
             return .handled
-        case "s", "S":
+        case "s", "S" where filterText.isEmpty && !isFiltering:
             if selectedItem != nil { snoozeTargetUID = selectedUID }
             return .handled
         default:

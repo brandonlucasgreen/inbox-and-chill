@@ -21,6 +21,7 @@ struct SourcesPane: View {
                         onEdit: { editingSource = source },
                         onDelete: { pendingDelete = source })
                 }
+                .onMove(perform: move)
             }
             HStack {
                 Button { isAdding = true } label: {
@@ -54,6 +55,17 @@ struct SourcesPane: View {
         }
     }
 
+    /// Persists the new drag order into `sortOrder` on every affected row —
+    /// `sources` is already sorted by that key, so we just renumber it.
+    private func move(from offsets: IndexSet, to destination: Int) {
+        var reordered = sources
+        reordered.move(fromOffsets: offsets, toOffset: destination)
+        for (index, source) in reordered.enumerated() {
+            source.sortOrder = index
+        }
+        try? modelContext.save()
+    }
+
     private func delete(_ source: SourceConfig) {
         let sourceID = source.id
         for field in ConnectorCatalog.descriptor(for: source.kind)?.fields ?? []
@@ -70,6 +82,7 @@ struct SourcesPane: View {
 }
 
 private struct SourceRow: View {
+    @Environment(AppState.self) private var appState
     @Bindable var source: SourceConfig
     var onEdit: () -> Void
     var onDelete: () -> Void
@@ -92,12 +105,25 @@ private struct SourceRow: View {
             Toggle("On", isOn: $source.isEnabled)
                 .toggleStyle(.checkbox)
                 .help("Enable or disable this source")
+                .onChange(of: source.isEnabled) {
+                    let sourceID = source.id
+                    Task {
+                        await appState.engine.unregister(sourceID: sourceID)
+                        await appState.bootstrapConnectors()
+                    }
+                }
             Toggle("Badge", isOn: $source.countsTowardBadge)
                 .toggleStyle(.checkbox)
                 .help("Count this source's items toward the menu bar badge")
+                .onChange(of: source.countsTowardBadge) {
+                    Task { await appState.refreshBadge() }
+                }
             Toggle("Banners", isOn: $source.bannersEnabled)
                 .toggleStyle(.checkbox)
                 .help("Show a notification banner for new items from this source")
+                .onChange(of: source.bannersEnabled) {
+                    Task { await appState.refreshBadge() }
+                }
             Button("Edit", action: onEdit)
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")

@@ -26,7 +26,21 @@ final class AppState {
     var statuses: [String: ConnectorStatus] = [:]
     /// uids of user-done items, most recent last (⌘Z pops).
     var undoStack: [String] = []
-    var selectedSourceFilter: String?  // nil = All
+    var launchAtLoginError: String?
+
+    /// Persisted across relaunch (§5.3). nil = All.
+    var selectedSourceFilter: String? {
+        get {
+            access(keyPath: \.selectedSourceFilter)
+            return UserDefaults.standard.string(forKey: "panel.sourceFilter")
+        }
+        set {
+            withMutation(keyPath: \.selectedSourceFilter) {
+                UserDefaults.standard.set(
+                    newValue, forKey: "panel.sourceFilter")
+            }
+        }
+    }
 
     var launchAtLogin: Bool {
         get {
@@ -35,21 +49,32 @@ final class AppState {
         }
         set {
             withMutation(keyPath: \.launchAtLogin) {
-                try? newValue
-                    ? SMAppService.mainApp.register()
-                    : SMAppService.mainApp.unregister()
+                do {
+                    if newValue {
+                        try SMAppService.mainApp.register()
+                    } else {
+                        try SMAppService.mainApp.unregister()
+                    }
+                    launchAtLoginError = nil
+                } catch {
+                    launchAtLoginError = error.localizedDescription
+                }
             }
         }
     }
 
     var badgeStyle: BadgeStyle {
         get {
-            BadgeStyle(
+            access(keyPath: \.badgeStyle)
+            return BadgeStyle(
                 rawValue: UserDefaults.standard.string(forKey: "badgeStyle")
                     ?? "") ?? .highSignalCount
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: "badgeStyle")
+            withMutation(keyPath: \.badgeStyle) {
+                UserDefaults.standard.set(
+                    newValue.rawValue, forKey: "badgeStyle")
+            }
             Task { await refreshBadge() }
         }
     }
@@ -71,9 +96,29 @@ final class AppState {
         engine = SyncEngine(store: store) { [weak self] change in
             Task { @MainActor in self?.handle(change) }
         }
-        UNUserNotificationCenter.current().requestAuthorization(
-            options: [.alert, .sound]) { _, _ in }
-        Task { await bootstrapConnectors() }
+        // Permission is requested lazily, right before the first banner —
+        // not at launch (banners are opt-in; don't alert before the UI).
+        notificationDelegate = NotificationDelegate(appState: self)
+        UNUserNotificationCenter.current().delegate = notificationDelegate
+        Task {
+            await bootstrapConnectors()
+            await refreshBadge()
+        }
+    }
+
+    private var notificationDelegate: NotificationDelegate?
+
+    /// Banner sound is off by default (§2.1.4: silent posture).
+    var bannerSound: Bool {
+        get {
+            access(keyPath: \.bannerSound)
+            return UserDefaults.standard.bool(forKey: "bannerSound")
+        }
+        set {
+            withMutation(keyPath: \.bannerSound) {
+                UserDefaults.standard.set(newValue, forKey: "bannerSound")
+            }
+        }
     }
 
     // MARK: Connector bootstrap
@@ -117,13 +162,9 @@ final class AppState {
         let bannerItems =
             change.inserted.filter { bannerSources.contains($0.sourceID) }
             + change.snoozeWakes
-        for item in bannerItems {
-            let content = UNMutableNotificationContent()
-            content.title = item.title
-            content.sound = .default
-            UNUserNotificationCenter.current().add(
-                UNNotificationRequest(
-                    identifier: item.id, content: content, trigger: nil))
+        if !bannerItems.isEmpty {
+            let sound = bannerSound
+            Task { await Self.postBanners(bannerItems, sound: sound) }
         }
         Task { await refreshBadge() }
     }
@@ -143,6 +184,49 @@ final class AppState {
         case .dot: badgeText = n > 0 ? "●" : nil
         case .none: badgeText = nil
         default: badgeText = n > 0 ? "\(n)" : nil
+        }
+    }
+
+    /// Requests permission on first use (if undetermined), then posts.
+    private static func postBanners(_ items: [ItemSummary], sound: Bool) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            let granted =
+                (try? await center.requestAuthorization(
+                    options: [.alert, .sound])) ?? false
+            guard granted else { return }
+        case .denied:
+            return
+        default:
+            break
+        }
+        for item in items {
+            let content = UNMutableNotificationContent()
+            content.title = item.title
+            if let snippet = item.snippet { content.body = snippet }
+            content.subtitle = ConnectorCatalog.descriptor(
+                for: item.sourceKind)?.displayName ?? item.sourceKind
+            content.threadIdentifier = item.sourceID
+            content.userInfo = ["uid": item.id]
+            if sound { content.sound = .default }
+            try? await center.add(
+                UNNotificationRequest(
+                    identifier: item.id, content: content, trigger: nil))
+        }
+    }
+
+    /// Banner click → open the item's URL (or the panel as fallback).
+    func handleNotificationTap(uid: String) {
+        var descriptor = FetchDescriptor<Item>(
+            predicate: #Predicate { $0.uid == uid })
+        descriptor.fetchLimit = 1
+        if let item = try? container.mainContext.fetch(descriptor).first,
+            item.url != nil {
+            open(item)
+        } else {
+            PanelToggler.toggle()
         }
     }
 
@@ -224,6 +308,39 @@ final class AppState {
             ids.insert("fake-1")
         #endif
         return ids
+    }
+}
+
+/// Routes banner clicks back into the app and shows banners while frontmost.
+final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    private weak var appState: AppState?
+
+    init(appState: AppState) {
+        self.appState = appState
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let uid =
+            response.notification.request.content.userInfo["uid"] as? String
+        completionHandler()
+        guard let uid else { return }
+        let state = appState  // @MainActor class — Sendable reference
+        Task { @MainActor in
+            state?.handleNotificationTap(uid: uid)
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler:
+            @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner])
     }
 }
 

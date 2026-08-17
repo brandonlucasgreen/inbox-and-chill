@@ -94,22 +94,46 @@ enum PanelFormat {
     }
 }
 
-/// ⌘C / context-menu copy: HTML link plus a plain-text fallback so the
-/// paste lands richly in Notes or Slack and legibly in a terminal.
+/// ⌘C / context-menu copy: writes every flavor a paste target might ask
+/// for in one deterministic pass — `.URL` so Safari's address bar and
+/// Finder get a real link, `.html`/`.rtf` so rich documents (Notes,
+/// TextEdit, Slack) get a styled link, and `.string` so plain-text fields
+/// (terminals, chat composers) get something legible either way.
 enum PanelPasteboard {
     static func copy(title: String, url: URL?) {
         let board = NSPasteboard.general
         board.clearContents()
-        let plain = url.map { "\(title) — \($0.absoluteString)" } ?? title
-        if let url {
-            board.declareTypes([.html, .string], owner: nil)
-            board.setString(
-                "<a href=\"\(escaped(url.absoluteString))\">\(escaped(title))</a>",
-                forType: .html)
-        } else {
-            board.declareTypes([.string], owner: nil)
+
+        guard let url else {
+            let item = NSPasteboardItem()
+            item.setString(title, forType: .string)
+            board.writeObjects([item])
+            return
         }
-        board.setString(plain, forType: .string)
+
+        let plain = "\(title) — \(url.absoluteString)"
+        let item = NSPasteboardItem()
+        item.setString(url.absoluteString, forType: .URL)
+        item.setString(
+            "<a href=\"\(escaped(url.absoluteString))\">\(escaped(title))</a>",
+            forType: .html)
+        if let rtf = rtfLink(title: title, url: url) {
+            item.setData(rtf, forType: .rtf)
+        }
+        item.setString(plain, forType: .string)
+        // Single write: one item carrying every flavor, so every paste
+        // target — Safari's URL-only address bar, a rich-text document, a
+        // plain-text field — reads back a consistent, correct value.
+        board.writeObjects([item])
+    }
+
+    private static func rtfLink(title: String, url: URL) -> Data? {
+        let attributed = NSAttributedString(
+            string: title,
+            attributes: [.link: url])
+        return try? attributed.data(
+            from: NSRange(location: 0, length: attributed.length),
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
     }
 
     private static func escaped(_ string: String) -> String {

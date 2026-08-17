@@ -108,6 +108,7 @@ struct MainWindowView: View {
                 Text(item.title)
                     .fontWeight(item.highSignal ? .semibold : .regular)
                     .help(tooltip(for: item))
+                    .draggable(ItemDragPayload(item))
             }
             .width(min: 200, ideal: 420)
 
@@ -260,7 +261,7 @@ struct MainWindowView: View {
 
     private var statusBar: some View {
         HStack(spacing: 8) {
-            Text(selectionSummary)
+            selectionSummary
                 .font(.callout)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -366,7 +367,7 @@ struct MainWindowView: View {
             Button(title("Copy", count)) { MainWindowPasteboard.copy(targets) }
             if count == 1, let url = targets[0].url {
                 Button("Copy Link") {
-                    PanelPasteboard.copy(title: url.absoluteString, url: nil)
+                    PanelPasteboard.copy(title: targets[0].title, url: url)
                 }
             }
         }
@@ -606,11 +607,13 @@ struct MainWindowView: View {
         return isSearching ? "\(count) \(noun) matching" : "\(count) \(noun)"
     }
 
-    private var selectionSummary: String {
+    private var selectionSummary: Text {
         guard !selection.isEmpty else {
-            return rows.isEmpty ? "No items" : "\(rows.count) items"
+            return rows.isEmpty
+                ? Text("No items")
+                : Text("^[\(rows.count) item](inflect: true)")
         }
-        return "\(selection.count) of \(rows.count) selected"
+        return Text("\(selection.count) of \(rows.count) selected")
     }
 
     private var lastRefresh: Date? {
@@ -645,6 +648,9 @@ struct MainWindowView: View {
     private var snoozeTargetTitle: String {
         let targets = resolve(snoozeTargetIDs ?? [])
         guard targets.count != 1 else { return targets[0].title }
+        // `SnoozePopover.title` is a plain String (shared with the panel),
+        // so the `^[...](inflect: true)` Text markdown isn't available here.
+        // count != 1 is guaranteed above, so "items" is always correct.
         return "\(targets.count) items"
     }
 

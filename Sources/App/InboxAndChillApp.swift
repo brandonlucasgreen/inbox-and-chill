@@ -29,6 +29,16 @@ struct InboxAndChillApp: App {
             MainWindowView()
                 .environment(appState)
                 .modelContainer(appState.container)
+                // LSUIElement apps have no Dock icon or ⌘Tab entry — while
+                // the triage window is open, become a regular app so it
+                // stays reachable; revert when it closes.
+                .onAppear {
+                    NSApp.setActivationPolicy(.regular)
+                    NSApp.activate()
+                }
+                .onDisappear {
+                    NSApp.setActivationPolicy(.accessory)
+                }
         }
         .defaultLaunchBehavior(.suppressed)
         .commands { MainWindowCommands() }
@@ -64,6 +74,10 @@ enum PanelToggler {
         // click on our status item to toggle the panel.
         for window in NSApp.windows
         where window.className.contains("NSStatusBarWindow") {
+            // Private accessor — guard so a future rename degrades to a
+            // silent no-op instead of an uncatchable KVC exception.
+            guard window.responds(to: NSSelectorFromString("statusItem"))
+            else { continue }
             if let button = window.value(forKey: "statusItem")
                 .flatMap({ $0 as? NSStatusItem })?.button {
                 button.performClick(nil)

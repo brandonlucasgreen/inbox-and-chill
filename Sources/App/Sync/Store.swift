@@ -7,6 +7,7 @@ struct ItemSummary: Sendable, Identifiable {
     var sourceID: String
     var sourceKind: String
     var title: String
+    var snippet: String?
     var urlString: String?
     var highSignal: Bool
 }
@@ -232,6 +233,7 @@ actor Store {
         ItemSummary(
             id: item.uid, sourceID: item.sourceID,
             sourceKind: item.sourceKind, title: item.title,
-            urlString: item.urlString, highSignal: item.highSignal)
+            snippet: item.snippet, urlString: item.urlString,
+            highSignal: item.highSignal)
     }
 }

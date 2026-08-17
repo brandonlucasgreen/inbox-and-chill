@@ -20,7 +20,7 @@ To-dos and "things awaiting me" live in at least seven places: Linear inbox, Sla
 2. **Hybrid open/done**: items whose source clears them naturally (Slack unreads via Slack's own read-state) auto-clear; everything else dies only by explicit done (E).
 3. **Badge**: Settings choice of total count / high-signal count / dot / none (default: high-signal), with per-source "counts toward badge" toggles. Zero = clean icon.
 4. **App notifications**: silent by default; per-source opt-in banners; Claude/terminal sources default on; Focus modes respected.
-5. **Snooze**: write-through for Linear (real remote snooze), local for the rest, identical UI; snoozed items visible in a collapsed section; a waking item always banners (snoozing is consent to be interrupted).
+5. **Snooze**: write-through for Linear (real remote snooze), local for the rest, identical UI; snoozed items visible in a collapsed section; a waking item always banners (snoozing is consent to be interrupted). *Amendment: under a Focus mode, wake banners defer like any notification — honoring "always" literally would require the time-sensitive entitlement; politeness wins.*
 6. **Done items archive for 90 days** (searchable, ⌘Z undo-done), then purge. **Pin (⌘P)** exempts an item from *all* auto-clears, done, and purge — pinned section at top of panel, leaves only by unpinning.
 7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store at most a later degraded fork. Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
 8. **Cloudflare relay deferred; Notion connector demoted to build-on-demand** (Notion's tenure in the stack is itself uncertain). v1 is fully self-contained — zero infrastructure.
@@ -96,7 +96,7 @@ Two complementary mechanisms:
 
 ### 5.3 State preservation
 
-Remember: filter scope, group-by mode, panel size, window frame, sort order, per-source collapsed state, snoozes (obviously), last selection. Restore on relaunch.
+Remember: filter scope, snoozed-section disclosure, main-window scope/sort (SceneStorage), window frame, snoozes (obviously). Restore on relaunch. *Amendment: panel size is fixed (MenuBarExtra window-style panels aren't user-resizable) — the original "remember panel size" promise is dropped; the ⌘0 window is the resizable surface.*
 
 ### 5.4 Triage semantics, notifications & focus
 
@@ -204,6 +204,16 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 **Stock Terminal / any shell:** no notification API exists, so integration is shell-level: a zsh `precmd` snippet (installable from Settings) reports completion of any command that ran longer than N seconds — `inchill notify --title "make: done (exit 0)"` — plus manual use: `long_command; inchill done "deploy finished"`.
 
 **Rejected:** reading the macOS Notification Center database (requires Full Disk Access, private schema, breaks every macOS release) and Accessibility-API scraping. Hooks and shell integration are reliable and honest.
+
+## 6.9 OAuth vs paste-a-token (explored 2026-08-17, verified against current docs)
+
+| Provider | Verdict | Why |
+|---|---|---|
+| GitHub | ❌ Can't switch | Device flow is clean (no secret) — but `GET /notifications` **rejects OAuth App tokens entirely**; GitHub's docs state the endpoint supports "personal access token (classic)" only. Same wall as fine-grained PATs. Classic PAT paste is the only working auth. Recheck occasionally. |
+| Slack | ❌ Pointless here | OAuth v2 requires **HTTPS redirect URIs** (no localhost/custom scheme), impossible for a serverless native app. And since every user installs their *own* workspace app, Slack's install page already runs the OAuth flow and displays the xoxp token — paste is the flow's last step, not an alternative to it. The `xapp` Socket Mode token can never come from OAuth. |
+| Linear | ⚠️ Viable, optional | PKCE public-client flow (no secret) with documented `http://localhost` loopback redirect; 24h tokens + refresh; near-identical rate limits. Requires registering a Linear OAuth app (client_id) first. The personal API key remains Linear's sanctioned personal path and is fewer steps — implement OAuth only if/when the GitHub release wants nicer onboarding. Sandbox note: the loopback listener would need `network.server` entitlement if the app is ever sandboxed. |
+
+**Decision: keep Keychain-stored pasted tokens everywhere for now; Linear PKCE is a documented backlog item.**
 
 ## 7. Milestones
 

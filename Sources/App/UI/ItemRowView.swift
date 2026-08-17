@@ -1,9 +1,11 @@
+import AppKit
 import SwiftUI
 
 /// One queue row: source glyph, title, snippet/actor, relative time, and
 /// hover-revealed quick actions (Open · Done · Snooze ▾ · Pin).
 struct ItemRowView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.controlActiveState) private var controlActiveState
     let item: Item
     let display: SourceDisplay
     let isSelected: Bool
@@ -33,6 +35,16 @@ struct ItemRowView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel(Text(accessibilityLabel))
             .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            // Hover-only quick actions have no VoiceOver equivalent without
+            // these — expose the same actions regardless of hover state.
+            .accessibilityAction(named: "Open") { appState.open(item) }
+            .accessibilityAction(named: "Mark Done") { appState.markDone(item) }
+            .accessibilityAction(named: "Snooze 3 Hours") {
+                appState.snooze(item, until: SnoozePreset.laterToday.date())
+            }
+            .accessibilityAction(named: item.isPinned ? "Unpin" : "Pin") {
+                appState.togglePin(item)
+            }
     }
 
     // MARK: Layout
@@ -150,7 +162,7 @@ struct ItemRowView: View {
         }
         if let url = item.url {
             Button("Copy Link") {
-                PanelPasteboard.copy(title: url.absoluteString, url: nil)
+                PanelPasteboard.copy(title: item.title, url: url)
             }
         }
     }
@@ -163,7 +175,13 @@ struct ItemRowView: View {
     }
 
     private var fillStyle: AnyShapeStyle {
-        if isSelected { return AnyShapeStyle(Color.accentColor.opacity(0.18)) }
+        if isSelected {
+            let color: NSColor =
+                controlActiveState == .key
+                ? .selectedContentBackgroundColor
+                : .unemphasizedSelectedContentBackgroundColor
+            return AnyShapeStyle(Color(nsColor: color))
+        }
         if isHovering { return AnyShapeStyle(.quaternary) }
         return AnyShapeStyle(Color.clear)
     }

@@ -1,4 +1,5 @@
 import AppKit
+import CoreTransferable
 import SwiftUI
 
 /// Sidebar scope for the main triage window: the four fixed lists plus one
@@ -171,6 +172,25 @@ extension Item {
 
     /// Pinned first when sorted ascending.
     var pinSortKey: Int { isPinned ? 0 : 1 }
+}
+
+/// Drag payload for a table row's Title cell: exports the item's URL when it
+/// has one, else falls back to the title as plain text — so dragging a row
+/// out to Finder, Mail, or a browser does the useful thing either way.
+struct ItemDragPayload: Sendable, Transferable {
+    var title: String
+    var url: URL?
+
+    init(_ item: Item) {
+        title = item.title
+        url = item.url
+    }
+
+    var urlOrTitleString: String { url?.absoluteString ?? title }
+
+    static var transferRepresentation: some TransferRepresentation {
+        ProxyRepresentation(exporting: \.urlOrTitleString)
+    }
 }
 
 /// ⌘C over a multi-row selection: newline-joined "title — url" as plain

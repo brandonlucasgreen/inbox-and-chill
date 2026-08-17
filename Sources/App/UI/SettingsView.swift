@@ -18,6 +18,10 @@ struct SettingsView: View {
                 KeyboardShortcuts.Recorder(
                     "Show panel:", name: .togglePanel)
                 Toggle("Launch at login", isOn: $state.launchAtLogin)
+                if let error = appState.launchAtLoginError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+                Toggle("Play sound with banners", isOn: $state.bannerSound)
                 Section {
                     ClaudeCodeIntegrationRow()
                 }
