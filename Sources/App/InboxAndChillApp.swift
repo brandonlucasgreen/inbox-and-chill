@@ -7,6 +7,7 @@ struct InboxAndChillApp: App {
     @State private var appState = AppState()
 
     init() {
+        IntentContext.appState = appState
         KeyboardShortcuts.onKeyUp(for: .togglePanel) {
             // Toggling MenuBarExtra presentation programmatically:
             // handled via AppKit lookup of our status window in PanelToggler.
@@ -23,6 +24,14 @@ struct InboxAndChillApp: App {
             MenuBarLabel(badgeText: appState.badgeText)
         }
         .menuBarExtraStyle(.window)
+
+        Window("Inbox & Chill", id: "main") {
+            MainWindowView()
+                .environment(appState)
+                .modelContainer(appState.container)
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .commands { MainWindowCommands() }
 
         Settings {
             SettingsView()

@@ -9,6 +9,7 @@ import SwiftUI
 struct PanelView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Query(sort: \Item.occurredAt, order: .reverse) private var items: [Item]
@@ -233,6 +234,16 @@ struct PanelView: View {
                 showArchive
                     ? "Back to the queue" : "Archive — done items, last 90 days")
             .accessibilityLabel(showArchive ? "Back to the queue" : "Archive")
+
+            Button {
+                openWindow(id: "main")
+                dismiss()
+            } label: {
+                Image(systemName: "macwindow")
+            }
+            .keyboardShortcut("0", modifiers: .command)
+            .help("Open as Window (⌘0)")
+            .accessibilityLabel("Open as window")
 
             SettingsLink { Image(systemName: "gearshape") }
                 .help("Settings (⌘,)")

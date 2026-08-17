@@ -1,5 +1,6 @@
 import Foundation
 import KeyboardShortcuts
+import ServiceManagement
 import SwiftData
 import SwiftUI
 import UserNotifications
@@ -26,6 +27,20 @@ final class AppState {
     /// uids of user-done items, most recent last (⌘Z pops).
     var undoStack: [String] = []
     var selectedSourceFilter: String?  // nil = All
+
+    var launchAtLogin: Bool {
+        get {
+            access(keyPath: \.launchAtLogin)
+            return SMAppService.mainApp.status == .enabled
+        }
+        set {
+            withMutation(keyPath: \.launchAtLogin) {
+                try? newValue
+                    ? SMAppService.mainApp.register()
+                    : SMAppService.mainApp.unregister()
+            }
+        }
+    }
 
     var badgeStyle: BadgeStyle {
         get {

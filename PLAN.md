@@ -2,7 +2,7 @@
 
 *A native macOS menu bar app that aggregates your unread/actionable queue across Slack, Linear, GitHub, Campsite, Notion, terminal apps (incl. Claude Code), and custom sources.*
 
-> Status: v2 — feasibility verified against current API docs (Aug 2026); product decisions locked via grill-me session (2026-08-17).
+> Status: v3 — BUILT (2026-08-17). All milestones implemented; 33 tests green. Remaining human steps: Slack app install approval, Campsite Doorkeeper token, per-source API keys, Developer ID signing for release. See README.md and docs/.
 
 ## 1. The problem
 
