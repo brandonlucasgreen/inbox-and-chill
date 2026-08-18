@@ -103,6 +103,16 @@ actor LocalListener {
     /// task's listener.
     private var generation: UInt64 = 0
 
+    /// The bind currently in progress, if any. Actors are reentrant across
+    /// `await`, and binding suspends — so without funnelling overlapping
+    /// callers onto one task, two `start()`s each check `listener == nil`,
+    /// each bind their own `NWListener`, and the loser's socket stays bound
+    /// but unreachable while `port`, `token` and the discovery file
+    /// interleave. That is exactly how `local-api.json` ends up naming a port
+    /// (and a token) no live listener answers to, which fails every `inchill`
+    /// call and so every Claude Code hook until the app is relaunched.
+    private var startTask: Task<UInt64, Error>?
+
     /// Starts the listener if it isn't already running (idempotent — safe to
     /// call every time a connector registers). Handlers are updated on every
     /// call so the most recent caller "wins," which is fine: only
@@ -122,13 +132,28 @@ actor LocalListener {
     ) async throws -> UInt64 {
         self.onNotify = onNotify
         self.onClear = onClear
+
+        if let inFlight = startTask { return try await inFlight.value }
         if listener != nil {
             // Already bound: adopt the new handlers and re-assert the
-            // discovery file in case a previous stop removed it.
+            // discovery file in case a previous stop removed it. Bumping the
+            // generation transfers ownership to this caller — otherwise the
+            // *previous* owner's late `stop()` still matches, and tears down
+            // the listener this caller just adopted.
+            generation += 1
             try? writeInfoFile()
             return generation
         }
 
+        let task = Task { try await bind() }
+        startTask = task
+        defer { startTask = nil }
+        return try await task.value
+    }
+
+    /// Binds a fresh listener and publishes the discovery file. Only ever
+    /// called from `start()`, one at a time.
+    private func bind() async throws -> UInt64 {
         // Fresh token on every listener start (i.e. every app launch): the
         // CLI re-reads the discovery file per invocation, so rotation is
         // free — and it caps the useful life of a leaked token at one

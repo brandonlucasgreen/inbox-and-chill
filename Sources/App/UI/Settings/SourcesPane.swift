@@ -23,6 +23,9 @@ struct SourcesPane: View {
                 }
                 .onMove(perform: move)
             }
+            BannerPermissionNotice()
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             HStack {
                 Button { isAdding = true } label: {
                     Label("Add Source", systemImage: "plus")
@@ -125,7 +128,18 @@ private struct SourceRow: View {
                 .toggleStyle(.checkbox)
                 .help("Show a notification banner for new items from this source")
                 .onChange(of: source.bannersEnabled) {
-                    Task { await appState.refreshBadge() }
+                    let wantsBanners = source.bannersEnabled
+                    Task {
+                        // Ask here, not at the first arrival: macOS spends the
+                        // permission prompt once, and this is the moment the
+                        // user can connect it (or its refusal) to what they
+                        // just did.
+                        if wantsBanners {
+                            await appState.resolveBannerAuthorization(
+                                prompting: true)
+                        }
+                        await appState.refreshBadge()
+                    }
                 }
             Button("Edit", action: onEdit)
             Button(role: .destructive, action: onDelete) {

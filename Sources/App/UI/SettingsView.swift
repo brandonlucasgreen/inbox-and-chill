@@ -15,11 +15,13 @@ struct SettingsView: View {
                     Text("Dot").tag(BadgeStyle.dot)
                     Text("None").tag(BadgeStyle.none)
                 }
-                // The per-source badge opt-out lives in the Sources tab (one
-                // checkbox per row), which is the right home for it but means
-                // someone configuring the badge here has no idea it exists.
+                // Two things are invisible from here: what "high signal"
+                // actually means (each connector decides — an ntfy message at
+                // the default priority 3 is not high signal, so it never moves
+                // the badge in this mode), and that the per-source opt-out
+                // lives one tab over.
                 Text(
-                    "Choose which sources count toward the badge in the Sources tab."
+                    "High-signal count shows only what each source treats as high signal — mentions, review requests, DMs, and ntfy messages sent at priority 4 or 5. Total count shows everything. Choose which sources count at all in the Sources tab."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -31,6 +33,7 @@ struct SettingsView: View {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
                 Toggle("Play sound with banners", isOn: $state.bannerSound)
+                BannerPermissionNotice()
                 Section {
                     ClaudeCodeIntegrationRow()
                 }
@@ -43,6 +46,49 @@ struct SettingsView: View {
                 .tabItem { Label("Sources", systemImage: "tray.2") }
         }
         .frame(width: 640, height: 480)
+    }
+}
+
+/// Permission trouble, said out loud.
+///
+/// Banners are the one feature whose failure the app cannot see for itself:
+/// macOS accepts the posting call and drops it. This is where the user finds
+/// out that a banner they switched on never had a chance of arriving.
+struct BannerPermissionNotice: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        if appState.hasBannerEnabledSource {
+            switch appState.bannerAuthorization {
+            case .blocked(let message):
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                    Button("Open Notification Settings") {
+                        NSWorkspace.shared.open(
+                            BannerAuthorization.systemSettingsURL)
+                    }
+                }
+            case .notRequested:
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(
+                        "macOS hasn't been asked for permission to show banners yet, so none can arrive."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Button("Request Permission") {
+                        Task {
+                            await appState.resolveBannerAuthorization(
+                                prompting: true)
+                        }
+                    }
+                }
+            default:
+                EmptyView()
+            }
+        }
     }
 }
 

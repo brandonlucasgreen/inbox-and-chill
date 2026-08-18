@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Testing
+import UserNotifications
 
 @testable import InboxAndChill
 
@@ -971,5 +972,64 @@ struct SlackTokenValidationTests {
     func unrecognisedToken() throws {
         #expect(SlackConnector.userTokenProblem("") == "No user token configured.")
         #expect(try #require(SlackConnector.userTokenProblem("hunter2")).contains("xoxp-"))
+    }
+}
+
+// MARK: - Banner permission wording (Sources/App/AppState.swift)
+
+/// Banners are the one feature whose failure the app can't observe: macOS
+/// takes the posting call and drops it. Every path out of the permission
+/// check therefore has to produce something the user can read.
+struct BannerAuthorizationTests {
+    @Test func authorizedStatusesGrant() {
+        #expect(
+            BannerAuthorization.settledOutcome(status: .authorized) == .granted)
+        #expect(
+            BannerAuthorization.settledOutcome(status: .provisional) == .granted)
+    }
+
+    /// `.notDetermined` is the only status the caller still gets a say in.
+    @Test func notDeterminedIsUnsettled() {
+        #expect(BannerAuthorization.settledOutcome(status: .notDetermined) == nil)
+    }
+
+    @Test func deniedExplainsItselfAndNamesTheFix() {
+        let outcome = BannerAuthorization.settledOutcome(status: .denied)
+        #expect(outcome == .blocked(BannerAuthorization.deniedMessage))
+        #expect(outcome?.message?.contains("System Settings") == true)
+    }
+
+    @Test func grantedCarriesNoComplaint() {
+        let outcome = BannerAuthorization.requestOutcome(granted: true, error: nil)
+        #expect(outcome == .granted)
+        #expect(outcome.message == nil)
+    }
+
+    /// The original bug: a refused request returned `false` and posted
+    /// nothing, leaving no banner and no reason for its absence.
+    @Test func refusedRequestNeverGoesSilent() {
+        let outcome = BannerAuthorization.requestOutcome(granted: false, error: nil)
+        #expect(outcome.message != nil)
+    }
+
+    /// A thrown request error is the diagnostic — it must reach the user
+    /// verbatim, not be flattened into a generic "couldn't show banners".
+    @Test func thrownRequestErrorSurvivesIntoTheMessage() {
+        let outcome = BannerAuthorization.requestOutcome(
+            granted: false,
+            error: "Notifications are not allowed for this application")
+        #expect(
+            outcome.message?.contains("not allowed for this application") == true)
+    }
+
+    /// Permission granted still isn't a banner delivered.
+    @Test func postFailureIsReportedToo() {
+        #expect(BannerAuthorization.postFailure("boom").message?.contains("boom") == true)
+    }
+
+    @Test func settingsDeepLinkTargetsNotifications() {
+        #expect(
+            BannerAuthorization.systemSettingsURL.absoluteString
+                .contains("Notifications"))
     }
 }

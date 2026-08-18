@@ -1,5 +1,6 @@
 import Foundation
 import KeyboardShortcuts
+import OSLog
 import ServiceManagement
 import SwiftData
 import SwiftUI
@@ -27,6 +28,11 @@ final class AppState {
     /// uids of user-done items, most recent last (⌘Z pops).
     var undoStack: [String] = []
     var launchAtLoginError: String?
+
+    /// Why banners are or aren't reaching the user; `nil` until something has
+    /// looked. Surfaced in Settings — a banner the user asked for and didn't
+    /// get must never fail silently (PLAN §2).
+    private(set) var bannerAuthorization: BannerAuthorization.Outcome?
 
     /// Persisted across relaunch (§5.3). nil = All.
     var selectedSourceFilter: String? {
@@ -103,6 +109,9 @@ final class AppState {
         Task {
             await bootstrapConnectors()
             await refreshBadge()
+            // Read-only: a blocked permission shows up in Settings before an
+            // item arrives, but nobody gets a system prompt they didn't ask for.
+            await resolveBannerAuthorization(prompting: false)
         }
     }
 
@@ -282,7 +291,7 @@ final class AppState {
             + change.snoozeWakes
         if !bannerItems.isEmpty {
             let sound = bannerSound
-            Task { await Self.postBanners(bannerItems, sound: sound) }
+            Task { await self.postBanners(bannerItems, sound: sound) }
         }
         if journalEnabled, journalLogArrivals, !change.inserted.isEmpty {
             let name = sourceName(forID: change.sourceID)
@@ -314,21 +323,65 @@ final class AppState {
         }
     }
 
-    /// Requests permission on first use (if undetermined), then posts.
-    private static func postBanners(_ items: [ItemSummary], sound: Bool) async {
+    /// Resolves banner permission, recording whatever blocks it in
+    /// `bannerAuthorization`, and reports whether a banner can be posted.
+    ///
+    /// `prompting: false` only *reads* the state. macOS shows the permission
+    /// prompt exactly once per install, so who spends it matters: pass `true`
+    /// only where the user has just done something they can connect the
+    /// prompt to (enabling banners for a source, or the button in Settings).
+    @discardableResult
+    func resolveBannerAuthorization(prompting: Bool) async -> Bool {
         let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
-        case .notDetermined:
-            let granted =
-                (try? await center.requestAuthorization(
-                    options: [.alert, .sound])) ?? false
-            guard granted else { return }
-        case .denied:
-            return
-        default:
-            break
+        let status = await center.notificationSettings().authorizationStatus
+        let outcome: BannerAuthorization.Outcome
+
+        if let settled = BannerAuthorization.settledOutcome(status: status) {
+            outcome = settled
+        } else if !prompting {
+            // .notDetermined: nothing has asked macOS yet, so no banner has
+            // ever had a chance of arriving — which is not an error, but is
+            // not something to keep quiet about either.
+            outcome = .notRequested
+        } else {
+            do {
+                let granted = try await center.requestAuthorization(
+                    options: [.alert, .sound])
+                outcome = BannerAuthorization.requestOutcome(
+                    granted: granted, error: nil)
+            } catch {
+                // `try?` here was the bug: a request macOS refuses outright
+                // left the user with no banner, no prompt, and nothing to go on.
+                outcome = BannerAuthorization.requestOutcome(
+                    granted: false, error: error.localizedDescription)
+            }
         }
+
+        // The raw status goes to the log as well as to Settings: a status
+        // that isn't `.notDetermined` but has no Notification Center record
+        // means macOS will never show the prompt, and the number is the only
+        // way to tell that apart from an ordinary denial.
+        Self.bannerLog.notice(
+            """
+            banner permission resolved: status=\(status.rawValue, privacy: .public) \
+            prompted=\(prompting, privacy: .public) \
+            outcome=\(String(describing: outcome), privacy: .public)
+            """)
+
+        bannerAuthorization = outcome
+        return outcome == .granted
+    }
+
+    /// Banner delivery is the one path the app cannot verify for itself —
+    /// macOS accepts the posting call and drops it — so the resolved
+    /// permission state is recorded where it can be read after the fact.
+    private static let bannerLog = Logger(
+        subsystem: "lol.bgreen.inboxandchill", category: "banners")
+
+    /// Requests permission on first use (if undetermined), then posts.
+    private func postBanners(_ items: [ItemSummary], sound: Bool) async {
+        guard await resolveBannerAuthorization(prompting: true) else { return }
+        let center = UNUserNotificationCenter.current()
         for item in items {
             let content = UNMutableNotificationContent()
             content.title = item.title
@@ -338,9 +391,17 @@ final class AppState {
             content.threadIdentifier = item.sourceID
             content.userInfo = ["uid": item.id]
             if sound { content.sound = .default }
-            try? await center.add(
-                UNNotificationRequest(
-                    identifier: item.id, content: content, trigger: nil))
+            do {
+                try await center.add(
+                    UNNotificationRequest(
+                        identifier: item.id, content: content, trigger: nil))
+            } catch {
+                // Permission granted is not the same as banner delivered.
+                // One failure explains the batch; the rest fail identically.
+                bannerAuthorization = BannerAuthorization.postFailure(
+                    error.localizedDescription)
+                return
+            }
         }
     }
 
@@ -447,6 +508,9 @@ final class AppState {
         String(item.uid.dropFirst(item.sourceKind.count + 1))
     }
 
+    /// Whether any source is set to banner at all.
+    var hasBannerEnabledSource: Bool { !bannerEnabledSourceIDs().isEmpty }
+
     private func bannerEnabledSourceIDs() -> Set<String> {
         let configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
@@ -497,6 +561,76 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     ) {
         completionHandler([.banner])
     }
+}
+
+/// Why banners are or aren't reaching the user, in the words Settings shows.
+///
+/// Deliberately free of `UNUserNotificationCenter`: the wording is the part
+/// that has to be right, and a test process can't stand up the notification
+/// system to exercise it. `UNAuthorizationStatus` is a plain enum, so the
+/// mapping stays testable while the I/O it describes lives in `AppState`.
+enum BannerAuthorization {
+    enum Outcome: Equatable {
+        /// macOS will deliver banners.
+        case granted
+        /// Nothing has asked macOS yet, so no banner can arrive. Not an
+        /// error — but not silence either: the user gets a button to ask.
+        case notRequested
+        /// Asked and refused, with the reason to show.
+        case blocked(String)
+
+        /// The red-text message, or `nil` when there's nothing wrong to say.
+        var message: String? {
+            if case .blocked(let message) = self { return message }
+            return nil
+        }
+    }
+
+    /// The verdict for an already-settled status, or `nil` for
+    /// `.notDetermined` — the one case where asking macOS is still on the
+    /// table, and only the caller knows whether this is the moment for it.
+    static func settledOutcome(status: UNAuthorizationStatus) -> Outcome? {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return .granted
+        case .denied:
+            return .blocked(deniedMessage)
+        case .notDetermined:
+            return nil
+        @unknown default:
+            // An unrecognised status is not a licence to assume delivery.
+            return .blocked(
+                "macOS reported a notification permission state Inbox & Chill doesn't recognise, so banners may not be delivered."
+            )
+        }
+    }
+
+    /// The verdict once `requestAuthorization` has answered.
+    static func requestOutcome(granted: Bool, error: String?) -> Outcome {
+        if let error, !error.isEmpty {
+            return .blocked(
+                "macOS refused the notification permission request, so no banners can be shown: \(error)"
+            )
+        }
+        return granted ? .granted : .blocked(declinedMessage)
+    }
+
+    /// A banner macOS had permission for but still wouldn't take.
+    static func postFailure(_ error: String) -> Outcome {
+        .blocked("macOS rejected a banner: \(error)")
+    }
+
+    static let deniedMessage =
+        "Notifications from Inbox & Chill are turned off in macOS, so no banners can be shown. Turn “Allow notifications” back on in System Settings › Notifications › Inbox & Chill."
+
+    static let declinedMessage =
+        "Notification permission was declined, so no banners can be shown. You can turn it on in System Settings › Notifications › Inbox & Chill."
+
+    /// Deep link to System Settings › Notifications.
+    static let systemSettingsURL = URL(
+        string:
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+    )!
 }
 
 /// Builds a connector from a stored config.
