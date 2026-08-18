@@ -49,12 +49,20 @@ xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill \
     exit 1
   }
 
-BUILT=$(grep -m1 -o '/.*/Build/Products/'"$CONFIGURATION"'/Inbox & Chill.app' \
-  /tmp/inchill-build.log || true)
-if [ -z "$BUILT" ] || [ ! -d "$BUILT" ]; then
-  BUILT=$(ls -d ~/Library/Developer/Xcode/DerivedData/InboxAndChill-*/Build/Products/"$CONFIGURATION"/"$APP_NAME" 2>/dev/null | head -1)
-fi
-[ -d "$BUILT" ] || { echo "Couldn't locate the built app." >&2; exit 1; }
+# Ask xcodebuild where it put the app rather than scraping the log or
+# globbing DerivedData. Both of those pick by *text order* or *name order*,
+# and every git worktree gets its own DerivedData directory — so from a
+# worktree they happily resolve to another checkout's stale build and
+# `ditto` installs an app that does not contain your changes.
+BUILT_PRODUCTS_DIR=$(xcodebuild -project InboxAndChill.xcodeproj \
+  -scheme InboxAndChill -configuration "$CONFIGURATION" -showBuildSettings 2>/dev/null \
+  | awk -F ' = ' '/^ *BUILT_PRODUCTS_DIR = /{print $2; exit}')
+BUILT="$BUILT_PRODUCTS_DIR/$APP_NAME"
+[ -n "$BUILT_PRODUCTS_DIR" ] && [ -d "$BUILT" ] || {
+  echo "Couldn't locate the built app (BUILT_PRODUCTS_DIR='$BUILT_PRODUCTS_DIR')." >&2
+  exit 1
+}
+echo "    built at $BUILT"
 
 echo "==> Verifying signature"
 codesign --verify --deep --strict "$BUILT"
