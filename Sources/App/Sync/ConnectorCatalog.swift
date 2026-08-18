@@ -58,7 +58,7 @@ enum ConnectorCatalog {
                 .init(
                     key: "userToken", label: "User OAuth Token", isSecret: true,
                     placeholder: "xoxp-…",
-                    help: "From your workspace app's OAuth & Permissions page"),
+                    help: "From your app's OAuth & Permissions page. Not the “xoxe.xoxp-” app configuration token offered on the apps list — that one is Manifest-API-only and expires in 12 hours."),
                 .init(
                     key: "appToken", label: "App-Level Token (optional)", isSecret: true,
                     placeholder: "xapp-…",

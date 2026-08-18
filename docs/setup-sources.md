@@ -54,7 +54,11 @@ Slack setup has more steps because you're creating your own Slack app rather tha
 1. Go to **https://api.slack.com/apps → Create New App → From an app manifest**, pick your workspace, and paste in the contents of [`docs/slack-app-manifest.yml`](slack-app-manifest.yml).
 2. Click **Install to Workspace**. If your workspace has "Require App Approval" turned on, this queues an approval request instead of installing immediately — a workspace admin will need to approve it before the app can be used. (It's a read-only app that only ever acts on your own account, which tends to be an easy approval to ask for.)
 3. Once installed, collect your tokens:
-   - **User OAuth Token** (`xoxp-…`) — on the app's **OAuth & Permissions** page. **Required.**
+   - **User OAuth Token** (`xoxp-…`) — on the app's **OAuth & Permissions** page, under "OAuth Tokens for Your Workspace". **Required.**
+
+     **Not the token at the top of the apps list.** `api.slack.com/apps` also offers **App Configuration Tokens**, which look like `xoxe.xoxp-…`. Those drive the App Manifest API only, expire 12 hours after you generate them, and cannot call the Web API at all — easy to grab by mistake, since "generate a token" is right there. The app checks the prefix and tells you which one you've pasted rather than failing with a Slack error that explains nothing.
+
+     The same `xoxe.` prefix also appears if you enable **token rotation**: those expire every 12 hours and can only be refreshed with your app's client secret, which a native app can't hold. Slack does not allow rotation to be turned off once enabled, so if that happened you need a new app. The manifest in this repo sets `token_rotation_enabled: false` for exactly that reason.
    - **App-Level Token** (`xapp-…`) — on **Basic Information → App-Level Tokens → Generate**, with the `connections:write` scope. **Optional**, and what it buys you is explained below.
 4. Paste the user token in; add the app-level token too if you want channel mentions.
 5. **Save Emoji** defaults to `pushpin` (📌). This is the emoji you react with to save a message — see below.

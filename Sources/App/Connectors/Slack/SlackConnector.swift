@@ -195,6 +195,35 @@ actor SlackConnector: Connector {
         }
     }
 
+    /// Names the problem with a pasted user token, or `nil` if it looks right.
+    ///
+    /// Worth checking before spending a round trip, because Slack's own error
+    /// for the wrong token kind is opaque and the tokens are easy to mix up —
+    /// the app-management page offers several, only one of which works here.
+    ///
+    /// `nonisolated static` so it's testable without a Keychain.
+    nonisolated static func userTokenProblem(_ token: String) -> String? {
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if token.isEmpty { return "No user token configured." }
+        if token.hasPrefix("xoxe.") || token.hasPrefix("xoxe-") {
+            return
+                "That's an app configuration token (it starts with “xoxe.”), which only works with Slack's App Manifest API and expires 12 hours after you generate it — it can't call the Web API at all. You want the User OAuth Token from your app's OAuth & Permissions page, which starts with “xoxp-”. (The same prefix also appears on rotation-enabled tokens, which expire every 12 hours too and can't be refreshed without your app's client secret — so if you enabled token rotation, you'll need a new app: Slack won't let you turn it back off.)"
+        }
+        if token.hasPrefix("xoxb-") {
+            return
+                "That's a bot token (“xoxb-”). This connector reads *your* account — mentions, DMs, read state — so it needs the User OAuth Token from OAuth & Permissions, starting with “xoxp-”."
+        }
+        if token.hasPrefix("xapp-") {
+            return
+                "That's the app-level token (“xapp-”) — it belongs in the App-Level Token field, not this one. The user token starts with “xoxp-”."
+        }
+        if !token.hasPrefix("xoxp-") {
+            return
+                "That doesn't look like a Slack user token. Expected one starting with “xoxp-”, from your app's OAuth & Permissions page."
+        }
+        return nil
+    }
+
     /// Resolves tokens, identifies us, and returns the app-level token — or
     /// `nil` when only a user token is configured. That is a supported,
     /// deliberately degraded mode (no channel mentions), not an error: it
@@ -205,6 +234,9 @@ actor SlackConnector: Connector {
             throw SlackError(
                 errorDescription:
                     "Slack: no user token (xoxp-…) configured for source \(sourceID).")
+        }
+        if let problem = Self.userTokenProblem(userToken) {
+            throw SlackError(errorDescription: "Slack: \(problem)")
         }
         let api = SlackAPI(token: userToken)
         self.api = api

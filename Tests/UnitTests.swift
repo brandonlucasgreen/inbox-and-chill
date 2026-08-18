@@ -870,3 +870,37 @@ struct NtfyFailureStatusTests {
         }
     }
 }
+
+// MARK: - Slack user-token validation
+
+struct SlackTokenValidationTests {
+    @Test("A plain user token is accepted")
+    func validUserToken() {
+        #expect(SlackConnector.userTokenProblem("xoxp-123-456-abc") == nil)
+        // Pasted with stray whitespace is still fine.
+        #expect(SlackConnector.userTokenProblem("  xoxp-123\n") == nil)
+    }
+
+    /// The one Brandon actually hit: `xoxe.xoxp-` is an app *configuration*
+    /// token — Manifest API only, 12-hour life, useless for the Web API.
+    @Test("An xoxe. configuration token is rejected with the reason")
+    func configurationTokenRejected() throws {
+        let problem = try #require(SlackConnector.userTokenProblem("xoxe.xoxp-1-abc"))
+        #expect(problem.contains("configuration token"))
+        #expect(problem.contains("OAuth & Permissions"))
+        #expect(problem.contains("12 hours"))
+    }
+
+    @Test("Bot and app-level tokens are named for what they are")
+    func wrongTokenKinds() throws {
+        #expect(try #require(SlackConnector.userTokenProblem("xoxb-1-2-3")).contains("bot token"))
+        let appLevel = try #require(SlackConnector.userTokenProblem("xapp-1-A-2-3"))
+        #expect(appLevel.contains("App-Level Token field"))
+    }
+
+    @Test("Anything else is flagged rather than sent")
+    func unrecognisedToken() throws {
+        #expect(SlackConnector.userTokenProblem("") == "No user token configured.")
+        #expect(try #require(SlackConnector.userTokenProblem("hunter2")).contains("xoxp-"))
+    }
+}
