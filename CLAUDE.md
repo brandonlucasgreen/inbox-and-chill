@@ -41,6 +41,18 @@ Two traps in that check:
 mtime and size are not evidence. A behavioural test that "fails" is very often a
 stale binary.
 
+**Logging: `log show` does not work for this app.** It returns nothing for
+subsystem `lol.bgreen.inboxandchill` even at `.error` level. Use a live stream
+and restart the app underneath it:
+
+```bash
+log stream --predicate 'subsystem == "lol.bgreen.inboxandchill"' --info --debug --style compact
+```
+
+Put the predicate in a script rather than inline — quoting it through a shell
+wrapper fails with "too many arguments". This cost several cycles of believing
+code wasn't running when the logging simply wasn't reaching the terminal.
+
 ### 2. Quote every path you hand to a shell
 
 The bundle is `Inbox & Chill.app`. A shell reads the `&` as a background-job
@@ -121,6 +133,23 @@ should auto-archive". That is only safe if the snapshot can enumerate
 `Store.resurrectIfNeeded` revives a done item only when `doneReason == "remote"`
 or `remote.occurredAt > doneAt`. This is why re-emitting an item the user
 dismissed is safe as long as `occurredAt` is the real event time.
+
+## Task groups in connectors — two ways to lose a source
+
+`run()` uses `withThrowingTaskGroup` with `_ = try await group.next()`, so **the
+first child to finish tears down all its siblings** and the SyncEngine restarts
+the connector 5s later. Two failures have come from this:
+
+- **A child that returns immediately kills the connector.** Slack's keyword
+  watch returned early when no terms were configured — the default — which
+  would have restarted the whole source every 5 seconds, taking DMs and
+  mentions with it. Either don't add the task, or make it park rather than
+  return.
+- **Don't put independent work downstream of `seed()`.** `seed()` walks every
+  conversation in the workspace; on a large one it takes minutes. Anything
+  awaiting it before starting effectively never starts. The keyword watch
+  shipped this way and ran zero times against a workspace where Slack was
+  returning 45 matches.
 
 ## Connectors
 
