@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// One queue row: source glyph, title, snippet/actor, relative time, and
@@ -189,20 +188,18 @@ struct ItemRowView: View {
     // MARK: Derived
 
     private var background: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(fillStyle)
-    }
-
-    private var fillStyle: AnyShapeStyle {
-        if isSelected {
-            let color: NSColor =
-                controlActiveState == .key
-                ? .selectedContentBackgroundColor
-                : .unemphasizedSelectedContentBackgroundColor
-            return AnyShapeStyle(Color(nsColor: color))
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let focus = RowFocus.resolve(
+            isSelected: isSelected, isHovering: isHovering,
+            isKey: controlActiveState == .key)
+        return ZStack {
+            if focus.hasBaseFill { shape.fill(.quaternary) }
+            if focus.fill > 0 { shape.fill(Color.primary.opacity(focus.fill)) }
+            if focus.border > 0 {
+                shape.strokeBorder(
+                    Color.primary.opacity(focus.border), lineWidth: 1)
+            }
         }
-        if isHovering { return AnyShapeStyle(.quaternary) }
-        return AnyShapeStyle(Color.clear)
     }
 
     private var secondary: String? {

@@ -177,3 +177,50 @@ struct SourceStatusDot: View {
         }
     }
 }
+
+/// How much background a queue row paints for hover and keyboard selection.
+///
+/// Selection used to be `NSColor.selectedContentBackgroundColor` — a
+/// saturated blue slab in a panel that is otherwise all greys, loud enough to
+/// read as an alert rather than as a cursor. It is now a neutral tonal step:
+/// the same fill hover uses, plus more `Color.primary` on top of it, plus a
+/// hairline edge that hover never draws.
+///
+/// Two properties the numbers exist to hold:
+///
+/// - Selection layers *over* the hover fill instead of replacing it, so a
+///   selected row is denser than a hovered one by construction — whatever
+///   `.quaternary` happens to resolve to in the current appearance and
+///   material. Both states can apply to the same row, and ↑/↓ selection has
+///   to stay unambiguous when they do.
+/// - The weights ride on `Color.primary`, which is black in light mode and
+///   white in dark, so one set of numbers darkens a light panel and lightens
+///   a dark one. A fixed grey would only be right in one of them, and the
+///   panel sits on `.bar` material where there is no fixed backdrop to
+///   match anyway.
+struct RowFocus: Equatable {
+    /// `Color.primary` opacity layered above the shared hover fill.
+    var fill: Double
+    /// `Color.primary` opacity for the 1pt border; 0 draws none. Carried by
+    /// selection only, so the border alone tells the two states apart.
+    var border: Double
+    /// Whether the shared `.quaternary` fill is painted at all.
+    var hasBaseFill: Bool
+
+    static let unfocused = RowFocus(fill: 0, border: 0, hasBaseFill: false)
+    static let hovered = RowFocus(fill: 0, border: 0, hasBaseFill: true)
+    /// Panel owns key: selection has to stay findable while scanning with
+    /// ↑/↓, so this is the loudest step — quiet, but never in doubt.
+    static let selected = RowFocus(fill: 0.08, border: 0.15, hasBaseFill: true)
+    /// Panel lost key (snooze popover, Settings window). Dimmed to match the
+    /// rest of the chrome, still clearly a selection.
+    static let selectedInactive =
+        RowFocus(fill: 0.02, border: 0.08, hasBaseFill: true)
+
+    static func resolve(
+        isSelected: Bool, isHovering: Bool, isKey: Bool
+    ) -> RowFocus {
+        guard isSelected else { return isHovering ? .hovered : .unfocused }
+        return isKey ? .selected : .selectedInactive
+    }
+}

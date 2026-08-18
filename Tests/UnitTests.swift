@@ -251,6 +251,75 @@ struct SnoozePresetTests {
     }
 }
 
+// MARK: - Row focus weights (Sources/App/UI/PanelSupport.swift)
+
+/// The row's selection background is tuned by eye, but the *relationships*
+/// between the states are the part a later tweak could quietly break —
+/// selection sinking to or below hover would make ↑/↓ navigation ambiguous,
+/// and the panel is keyboard-first.
+struct RowFocusTests {
+    @Test("An idle row paints nothing at all")
+    func idleRowIsBlank() {
+        let focus = RowFocus.resolve(
+            isSelected: false, isHovering: false, isKey: true)
+        #expect(focus == .unfocused)
+        #expect(!focus.hasBaseFill)
+        #expect(focus.fill == 0)
+        #expect(focus.border == 0)
+    }
+
+    @Test("Hover is a bare fill — the border belongs to selection alone")
+    func hoverHasNoBorder() {
+        let focus = RowFocus.resolve(
+            isSelected: false, isHovering: true, isKey: true)
+        #expect(focus == .hovered)
+        #expect(focus.hasBaseFill)
+        #expect(focus.border == 0)
+    }
+
+    /// Both states can land on the same row: the mouse rests on the row the
+    /// keyboard has selected. Selection must still win.
+    @Test("Selection outweighs hover in both key states, hover or not")
+    func selectionAlwaysOutweighsHover() {
+        for isKey in [true, false] {
+            for isHovering in [true, false] {
+                let focus = RowFocus.resolve(
+                    isSelected: true, isHovering: isHovering, isKey: isKey)
+                // Same `.quaternary` floor as hover, so these two weights
+                // are what selection adds on top of it.
+                #expect(focus.hasBaseFill)
+                #expect(focus.fill > RowFocus.hovered.fill)
+                #expect(focus.border > RowFocus.hovered.border)
+            }
+        }
+    }
+
+    @Test("Losing key status dims the selection without erasing it")
+    func inactiveSelectionIsDimmerButPresent() {
+        let key = RowFocus.resolve(
+            isSelected: true, isHovering: false, isKey: true)
+        let notKey = RowFocus.resolve(
+            isSelected: true, isHovering: false, isKey: false)
+        #expect(key == .selected)
+        #expect(notKey == .selectedInactive)
+        #expect(notKey.fill < key.fill)
+        #expect(notKey.border < key.border)
+        #expect(notKey.fill > 0)
+        #expect(notKey.border > 0)
+    }
+
+    /// Guards the "quiet" half of the brief from the opposite drift: these
+    /// are meant to be tonal nudges, not the blue slab they replaced.
+    @Test("Every weight stays in subtle-tint territory")
+    func weightsStaySubtle() {
+        for focus in [RowFocus.hovered, .selected, .selectedInactive] {
+            #expect(focus.fill < 0.2)
+            #expect(focus.border < 0.25)
+        }
+    }
+}
+
+
 // MARK: - JSONPollerConnector (Sources/App/Connectors/JSONPollerConnector.swift)
 //
 // Network calls aren't testable here. `fetch()` guards on a nil `URL` before
