@@ -1,16 +1,78 @@
 # Testing Inbox & Chill locally
 
-## 1. Build and launch
+## 1. Build and install
 
 ```sh
 brew install xcodegen   # once
-xcodegen generate
-xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill -configuration Debug build
-open ~/Library/Developer/Xcode/DerivedData/InboxAndChill-*/Build/Products/Debug/"Inbox & Chill.app"
+scripts/install-local.sh
 ```
 
-Or open `InboxAndChill.xcodeproj` in Xcode and hit ⌘R. Look for the tray
-icon in the menu bar. First launch asks for notification permission.
+That builds a Release configuration, verifies the signature, installs to
+`/Applications`, and launches. Look for the tray icon in the menu bar (this
+is an `LSUIElement` app — no Dock icon until you open the ⌘0 window). First
+launch asks for notification permission.
+
+Add `--debug` for a Debug build (which includes the fake connector, §2), or
+`--no-launch` to install without starting it.
+
+### Why install instead of running from DerivedData
+
+macOS ties **Keychain ACLs, TCC privacy permissions, and firewall
+decisions** to an app's *code signature* and *path*. Two things used to
+break both:
+
+- Builds were **ad-hoc signed** (`CODE_SIGN_IDENTITY: "-"`), which has no
+  stable identity. Every rebuild looked like a different app, so macOS
+  re-prompted for everything — most visibly the Keychain, which this app
+  touches on every token read.
+- DerivedData paths contain a random hash and change whenever DerivedData
+  is cleaned.
+
+Builds are now signed with **Developer ID Application** (team
+`CV926C8KS8`, set in `project.yml`) and installed to a stable location, so
+you grant each permission once and it sticks across rebuilds.
+
+**Credentials saved by an older ad-hoc build.** A Keychain item's access
+control list records which app may read it, and an item created by an
+ad-hoc build names an identity that no longer exists — so the properly
+signed app matches nothing and macOS puts up the "wants to use your
+confidential information" panel. Two ways to clear it:
+
+- **Keep the credential:** when the panel appears, type your login password
+  and click **Always Allow** (plain *Allow* is one-time and the panel comes
+  straight back). This rewrites the item's ACL in place. Prefer this for
+  anything you can't easily re-obtain — a Linear personal API key, for
+  instance, is only displayed once when you create it.
+- **Start clean:** delete the source in Settings and re-add it. Deleting
+  prefix-wipes its Keychain entries, and re-adding writes a fresh item
+  owned by the current build.
+
+Note that `Keychain.set` deletes before adding rather than using
+`SecItemUpdate`, so simply *editing* a source and re-pasting its token also
+rebuilds the ACL correctly.
+
+### Gatekeeper and notarization
+
+`spctl -a -vvv "/Applications/Inbox & Chill.app"` reports `rejected —
+source=Unnotarized Developer ID`. **This is expected and doesn't affect
+local use:** Gatekeeper only evaluates apps carrying a quarantine
+attribute, which is set on downloads, not on locally built apps. The app
+launches normally.
+
+Notarization is the remaining step before *distributing* the app to anyone
+else (PLAN §2.1.7). It needs an App Store Connect API key or an
+app-specific password, so it's a manual step:
+
+```sh
+xcrun notarytool submit "Inbox & Chill.zip" --keychain-profile "<your-profile>" --wait
+xcrun stapler staple "/Applications/Inbox & Chill.app"
+```
+
+### Building this yourself (not Brandon)
+
+Change `DEVELOPMENT_TEAM` in `project.yml` to your own Team ID
+(`security find-identity -v -p codesigning` lists yours), or build unsigned
+with `xcodebuild CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=NO`.
 
 ## 2. Ride the fake connector (no accounts needed)
 

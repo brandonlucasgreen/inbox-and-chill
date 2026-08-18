@@ -25,12 +25,14 @@ struct SourcesPane: View {
             }
             HStack {
                 Button { isAdding = true } label: {
-                    Image(systemName: "plus")
+                    Label("Add Source", systemImage: "plus")
+                        .padding(.horizontal, 2)
                 }
+                .controlSize(.large)
                 .help("Add a source")
                 Spacer()
             }
-            .padding(8)
+            .padding(10)
         }
         .sheet(isPresented: $isAdding) {
             SourceEditorSheet()
@@ -68,10 +70,9 @@ struct SourcesPane: View {
 
     private func delete(_ source: SourceConfig) {
         let sourceID = source.id
-        for field in ConnectorCatalog.descriptor(for: source.kind)?.fields ?? []
-        where field.isSecret {
-            Keychain.delete("\(sourceID).\(field.key)")
-        }
+        // Prefix-wipe rather than per-descriptor-field: catches credentials
+        // the descriptor no longer lists (e.g. Linear OAuth tokens).
+        Keychain.deleteAll(prefix: "\(sourceID).")
         modelContext.delete(source)
         try? modelContext.save()
         Task {
@@ -92,9 +93,10 @@ private struct SourceRow: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: descriptor?.systemImage ?? "questionmark.circle")
-                .frame(width: 20)
+                .font(.system(size: 15))
+                .frame(width: 24)
             VStack(alignment: .leading, spacing: 1) {
                 Text(source.displayName)
                 Text(descriptor?.displayName ?? source.kind)
@@ -114,7 +116,8 @@ private struct SourceRow: View {
                 }
             Toggle("Badge", isOn: $source.countsTowardBadge)
                 .toggleStyle(.checkbox)
-                .help("Count this source's items toward the menu bar badge")
+                .help(
+                    "Count this source's items toward the menu bar badge. Turn it off to keep the source in the queue but out of the count.")
                 .onChange(of: source.countsTowardBadge) {
                     Task { await appState.refreshBadge() }
                 }
@@ -127,10 +130,12 @@ private struct SourceRow: View {
             Button("Edit", action: onEdit)
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
+                    .frame(width: 24, height: 22)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .help("Delete this source")
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
     }
 }

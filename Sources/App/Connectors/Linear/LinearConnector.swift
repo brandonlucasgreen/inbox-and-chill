@@ -25,12 +25,18 @@ actor LinearConnector: Connector {
         return formatter
     }()
 
-    init(sourceID: String) {
+    /// OAuth client ID from the source's settings — only set when the source
+    /// was connected via "Sign in with Linear"; needed to refresh tokens.
+    private let oauthClientID: String?
+
+    init(sourceID: String, oauthClientID: String? = nil) {
         self.sourceID = sourceID
+        self.oauthClientID = oauthClientID
     }
 
     enum LinearConnectorError: Error, LocalizedError, CustomStringConvertible, Sendable {
         case missingAPIKey(sourceID: String)
+        case oauthExpired
         case transport(String)
         case httpError(status: Int, body: String)
         case graphQLErrors([String])
@@ -41,7 +47,9 @@ actor LinearConnector: Connector {
         var errorDescription: String? {
             switch self {
             case .missingAPIKey(let sourceID):
-                return "No Linear API key in Keychain for \"\(sourceID).apiKey\". Add a Personal API Key under Settings → Linear."
+                return "No Linear credentials in Keychain for source \"\(sourceID)\". Add a Personal API Key or sign in with Linear under Settings → Sources."
+            case .oauthExpired:
+                return "Linear sign-in expired and couldn't be refreshed. Re-connect under Settings → Sources → Linear."
             case .transport(let detail):
                 return "Linear request failed: \(detail)"
             case .httpError(let status, let body):
@@ -56,24 +64,69 @@ actor LinearConnector: Connector {
         }
     }
 
-    // MARK: Transport
+    // MARK: Auth
 
-    private func apiKey() throws -> String {
-        guard let key = Keychain.get("\(sourceID).apiKey"), !key.isEmpty else {
-            throw LinearConnectorError.missingAPIKey(sourceID: sourceID)
-        }
-        return key
+    private var usesOAuth: Bool {
+        Keychain.get("\(sourceID).oauthAccessToken")?.isEmpty == false
     }
+
+    /// The `Authorization` header value. Personal API keys are sent raw (no
+    /// `Bearer` prefix — Linear's documented shape for personal keys); OAuth
+    /// access tokens are `Bearer`-prefixed and refreshed ~2 minutes before
+    /// their recorded expiry. The actor serializes refreshes.
+    private func authorizationHeader(forceRefresh: Bool = false) async throws -> String {
+        guard usesOAuth else {
+            guard let key = Keychain.get("\(sourceID).apiKey"), !key.isEmpty else {
+                throw LinearConnectorError.missingAPIKey(sourceID: sourceID)
+            }
+            return key
+        }
+        let expiresAt = Keychain.get("\(sourceID).oauthExpiresAt")
+            .flatMap(Double.init)
+            .map(Date.init(timeIntervalSince1970:))
+        if forceRefresh || (expiresAt.map { $0.timeIntervalSinceNow < 120 } ?? false) {
+            try await refreshOAuthTokens()
+        }
+        guard let access = Keychain.get("\(sourceID).oauthAccessToken"),
+            !access.isEmpty
+        else {
+            throw LinearConnectorError.oauthExpired
+        }
+        return "Bearer \(access)"
+    }
+
+    private func refreshOAuthTokens() async throws {
+        guard let clientID = oauthClientID, !clientID.isEmpty,
+            let refreshToken = Keychain.get("\(sourceID).oauthRefreshToken"),
+            !refreshToken.isEmpty
+        else {
+            throw LinearConnectorError.oauthExpired
+        }
+        do {
+            let tokens = try await LinearOAuth.refresh(
+                clientID: clientID, refreshToken: refreshToken)
+            LinearOAuth.store(tokens, sourceID: sourceID)
+        } catch {
+            throw LinearConnectorError.oauthExpired
+        }
+    }
+
+    // MARK: Transport
 
     /// POSTs a GraphQL query/mutation and returns its decoded `data` payload,
     /// throwing a descriptive error for network failures, non-200 responses
     /// (including 429 — the engine's poll loop backs off naturally on the
     /// next interval), top-level GraphQL errors, or decode failures.
-    private func execute<T: Decodable>(_ document: String, variables: [String: String]? = nil) async throws -> T {
-        let key = try apiKey()
+    /// A 401 on an OAuth source gets one refresh-and-retry before giving up
+    /// (covers revoked-then-reissued tokens and clock skew on the expiry).
+    private func execute<T: Decodable>(
+        _ document: String, variables: [String: String]? = nil,
+        isAuthRetry: Bool = false
+    ) async throws -> T {
+        let authorization = try await authorizationHeader(forceRefresh: isAuthRetry)
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
-        request.setValue(key, forHTTPHeaderField: "Authorization")
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
             GraphQLRequestBody(query: document, variables: variables))
@@ -87,6 +140,9 @@ actor LinearConnector: Connector {
         }
         guard let http = response as? HTTPURLResponse else {
             throw LinearConnectorError.transport("no HTTP response")
+        }
+        if http.statusCode == 401, usesOAuth, !isAuthRetry {
+            return try await execute(document, variables: variables, isAuthRetry: true)
         }
         guard http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? ""

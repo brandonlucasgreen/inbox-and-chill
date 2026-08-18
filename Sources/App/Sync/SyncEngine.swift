@@ -28,7 +28,7 @@ actor SyncEngine {
         let id = connector.sourceID
         await unregister(sourceID: id)
         connectors[id] = connector
-        let caps = await connector.capabilities
+        let caps = connector.capabilities
         remoteTruth[id] = caps.contains(.remoteTruth)
         tasks[id] = Task { [weak self] in
             await self?.drive(connector, capabilities: caps)
@@ -44,7 +44,7 @@ actor SyncEngine {
 
     func refreshNow() async {
         for (id, connector) in connectors {
-            let caps = await connector.capabilities
+            let caps = connector.capabilities
             guard !caps.contains(.push) else { continue }
             await pollOnce(connector, sourceID: id)
         }
@@ -54,11 +54,16 @@ actor SyncEngine {
 
     func markDone(uid: String, sourceID: String, externalID: String, payload: Data?) async {
         try? await store.markDone(uid: uid)
+        var failure: String?
         if let connector = connectors[sourceID],
-            await connector.capabilities.contains(.markDone) {
-            try? await connector.markDone(externalID: externalID, payload: payload)
+            connector.capabilities.contains(.markDone) {
+            do {
+                try await connector.markDone(externalID: externalID, payload: payload)
+            } catch {
+                failure = String(describing: error)
+            }
         }
-        notify(sourceID: sourceID)
+        notify(sourceID: sourceID, writeThroughFailure: failure)
     }
 
     func undoDone(uid: String, sourceID: String) async {
@@ -68,11 +73,16 @@ actor SyncEngine {
 
     func snooze(uid: String, sourceID: String, externalID: String, until: Date, payload: Data?) async {
         try? await store.snooze(uid: uid, until: until)
+        var failure: String?
         if let connector = connectors[sourceID],
-            await connector.capabilities.contains(.remoteSnooze) {
-            try? await connector.snooze(externalID: externalID, until: until, payload: payload)
+            connector.capabilities.contains(.remoteSnooze) {
+            do {
+                try await connector.snooze(externalID: externalID, until: until, payload: payload)
+            } catch {
+                failure = String(describing: error)
+            }
         }
-        notify(sourceID: sourceID)
+        notify(sourceID: sourceID, writeThroughFailure: failure)
     }
 
     // MARK: Lifecycles
@@ -88,7 +98,7 @@ actor SyncEngine {
                 try? await Task.sleep(for: .seconds(5))
             }
         } else {
-            let interval = await connector.pollInterval
+            let interval = connector.pollInterval
             while !Task.isCancelled {
                 await pollOnce(connector, sourceID: id)
                 try? await Task.sleep(for: .seconds(interval + .random(in: 0...5)))
@@ -99,10 +109,14 @@ actor SyncEngine {
     private func pollOnce(_ connector: any Connector, sourceID: String) async {
         do {
             let snapshot = try await connector.fetch()
+            // A truncated snapshot can't stand in for the whole remote queue,
+            // so remote-truth archiving is suspended for this cycle rather
+            // than archiving everything we simply didn't fetch.
+            let complete = await connector.snapshotWasComplete()
             let result = try await store.reconcile(
                 snapshot: snapshot, sourceID: sourceID,
                 sourceKind: connector.sourceKind,
-                remoteTruth: remoteTruth[sourceID] ?? false)
+                remoteTruth: (remoteTruth[sourceID] ?? false) && complete)
             onChange(QueueChange(
                 sourceID: sourceID, inserted: result.inserted,
                 snoozeWakes: [], status: .ok(.now)))
@@ -152,7 +166,15 @@ actor SyncEngine {
         }
     }
 
-    private func notify(sourceID: String) {
-        onChange(QueueChange(sourceID: sourceID, inserted: [], snoozeWakes: [], status: nil))
+    /// A write-through failure must not stay silent. The local store has
+    /// already recorded the item as done/snoozed, but the service still shows
+    /// it unread — without a status the two drift apart invisibly, which is
+    /// exactly what a triage queue must never do (PLAN §2). Surfacing it puts
+    /// the source's footer dot into its error state with the reason.
+    private func notify(sourceID: String, writeThroughFailure: String? = nil) {
+        onChange(
+            QueueChange(
+                sourceID: sourceID, inserted: [], snoozeWakes: [],
+                status: writeThroughFailure.map { .error($0) }))
     }
 }

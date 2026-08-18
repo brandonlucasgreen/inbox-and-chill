@@ -32,9 +32,19 @@ enum ClaudeCodeIntegration {
 
     // MARK: - Public API
 
+    /// True only when every hook we manage is present *and* points at the
+    /// command we would write today. A merely-present entry isn't enough: if
+    /// the app moved (DerivedData → /Applications) or the command format
+    /// changed, the installed hook is dead weight, and reporting "installed"
+    /// would hide that behind a "Remove Integration" button. Reporting
+    /// not-installed instead turns the Settings row into a one-click repair.
     static var isInstalled: Bool {
         guard let settings = try? readSettings() else { return false }
-        return hookEvents.allSatisfy { hasInchillEntry(in: settings, event: $0) }
+        return hookEvents.allSatisfy { event in
+            hasEntry(
+                in: settings, event: event,
+                matching: command(forHookNamed: event.lowercased()))
+        }
     }
 
     static func installHooks() throws {
@@ -77,7 +87,18 @@ enum ClaudeCodeIntegration {
     }
 
     private static func command(forHookNamed hook: String) -> String {
-        "\(inchillPath()) claude-hook \(hook)"
+        "\(shellQuoted(inchillPath())) claude-hook \(hook)"
+    }
+
+    /// Claude Code runs each hook command through a shell, so the path has to
+    /// survive word splitting — and our own bundle is named "Inbox &
+    /// Chill.app", whose unquoted `&` a shell reads as a background-job
+    /// separator (splitting the command into two nonexistent ones, both
+    /// silently failing). Wrap the path in single quotes, escaping any
+    /// embedded single quote the POSIX way.
+    /// Internal rather than private so the shell round-trip is testable.
+    static func shellQuoted(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 
     // MARK: - settings.json read/write
@@ -124,21 +145,20 @@ enum ClaudeCodeIntegration {
     private static func merge(
         settings: [String: Any], event: String, command: String
     ) -> [String: Any] {
-        var settings = settings
+        // Drop any entry we wrote previously before appending the current
+        // one, so re-installing over an existing install rewrites a stale
+        // command — an old DerivedData path, or a pre-quoting version —
+        // instead of leaving the broken one in place.
+        var settings = removeInchillEntries(from: settings, event: event)
         var hooks = (settings["hooks"] as? [String: Any]) ?? [:]
         var entries = (hooks[event] as? [[String: Any]]) ?? []
 
-        let alreadyPresent = entries.contains { entry in
-            innerCommands(of: entry).contains { $0.contains("inchill") }
-        }
-        if !alreadyPresent {
-            entries.append([
-                "matcher": "",
-                "hooks": [
-                    ["type": "command", "command": command]
-                ],
-            ])
-        }
+        entries.append([
+            "matcher": "",
+            "hooks": [
+                ["type": "command", "command": command]
+            ],
+        ])
 
         hooks[event] = entries
         settings["hooks"] = hooks
@@ -169,12 +189,14 @@ enum ClaudeCodeIntegration {
         return settings
     }
 
-    private static func hasInchillEntry(in settings: [String: Any], event: String) -> Bool {
+    private static func hasEntry(
+        in settings: [String: Any], event: String, matching command: String
+    ) -> Bool {
         guard let hooks = settings["hooks"] as? [String: Any],
             let entries = hooks[event] as? [[String: Any]]
         else { return false }
         return entries.contains { entry in
-            innerCommands(of: entry).contains { $0.contains("inchill") }
+            innerCommands(of: entry).contains { $0 == command }
         }
     }
 

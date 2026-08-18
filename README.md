@@ -63,7 +63,17 @@ Or build from the command line:
 xcodebuild -scheme InboxAndChill -configuration Debug build
 ```
 
-The build also compiles and embeds the `inchill` CLI inside the app bundle (`Contents/MacOS/inchill`) — see [docs/shell-integration.md](docs/shell-integration.md).
+To actually *use* the app day to day, install it rather than running it out of DerivedData:
+
+```sh
+scripts/install-local.sh
+```
+
+This builds signed, installs to `/Applications`, and launches. A stable path plus a real (non-ad-hoc) signature is what lets macOS remember Keychain, notification, and firewall permissions between builds instead of re-prompting every time — see [docs/testing-locally.md](docs/testing-locally.md).
+
+**Signing:** builds use a Developer ID Application identity, configured via `DEVELOPMENT_TEAM` in `project.yml`. Building from your own clone means changing that to your Team ID, or passing `CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=NO` for an unsigned build.
+
+The build also compiles and embeds the `inchill` CLI inside the app bundle (`Contents/MacOS/inchill`), signed with the same identity — see [docs/shell-integration.md](docs/shell-integration.md).
 
 ## Status
 

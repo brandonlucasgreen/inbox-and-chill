@@ -213,7 +213,7 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 | Slack | ❌ Pointless here | OAuth v2 requires **HTTPS redirect URIs** (no localhost/custom scheme), impossible for a serverless native app. And since every user installs their *own* workspace app, Slack's install page already runs the OAuth flow and displays the xoxp token — paste is the flow's last step, not an alternative to it. The `xapp` Socket Mode token can never come from OAuth. |
 | Linear | ⚠️ Viable, optional | PKCE public-client flow (no secret) with documented `http://localhost` loopback redirect; 24h tokens + refresh; near-identical rate limits. Requires registering a Linear OAuth app (client_id) first. The personal API key remains Linear's sanctioned personal path and is fewer steps — implement OAuth only if/when the GitHub release wants nicer onboarding. Sandbox note: the loopback listener would need `network.server` entitlement if the app is ever sandboxed. |
 
-**Decision: keep Keychain-stored pasted tokens everywhere for now; Linear PKCE is a documented backlog item.**
+**Decision (superseded 2026-08-17): Linear PKCE is now implemented** — `LinearOAuth.swift`, loopback callback on fixed port 52180, bring-your-own client ID, tokens in Keychain with auto-refresh; the personal API key path remains the default/fewest-steps option. GitHub and Slack stay paste-a-token (verdicts above still hold), and the source editor now says why in-line.
 
 ## 7. Milestones
 

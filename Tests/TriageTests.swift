@@ -120,4 +120,94 @@ struct TriageTests {
         #expect(wakes.count == 1)
         #expect(try await store.dueSnoozeWakes().isEmpty)
     }
+    // MARK: - Partial-snapshot protection
+    //
+    // Regression coverage for the GitHub resurrection bug. `GET /notifications`
+    // caps at 50 items per page (default *and* max), and the connector used to
+    // fetch only the first page. With `.remoteTruth`, every unread notification
+    // past #50 looked like one the user had cleared remotely, got auto-archived
+    // with `doneReason == "remote"`, and then sprang back the moment the window
+    // slid far enough for it to reappear — so items could never be dismissed
+    // for good. SyncEngine now suspends remote-truth archiving for any cycle
+    // where the connector reports an incomplete snapshot.
+
+    @Test("A partial snapshot must not archive the items it omits")
+    func partialSnapshotDoesNotArchive() async throws {
+        let store = try makeStore()
+        let page1 = (1...3).map {
+            RemoteItem(externalID: "p\($0)", kind: "pr", title: "P\($0)", occurredAt: .now)
+        }
+        let page2 = (4...6).map {
+            RemoteItem(externalID: "p\($0)", kind: "pr", title: "P\($0)", occurredAt: .now)
+        }
+        _ = try await store.reconcile(
+            snapshot: page1 + page2, sourceID: "s", sourceKind: "test",
+            remoteTruth: true)
+
+        // Only page 1 comes back, and the connector said the snapshot was
+        // incomplete — so SyncEngine passes remoteTruth: false.
+        let partial = try await store.reconcile(
+            snapshot: page1, sourceID: "s", sourceKind: "test", remoteTruth: false)
+        #expect(partial.clearedRemotely == 0)
+        let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 6)
+    }
+
+    @Test("The same omission with a complete snapshot does archive")
+    func completeSnapshotStillArchives() async throws {
+        let store = try makeStore()
+        let a = RemoteItem(externalID: "a", kind: "pr", title: "A", occurredAt: .now)
+        let b = RemoteItem(externalID: "b", kind: "pr", title: "B", occurredAt: .now)
+        _ = try await store.reconcile(
+            snapshot: [a, b], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        let result = try await store.reconcile(
+            snapshot: [a], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        #expect(result.clearedRemotely == 1)
+    }
+
+    /// "How do I get rid of these permanently?" — a thing the user marked done
+    /// must stay done even while the remote keeps listing it as unread (a failed
+    /// or not-yet-propagated write-through), because its remote timestamp hasn't
+    /// moved. Only genuinely newer remote activity may bring it back.
+    @Test("A user-marked-done item stays done while the remote still lists it")
+    func userDoneSurvivesRemoteStillListing() async throws {
+        let store = try makeStore()
+        let old = Date.now.addingTimeInterval(-3600)
+        let item = RemoteItem(
+            externalID: "keep-gone", kind: "pr", title: "Old PR", occurredAt: old)
+        _ = try await store.reconcile(
+            snapshot: [item], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        try await store.markDone(uid: item.uid(sourceKind: "test"))
+
+        // Three more polls with the remote still reporting it unread.
+        for _ in 0..<3 {
+            _ = try await store.reconcile(
+                snapshot: [item], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        }
+        let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 0)
+    }
+
+    @Test("Genuinely newer remote activity does bring a done item back")
+    func newerRemoteActivityResurrects() async throws {
+        let store = try makeStore()
+        let old = Date.now.addingTimeInterval(-3600)
+        let item = RemoteItem(
+            externalID: "revive", kind: "pr", title: "PR", occurredAt: old)
+        _ = try await store.reconcile(
+            snapshot: [item], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        try await store.markDone(uid: item.uid(sourceKind: "test"))
+
+        var updated = item
+        updated.occurredAt = .now  // someone commented again
+        _ = try await store.reconcile(
+            snapshot: [updated], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 1)
+    }
+
+    @Test("Connectors report complete snapshots unless they say otherwise")
+    func snapshotCompletenessDefault() async throws {
+        #expect(await FakeConnector(sourceID: "f").snapshotWasComplete())
+    }
 }

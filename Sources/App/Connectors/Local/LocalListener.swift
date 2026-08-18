@@ -97,19 +97,43 @@ actor LocalListener {
     private var onNotify: (@Sendable (NotifyPayload) -> Void)?
     private var onClear: (@Sendable (ClearPayload) -> Void)?
 
+    /// Bumped on every successful listener bind. `stop(generation:)` only
+    /// tears down when the caller's token still matches, so a restarting
+    /// `LocalConnector` can't have its outgoing task dismantle its incoming
+    /// task's listener.
+    private var generation: UInt64 = 0
+
     /// Starts the listener if it isn't already running (idempotent — safe to
     /// call every time a connector registers). Handlers are updated on every
     /// call so the most recent caller "wins," which is fine: only
     /// `LocalConnector` ever calls this.
+    ///
+    /// Returns a generation token the caller must hand back to
+    /// `stop(generation:)`. Without it, a `LocalConnector` restart is a race:
+    /// SyncEngine's new task can `start()` before the cancelled task's
+    /// `stop()` runs, and an ungated `stop()` would then cancel the *new*
+    /// listener while the discovery file still advertised its port — leaving
+    /// every `inchill` call (and so every Claude Code hook) failing to
+    /// connect until the app was relaunched.
+    @discardableResult
     func start(
         onNotify: @escaping @Sendable (NotifyPayload) -> Void,
         onClear: @escaping @Sendable (ClearPayload) -> Void
-    ) async throws {
+    ) async throws -> UInt64 {
         self.onNotify = onNotify
         self.onClear = onClear
-        guard listener == nil else { return }
+        if listener != nil {
+            // Already bound: adopt the new handlers and re-assert the
+            // discovery file in case a previous stop removed it.
+            try? writeInfoFile()
+            return generation
+        }
 
-        token = Self.loadExistingToken() ?? Self.randomToken()
+        // Fresh token on every listener start (i.e. every app launch): the
+        // CLI re-reads the discovery file per invocation, so rotation is
+        // free — and it caps the useful life of a leaked token at one
+        // app session.
+        token = Self.randomToken()
 
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(
@@ -142,12 +166,21 @@ actor LocalListener {
 
         listener = newListener
         port = assignedPort.rawValue
+        generation += 1
         try writeInfoFile()
+        return generation
     }
 
     /// Stops the listener and drops all in-flight connections. Called when
     /// the owning `LocalConnector`'s task is cancelled.
-    func stop() {
+    ///
+    /// A stale token means another `start()` has since taken ownership, so
+    /// this is a late teardown from a task that no longer owns the listener —
+    /// ignore it rather than killing a live listener.
+    func stop(generation epoch: UInt64) {
+        // Note: named `epoch`, not `token` — `token` is the bearer-token
+        // property, and shadowing it here would be a trap for the next reader.
+        guard epoch == generation, listener != nil else { return }
         listener?.stateUpdateHandler = nil
         listener?.newConnectionHandler = nil
         listener?.cancel()
@@ -155,6 +188,10 @@ actor LocalListener {
         port = 0
         for (_, connection) in connections { connection.cancel() }
         connections.removeAll()
+        // Remove the handshake file rather than leave it pointing at a dead
+        // port: `inchill` then reports "Inbox & Chill isn't running" instead
+        // of a confusing connection failure.
+        try? FileManager.default.removeItem(at: Self.infoFileURL)
     }
 
     // MARK: - Connection handling
@@ -287,14 +324,6 @@ actor LocalListener {
 
     // MARK: - Token + discovery file
 
-    private static func loadExistingToken() -> String? {
-        guard let data = try? Data(contentsOf: infoFileURL),
-            let info = try? JSONDecoder().decode(LocalAPIInfo.self, from: data),
-            !info.token.isEmpty
-        else { return nil }
-        return info.token
-    }
-
     private static func randomToken() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
@@ -307,8 +336,15 @@ actor LocalListener {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let info = LocalAPIInfo(port: Int(port), token: token)
         let data = try JSONEncoder().encode(info)
-        try data.write(to: Self.infoFileURL, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: Self.infoFileURL.path)
+        // createFile applies the permissions atomically with creation —
+        // write-then-chmod would leave a default-umask window where another
+        // local user could read the token.
+        try? FileManager.default.removeItem(at: Self.infoFileURL)
+        guard FileManager.default.createFile(
+            atPath: Self.infoFileURL.path, contents: data,
+            attributes: [.posixPermissions: 0o600])
+        else {
+            throw CocoaError(.fileWriteUnknown)
+        }
     }
 }

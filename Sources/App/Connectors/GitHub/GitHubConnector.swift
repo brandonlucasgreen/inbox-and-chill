@@ -18,8 +18,30 @@ actor GitHubConnector: Connector {
 
     private var lastModified: String?
     private var cachedSnapshot: [RemoteItem] = []
+    /// False when the last fetch stopped at `maxPages` with a full final page,
+    /// i.e. GitHub still had more unread notifications to give us.
+    private var snapshotComplete = true
 
-    init(sourceID: String = "github") {
+    /// GitHub caps `/notifications` at 50 per page — that is both the default
+    /// *and* the documented maximum — so a busy inbox must be paged through.
+    /// Failing to do so was a real bug: with `.remoteTruth`, every unread
+    /// notification past the first 50 looked like one the user had handled
+    /// remotely, got auto-archived, and then sprang back the moment the
+    /// 50-item window slid far enough for it to reappear.
+    private static let perPage = 50
+    /// 20 × 50 = 1,000 unread notifications. Past that we report the snapshot
+    /// as incomplete rather than pretend the tail doesn't exist.
+    private static let maxPages = 20
+
+    /// `participating=true` narrows GitHub's firehose to threads you're
+    /// actually in — mentioned, assigned, review-requested, or already
+    /// commented on. Without it, `/notifications` returns activity from every
+    /// repo you watch, which on a busy monorepo org is thousands of items and
+    /// makes a triage queue useless.
+    private let participating: Bool
+
+    init(sourceID: String = "github", participating: Bool = true) {
+        self.participating = participating
         self.sourceID = sourceID
     }
 
@@ -54,21 +76,61 @@ actor GitHubConnector: Connector {
             throw GitHubConnectorError(errorDescription: "GitHub: no personal access token configured for source \(sourceID).")
         }
 
-        var request = URLRequest(url: URL(string: "https://api.github.com/notifications")!)
-        request.setValue("Bearer \(pat)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        if let lastModified {
-            request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+        var collected: [RemoteItem] = []
+        var complete = true
+
+        for page in 1...Self.maxPages {
+            var components = URLComponents(string: "https://api.github.com/notifications")!
+            var query = [
+                URLQueryItem(name: "per_page", value: String(Self.perPage)),
+                URLQueryItem(name: "page", value: String(page)),
+            ]
+            if participating {
+                query.append(URLQueryItem(name: "participating", value: "true"))
+            }
+            components.queryItems = query
+            var request = URLRequest(url: components.url!)
+            request.setValue("Bearer \(pat)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+            // Conditional requests are per-page-1 only: it's the cheap "has
+            // anything changed at all?" probe. Later pages are unconditional,
+            // since a 304 on page 3 would silently truncate the snapshot.
+            if page == 1, let lastModified {
+                request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+            }
+
+            let (pageItems, isLastPage) = try await fetchPage(
+                request: request, isFirstPage: page == 1)
+            guard let pageItems else {
+                // 304 on page 1: nothing has changed, so the cached snapshot
+                // is still accurate — including its completeness.
+                return cachedSnapshot
+            }
+            collected.append(contentsOf: pageItems)
+            if isLastPage { break }
+            if page == Self.maxPages { complete = false }
         }
 
+        snapshotComplete = complete
+        cachedSnapshot = collected
+        return collected
+    }
+
+    func snapshotWasComplete() async -> Bool { snapshotComplete }
+
+    /// Fetches one page. Returns `(nil, true)` for a 304, and
+    /// `isLastPage == true` once GitHub returns a short page.
+    private func fetchPage(
+        request: URLRequest, isFirstPage: Bool
+    ) async throws -> (items: [RemoteItem]?, isLastPage: Bool) {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw GitHubConnectorError(errorDescription: "GitHub: non-HTTP response from /notifications.")
         }
 
         if http.statusCode == 304 {
-            return cachedSnapshot
+            return (nil, true)
         }
 
         guard http.statusCode == 200 else {
@@ -85,14 +147,17 @@ actor GitHubConnector: Connector {
             }
         }
 
-        if let newLastModified = http.value(forHTTPHeaderField: "Last-Modified") {
+        // Only page 1 carries the validator we send back next time.
+        if isFirstPage, let newLastModified = http.value(forHTTPHeaderField: "Last-Modified") {
             lastModified = newLastModified
         }
 
         let threads = try JSONDecoder().decode([Thread].self, from: data)
-        let items = threads.filter(\.unread).map(makeRemoteItem)
-        cachedSnapshot = items
-        return items
+        // A short page means we've reached the end. Judge that on the raw
+        // thread count, before the `unread` filter — a full page of already-read
+        // threads still means more pages exist.
+        let isLastPage = threads.count < Self.perPage
+        return (threads.filter(\.unread).map(makeRemoteItem), isLastPage)
     }
 
     func markDone(externalID: String, payload: Data?) async throws {

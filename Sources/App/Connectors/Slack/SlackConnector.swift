@@ -77,6 +77,9 @@ actor SlackConnector: Connector {
 
     /// How often to re-check read state for channels holding items.
     private static let readStateInterval: Duration = .seconds(90)
+    /// Full-seed cadence when running without an app-level token. Slower than
+    /// the read-state check because a seed re-enumerates conversations.
+    private static let pollOnlySeedInterval: Duration = .seconds(300)
     /// Concurrency cap on seed `conversations.info` fan-out (rate-limit hygiene).
     private static let seedConcurrency = 5
 
@@ -152,6 +155,16 @@ actor SlackConnector: Connector {
             let appToken = try await connect()
             try await seed(emit: emit)
 
+            guard let appToken else {
+                // User token only. Channel mentions are unavailable — Slack
+                // has no polling API for them (see `seed`) — but DM unreads,
+                // emoji saves and read-state auto-clear are all pollable, so
+                // the source still works. This loop stands in for the socket.
+                emit(.status(.ok(.now)))
+                try await pollOnlyLoop(emit: emit)
+                return
+            }
+
             let socket = try await SlackSocket.open(appToken: appToken)
             defer { socket.close() }
             emit(.status(.ok(.now)))
@@ -182,19 +195,17 @@ actor SlackConnector: Connector {
         }
     }
 
-    /// Resolves tokens, identifies us, and returns the app-level token.
-    private func connect() async throws -> String {
+    /// Resolves tokens, identifies us, and returns the app-level token — or
+    /// `nil` when only a user token is configured. That is a supported,
+    /// deliberately degraded mode (no channel mentions), not an error: it
+    /// halves the setup to one paste for anyone who doesn't want to enable
+    /// Socket Mode.
+    private func connect() async throws -> String? {
         guard let userToken = Keychain.get("\(sourceID).userToken"), !userToken.isEmpty else {
             throw SlackError(
                 errorDescription:
                     "Slack: no user token (xoxp-…) configured for source \(sourceID).")
         }
-        guard let appToken = Keychain.get("\(sourceID).appToken"), !appToken.isEmpty else {
-            throw SlackError(
-                errorDescription:
-                    "Slack: no app-level token (xapp-…) configured for source \(sourceID).")
-        }
-
         let api = SlackAPI(token: userToken)
         self.api = api
 
@@ -205,7 +216,27 @@ actor SlackConnector: Connector {
         selfUserID = userID
         selfUserName = auth["user"].string ?? ""
         teamID = auth["team_id"].string ?? ""
-        return appToken
+
+        let appToken = Keychain.get("\(sourceID).appToken")
+        return (appToken?.isEmpty == false) ? appToken : nil
+    }
+
+    /// Degraded run loop for a user-token-only install: keeps read-state and
+    /// the pollable item kinds fresh in place of the Socket Mode reader.
+    private func pollOnlyLoop(
+        emit: @escaping @Sendable (ConnectorEvent) -> Void
+    ) async throws {
+        var sinceFullSeed: Duration = .zero
+        while !Task.isCancelled {
+            try await Task.sleep(for: Self.readStateInterval)
+            await reconcileReadState(emit: emit)
+
+            sinceFullSeed += Self.readStateInterval
+            if sinceFullSeed >= Self.pollOnlySeedInterval {
+                sinceFullSeed = .zero
+                try await seed(emit: emit)
+            }
+        }
     }
 
     private func readLoop(

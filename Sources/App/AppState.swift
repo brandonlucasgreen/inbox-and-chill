@@ -121,6 +121,124 @@ final class AppState {
         }
     }
 
+    // MARK: Journal (Sources/App/Journal/JournalWriter.swift)
+
+    /// Off by default, and with no default path: the useful value is a
+    /// personal vault location that only the user can supply.
+    var journalEnabled: Bool {
+        get {
+            access(keyPath: \.journalEnabled)
+            return UserDefaults.standard.bool(forKey: "journalEnabled")
+        }
+        set {
+            withMutation(keyPath: \.journalEnabled) {
+                UserDefaults.standard.set(newValue, forKey: "journalEnabled")
+            }
+        }
+    }
+
+    var journalPath: String {
+        get {
+            access(keyPath: \.journalPath)
+            return UserDefaults.standard.string(forKey: "journalPath") ?? ""
+        }
+        set {
+            withMutation(keyPath: \.journalPath) {
+                UserDefaults.standard.set(newValue, forKey: "journalPath")
+            }
+        }
+    }
+
+    var journalHeading: String {
+        get {
+            access(keyPath: \.journalHeading)
+            let stored = UserDefaults.standard.string(forKey: "journalHeading")
+            return (stored?.isEmpty == false) ? stored! : "## Inbox & Chill"
+        }
+        set {
+            withMutation(keyPath: \.journalHeading) {
+                UserDefaults.standard.set(newValue, forKey: "journalHeading")
+            }
+        }
+    }
+
+    /// The two halves of Brandon's ask: log what arrives, and log what you
+    /// did about it. Either can be turned off independently.
+    var journalLogArrivals: Bool {
+        get {
+            access(keyPath: \.journalLogArrivals)
+            return UserDefaults.standard.object(forKey: "journalLogArrivals")
+                as? Bool ?? true
+        }
+        set {
+            withMutation(keyPath: \.journalLogArrivals) {
+                UserDefaults.standard.set(newValue, forKey: "journalLogArrivals")
+            }
+        }
+    }
+
+    var journalLogActions: Bool {
+        get {
+            access(keyPath: \.journalLogActions)
+            return UserDefaults.standard.object(forKey: "journalLogActions")
+                as? Bool ?? true
+        }
+        set {
+            withMutation(keyPath: \.journalLogActions) {
+                UserDefaults.standard.set(newValue, forKey: "journalLogActions")
+            }
+        }
+    }
+
+    /// Last write failure, surfaced in Settings. Writing to a vault under
+    /// ~/Documents needs a one-time macOS Files-and-Folders grant, and a
+    /// denial has to be visible rather than swallowed (the write-through bug
+    /// taught us that once already).
+    var journalError: String?
+
+    private var journalConfig: JournalConfig {
+        JournalConfig(pathTemplate: journalPath, heading: journalHeading)
+    }
+
+    /// Fire-and-forget, but never silent: failures land in `journalError`.
+    private func journal(_ entries: [JournalEntry]) {
+        guard journalEnabled, !entries.isEmpty else { return }
+        let config = journalConfig
+        Task {
+            for entry in entries {
+                do {
+                    try await JournalWriter.shared.record(entry, config: config)
+                } catch {
+                    await MainActor.run {
+                        self.journalError = String(describing: error)
+                    }
+                    return
+                }
+            }
+            await MainActor.run { self.journalError = nil }
+        }
+    }
+
+    private func journal(
+        _ action: JournalAction, item: Item, detail: String? = nil
+    ) {
+        guard journalEnabled, journalLogActions else { return }
+        journal([
+            JournalEntry(
+                at: .now, action: action,
+                sourceName: sourceName(forID: item.sourceID),
+                title: item.title, url: item.url?.absoluteString, detail: detail)
+        ])
+    }
+
+    private func sourceName(forID sourceID: String) -> String {
+        var descriptor = FetchDescriptor<SourceConfig>(
+            predicate: #Predicate { $0.id == sourceID })
+        descriptor.fetchLimit = 1
+        let config = try? container.mainContext.fetch(descriptor).first
+        return config?.displayName ?? ""
+    }
+
     // MARK: Connector bootstrap
 
     func bootstrapConnectors() async {
@@ -165,6 +283,15 @@ final class AppState {
         if !bannerItems.isEmpty {
             let sound = bannerSound
             Task { await Self.postBanners(bannerItems, sound: sound) }
+        }
+        if journalEnabled, journalLogArrivals, !change.inserted.isEmpty {
+            let name = sourceName(forID: change.sourceID)
+            journal(
+                change.inserted.map {
+                    JournalEntry(
+                        at: .now, action: .arrived, sourceName: name,
+                        title: $0.title, url: $0.urlString, detail: nil)
+                })
         }
         Task { await refreshBadge() }
     }
@@ -239,6 +366,9 @@ final class AppState {
 
     func markDone(_ item: Item) {
         undoStack.append(item.uid)
+        journal(
+            .done, item: item,
+            detail: JournalWriter.waited(from: item.firstSeenAt, to: .now))
         let (uid, sourceID, ext, payload) =
             (item.uid, item.sourceID, externalID(of: item), item.payload)
         Task {
@@ -254,10 +384,29 @@ final class AppState {
 
     /// Bring a done item back to the queue (⌘Z and archive Restore).
     func restore(uid: String) {
+        if journalEnabled, journalLogActions, let item = item(forUID: uid) {
+            journal(.restored, item: item)
+        }
         undoStack.removeAll { $0 == uid }
         let sourceID = sourceID(forUID: uid)
         Task { await engine.undoDone(uid: uid, sourceID: sourceID) }
     }
+
+    private func item(forUID uid: String) -> Item? {
+        var descriptor = FetchDescriptor<Item>(
+            predicate: #Predicate { $0.uid == uid })
+        descriptor.fetchLimit = 1
+        return try? container.mainContext.fetch(descriptor).first
+    }
+
+    /// Snooze targets are read by humans in a note, so this one is localised
+    /// (unlike the journal's machine-stable `HH:mm` timestamp).
+    private static let journalDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
 
     private func sourceID(forUID uid: String) -> String {
         var descriptor = FetchDescriptor<Item>(
@@ -268,6 +417,9 @@ final class AppState {
     }
 
     func snooze(_ item: Item, until: Date) {
+        journal(
+            .snoozed, item: item,
+            detail: "until \(Self.journalDateFormatter.string(from: until))")
         let (uid, sourceID, ext, payload) =
             (item.uid, item.sourceID, externalID(of: item), item.payload)
         Task {
@@ -278,6 +430,9 @@ final class AppState {
     }
 
     func togglePin(_ item: Item) {
+        // Read before the store flips it: this is the action we're about to
+        // take, not the state we're leaving.
+        journal(item.isPinned ? .unpinned : .pinned, item: item)
         let uid = item.uid
         Task {
             try? await store.togglePin(uid: uid)
@@ -352,11 +507,21 @@ enum ConnectorFactory {
         case "fake":
             return FakeConnector(sourceID: config.id)
         case "linear":
-            return LinearConnector(sourceID: config.id)
+            return LinearConnector(
+                sourceID: config.id,
+                oauthClientID: settings["oauthClientID"])
         case "github":
-            return GitHubConnector(sourceID: config.id)
+            let field = ConnectorCatalog.descriptor(for: "github")?
+                .fields.first { $0.key == "participating" }
+            return GitHubConnector(
+                sourceID: config.id,
+                participating: field?.boolValue(in: settings) ?? true)
         case "local":
             return LocalConnector(sourceID: config.id)
+        case "ntfy":
+            return NtfyConnector(
+                sourceID: config.id, server: settings["server"] ?? "",
+                topics: settings["topics"] ?? "")
         case "jsonPoller":
             return JSONPollerConnector(
                 sourceID: config.id, urlString: settings["url"] ?? "",

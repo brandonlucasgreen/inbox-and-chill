@@ -61,25 +61,25 @@ struct ItemRowView: View {
         HStack(alignment: .top, spacing: 8) {
             Circle()
                 .fill(item.highSignal ? Color.accentColor : .clear)
-                .frame(width: 5, height: 5)
-                .padding(.top, 5)
+                .frame(width: 6, height: 6)
+                .padding(.top, 6)
                 .accessibilityHidden(true)
             Image(systemName: display.systemImage)
-                .font(.system(size: 12))
+                .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-                .frame(width: 16)
+                .frame(width: 20)
                 .padding(.top, 1)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(
                         .system(
-                            size: 12,
+                            size: 13,
                             weight: item.highSignal ? .semibold : .regular))
                     .lineLimit(1)
                 if let secondary {
                     Text(secondary)
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -87,41 +87,45 @@ struct ItemRowView: View {
             Spacer(minLength: 4)
             trailing
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
         .background(background)
     }
 
     @ViewBuilder private var trailing: some View {
         if isHovering {
             HStack(spacing: 2) {
-                actionButton("arrow.up.forward.app", "Open (⏎)", "Open") {
+                actionButton(
+                    "arrow.up.forward.app", key: "⏎", "Open (⏎)", "Open"
+                ) {
                     appState.open(item)
                 }
-                actionButton("checkmark.circle", "Done (E)", "Mark done") {
+                actionButton(
+                    "checkmark.circle", key: "E", "Done (E)", "Mark done"
+                ) {
                     appState.markDone(item)
                 }
                 SnoozeMenu(
                     apply: { appState.snooze(item, until: $0) },
                     pickDate: { snoozeTargetUID = item.uid })
                 actionButton(
-                    item.isPinned ? "pin.slash" : "pin",
+                    item.isPinned ? "pin.slash" : "pin", key: "⌘P",
                     item.isPinned ? "Unpin (⌘P)" : "Pin (⌘P)",
                     item.isPinned ? "Unpin" : "Pin"
                 ) { appState.togglePin(item) }
             }
-            .font(.system(size: 12))
+            .font(.system(size: 14))
             .buttonStyle(.borderless)
             .transition(.opacity)
         } else {
             VStack(alignment: .trailing, spacing: 1) {
                 Text(timeText)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 if item.isPinned {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 8))
+                        .font(.system(size: 9))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -129,13 +133,28 @@ struct ItemRowView: View {
         }
     }
 
+    /// Icon plus its keyboard shortcut, side by side. The key used to live
+    /// only in the tooltip, which meant discovering it required hovering a
+    /// row, then hovering an icon, then waiting — so in practice nobody found
+    /// the keys. Printing them next to the glyph is the whole point.
     private func actionButton(
-        _ systemImage: String, _ help: String, _ label: String,
+        _ systemImage: String, key: String, _ help: String, _ label: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) { Image(systemName: systemImage) }
-            .help(help)
-            .accessibilityLabel(Text(label))
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13))
+                KeyCap(key)
+            }
+            // Icon-only buttons need an explicit frame — the bare glyph's
+            // bounds make a fiddly ~14pt hit target.
+            .padding(.horizontal, 4)
+            .frame(height: 24)
+            .contentShape(.rect)
+        }
+        .help(help)
+        .accessibilityLabel(Text(label))
     }
 
     @ViewBuilder private var contextMenu: some View {
@@ -213,5 +232,28 @@ struct ItemRowView: View {
         Binding(
             get: { snoozeTargetUID == item.uid },
             set: { if !$0 { snoozeTargetUID = nil } })
+    }
+}
+
+
+/// A shortcut key rendered as a small keycap. Deliberately quiet — it's a
+/// hint sitting next to the control it describes, not a label competing with
+/// the item's title.
+struct KeyCap: View {
+    let key: String
+
+    init(_ key: String) { self.key = key }
+
+    var body: some View {
+        Text(key)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 3)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(.quaternary))
+            .accessibilityHidden(true)
     }
 }

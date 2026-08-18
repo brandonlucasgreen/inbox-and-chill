@@ -12,7 +12,18 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
-    CODE_SIGN_IDENTITY: "-"
+    # Real Developer ID signing, not ad-hoc ("-"), even for local builds.
+    # macOS keys Keychain ACLs, TCC permissions, and firewall decisions to
+    # the code signature: an ad-hoc signature has no stable identity, so
+    # every rebuild looks like a brand-new app and re-prompts for all of
+    # them. Developer ID is also what the eventual release ships with
+    # (PLAN §2.1.7), so local testing exercises the real artifact.
+    #
+    # Building this yourself? Change DEVELOPMENT_TEAM to your own Team ID,
+    # or pass CODE_SIGN_IDENTITY="-" to xcodebuild for an unsigned build.
+    DEVELOPMENT_TEAM: CV926C8KS8
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Developer ID Application"
 targets:
   InboxAndChill:
     type: application
@@ -25,8 +36,31 @@ targets:
     postBuildScripts:
       - name: Embed inchill CLI
         script: |
-          cp "$BUILT_PRODUCTS_DIR/inchill" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/inchill"
-          codesign --force --sign - "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/inchill"
+          set -e
+          DEST="$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/inchill"
+          cp "$BUILT_PRODUCTS_DIR/inchill" "$DEST"
+          # The embedded CLI must carry the SAME signature as the app around
+          # it. A nested ad-hoc binary inside a Developer ID app fails
+          # `codesign --verify --deep` and would fail notarization outright.
+          # EXPANDED_CODE_SIGN_IDENTITY is the resolved identity hash Xcode
+          # is about to sign the app with; fall back to ad-hoc for explicitly
+          # unsigned builds.
+          IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
+          if [ "$IDENTITY" = "-" ]; then
+            codesign --force --options runtime --timestamp=none --sign - "$DEST"
+          elif [ "$CONFIGURATION" = "Debug" ]; then
+            # Skip the timestamp server on dev builds: it's a network round
+            # trip per build and only release/notarized builds need it.
+            codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$DEST"
+          else
+            codesign --force --options runtime --timestamp --sign "$IDENTITY" "$DEST"
+          fi
+        # inputFiles is load-bearing, not documentation: with only outputFiles
+        # declared, Xcode treats the script as up to date whenever the output
+        # exists and skips it — so a rebuilt CLI never got copied into the app
+        # and every `inchill` change silently shipped as the previous build.
+        inputFiles:
+          - $(BUILT_PRODUCTS_DIR)/inchill
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/inchill
     settings:

@@ -172,6 +172,31 @@ private struct ClaudeHookPayload: Decodable {
     var cwd: String?
     var message: String?
     var hook_event_name: String?
+    /// Available on `Stop` — the final assistant text, which makes a far
+    /// better snippet than "Claude finished in <dir>" on its own.
+    var last_assistant_message: String?
+}
+
+/// A `file://` URL for the session's working directory.
+///
+/// Claude Code publishes no way to deep-link to a specific session — there is
+/// no documented URL scheme and no resume-by-id URI — so the project folder is
+/// the closest addressable thing, and it at least makes ⏎ on the item land you
+/// in the right project rather than nowhere.
+private func projectURL(for cwd: String?) -> String? {
+    guard let cwd, !cwd.isEmpty else { return nil }
+    return URL(fileURLWithPath: cwd).absoluteString
+}
+
+/// First non-empty line, trimmed to something that fits a queue row.
+private func firstLine(of text: String?, limit: Int = 200) -> String? {
+    guard let text else { return nil }
+    guard
+        let line = text.split(separator: "\n")
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
+            .first(where: { !$0.isEmpty })
+    else { return nil }
+    return line.count > limit ? String(line.prefix(limit)) + "…" : line
 }
 
 private func runClaudeHook(_ kind: String) {
@@ -187,15 +212,17 @@ private func runClaudeHook(_ kind: String) {
         // A session wants the user: permission prompt or idle-waiting.
         // Always high-signal, auto-clears when the wait ends (see "stop").
         let title = (payload.message?.isEmpty == false) ? payload.message! : "Claude Code needs your input"
-        post(
-            path: "/notify",
-            json: [
-                "id": "claude-\(payload.session_id)",
-                "source": "claude-code",
-                "kind": "claude_waiting",
-                "title": title,
-                "highSignal": true,
-            ])
+        let cwdBase = payload.cwd.map { ($0 as NSString).lastPathComponent } ?? "unknown"
+        var json: [String: Any] = [
+            "id": "claude-\(payload.session_id)",
+            "source": "claude-code",
+            "kind": "claude_waiting",
+            "title": title,
+            "body": "in \(cwdBase)",
+            "highSignal": true,
+        ]
+        if let url = projectURL(for: payload.cwd) { json["url"] = url }
+        post(path: "/notify", json: json)
 
     case "stop":
         // The turn ended: clear the waiting item (if any) and leave a
@@ -205,15 +232,20 @@ private func runClaudeHook(_ kind: String) {
 
         let cwdBase = payload.cwd.map { ($0 as NSString).lastPathComponent } ?? "unknown"
         let timestamp = Int(Date().timeIntervalSince1970)
-        post(
-            path: "/notify",
-            json: [
-                "id": "claude-done-\(payload.session_id)-\(timestamp)",
-                "source": "claude-code",
-                "kind": "claude_done",
-                "title": "Claude finished in \(cwdBase)",
-                "highSignal": false,
-            ])
+        var json: [String: Any] = [
+            "id": "claude-done-\(payload.session_id)-\(timestamp)",
+            "source": "claude-code",
+            "kind": "claude_done",
+            "title": "Claude finished in \(cwdBase)",
+            "highSignal": false,
+        ]
+        // What it actually said beats a bare "finished" when you're scanning
+        // several sessions at once.
+        if let summary = firstLine(of: payload.last_assistant_message) {
+            json["body"] = summary
+        }
+        if let url = projectURL(for: payload.cwd) { json["url"] = url }
+        post(path: "/notify", json: json)
 
     default:
         fail("inchill claude-hook: unknown hook kind '\(kind)' (expected 'notification' or 'stop').")

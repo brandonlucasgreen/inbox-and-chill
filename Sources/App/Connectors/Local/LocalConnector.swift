@@ -20,8 +20,9 @@ actor LocalConnector: Connector {
     func fetch() async throws -> [RemoteItem] { [] }
 
     func run(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
+        let generation: UInt64
         do {
-            try await LocalListener.shared.start(
+            generation = try await LocalListener.shared.start(
                 onNotify: { payload in
                     let item = RemoteItem(
                         externalID: payload.id ?? UUID().uuidString,
@@ -49,6 +50,6 @@ actor LocalConnector: Connector {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(3600))
         }
-        await LocalListener.shared.stop()
+        await LocalListener.shared.stop(generation: generation)
     }
 }

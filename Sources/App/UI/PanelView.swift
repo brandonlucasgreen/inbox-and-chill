@@ -10,6 +10,7 @@ struct PanelView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Query(sort: \Item.occurredAt, order: .reverse) private var items: [Item]
@@ -45,8 +46,9 @@ struct PanelView: View {
             Divider()
             footer
         }
-        .frame(width: 380, height: 520)
+        .frame(width: 420, height: 560)
         .background { commandShortcuts }
+        .background { PanelKeyboardFocus() }
         .focusable()
         .focusEffectDisabled()
         .focused($focus, equals: .list)
@@ -160,22 +162,22 @@ struct PanelView: View {
             Image(
                 systemName: isNarrowed
                     ? "line.3.horizontal.decrease" : "cup.and.saucer")
-                .font(.system(size: 22))
+                .font(.system(size: 26))
                 .foregroundStyle(.secondary)
             Text(isNarrowed ? "Nothing matches" : "You're all caught up ☺")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
             if isNarrowed {
                 Button("Clear Filters") { clearAllFilters() }
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .help("Show every source and clear the text filter")
             } else if let date = lastRefresh {
                 Text("Last refreshed \(PanelFormat.relative(date)) ago")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .help(PanelFormat.full(date))
             } else {
                 Text("Waiting for the first sync…")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -188,14 +190,16 @@ struct PanelView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Button {
                 refresh()
             } label: {
                 if isRefreshing {
-                    ProgressView().controlSize(.small)
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 26, height: 24)
                 } else {
-                    Image(systemName: "arrow.clockwise")
+                    footerIcon("arrow.clockwise")
                 }
             }
             .keyboardShortcut("r", modifiers: .command)
@@ -214,7 +218,7 @@ struct PanelView: View {
                 Button {
                     appState.undoDone()
                 } label: {
-                    Image(systemName: "arrow.uturn.backward")
+                    footerIcon("arrow.uturn.backward")
                 }
                 .help("Undo last done (⌘Z)")
                 .accessibilityLabel("Undo last done")
@@ -227,9 +231,7 @@ struct PanelView: View {
                     showArchive.toggle()
                 }
             } label: {
-                Image(
-                    systemName: showArchive
-                        ? "archivebox.fill" : "archivebox")
+                footerIcon(showArchive ? "archivebox.fill" : "archivebox")
             }
             .keyboardShortcut("a", modifiers: [.command, .shift])
             .help(
@@ -240,34 +242,49 @@ struct PanelView: View {
 
             Button {
                 openWindow(id: "main")
-                NSApp.activate()
+                WindowActivation.focusMainWindow()
                 dismiss()
             } label: {
-                Image(systemName: "macwindow")
+                footerIcon("macwindow")
             }
             .keyboardShortcut("0", modifiers: .command)
             .help("Open as Window (⌘0)")
             .accessibilityLabel("Open as window")
 
-            SettingsLink { Image(systemName: "gearshape") }
-                .keyboardShortcut(",", modifiers: .command)
-                .help("Settings (⌘,)")
-                .accessibilityLabel("Settings")
+            Button {
+                openSettings()
+                WindowActivation.focusSettings()
+                dismiss()
+            } label: {
+                footerIcon("gearshape")
+            }
+            .keyboardShortcut(",", modifiers: .command)
+            .help("Settings (⌘,)")
+            .accessibilityLabel("Settings")
 
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Image(systemName: "power")
+                footerIcon("power")
             }
             .keyboardShortcut("q", modifiers: .command)
             .help("Quit Inbox & Chill (⌘Q)")
             .accessibilityLabel("Quit Inbox & Chill")
         }
-        .font(.system(size: 12))
+        .font(.system(size: 14))
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .background(.bar)
+    }
+
+    /// Footer buttons are icon-only; without an explicit frame their hit
+    /// target is just the glyph's bounds (~14pt). Pad every one out to a
+    /// clickable 26×24.
+    private func footerIcon(_ systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .frame(width: 26, height: 24)
+            .contentShape(.rect)
     }
 
     /// ⌘-modified commands. Real `keyboardShortcut` buttons rather than
@@ -329,6 +346,17 @@ struct PanelView: View {
             moveSelection(1)
             return .handled
         }
+        // ←/→ step through the source filter chips. "All" is part of the
+        // cycle rather than a separate mode, so repeated presses always get
+        // you back to an unfiltered queue.
+        if character == KeyEquivalent.leftArrow.character {
+            moveFilter(-1)
+            return .handled
+        }
+        if character == KeyEquivalent.rightArrow.character {
+            moveFilter(1)
+            return .handled
+        }
         if character == KeyEquivalent.return.character {
             openSelected(andDone: false)
             return .handled
@@ -346,10 +374,14 @@ struct PanelView: View {
         // has started, every printable character — including e/s — extends
         // the filter instead (so e.g. "slack" can be typed).
         switch character {
-        case "e", "E" where filterText.isEmpty && !isFiltering:
+        // The `where` must repeat per pattern — a bare "e" pattern would
+        // match unconditionally and mark items done mid-filter.
+        case "e" where filterText.isEmpty && !isFiltering,
+            "E" where filterText.isEmpty && !isFiltering:
             doneSelected()
             return .handled
-        case "s", "S" where filterText.isEmpty && !isFiltering:
+        case "s" where filterText.isEmpty && !isFiltering,
+            "S" where filterText.isEmpty && !isFiltering:
             if selectedItem != nil { snoozeTargetUID = selectedUID }
             return .handled
         default:
@@ -360,6 +392,19 @@ struct PanelView: View {
             filterText.append(character)
             return .handled
         }
+    }
+
+    /// Cycles `selectedSourceFilter` across `nil` (All) plus every chip.
+    /// Clamped rather than wrapping: running off either end is a no-op, which
+    /// keeps ←/← predictable instead of teleporting to the far side.
+    private func moveFilter(_ delta: Int) {
+        guard focus != .filter else { return }
+        let options: [String?] = [nil] + chipSources.map { $0.id as String? }
+        guard options.count > 1 else { return }
+        let current = options.firstIndex(of: appState.selectedSourceFilter) ?? 0
+        let next = min(max(current + delta, 0), options.count - 1)
+        guard next != current else { return }
+        appState.selectedSourceFilter = options[next]
     }
 
     private func moveSelection(_ delta: Int) {
@@ -568,30 +613,59 @@ struct PanelSectionHeader: View {
     var disclosureExpanded: Bool?
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             if let disclosureExpanded {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .rotationEffect(.degrees(disclosureExpanded ? 90 : 0))
                     .foregroundStyle(.secondary)
             }
             Image(systemName: systemImage)
-                .font(.system(size: 9))
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .lineLimit(1)
             Text("\(count)")
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(.bar)
         .contentShape(.rect)
+    }
+}
+
+
+/// Gives the panel keyboard focus as soon as it opens.
+///
+/// `MenuBarExtra(.window)` presents its content in a window that isn't made
+/// key on its own, and a SwiftUI `.focusable()` view inside it doesn't become
+/// first responder until something is clicked. Until then `onKeyPress` never
+/// fires at all — so for a keyboard-first user the panel looks simply broken:
+/// arrows, E, S and ⏎ all do nothing until they click a row first.
+///
+/// Making the hosting window key on appear is what lets the focus SwiftUI
+/// already tracks (`@FocusState`) actually receive events.
+struct PanelKeyboardFocus: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { FocusNudger() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class FocusNudger: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            // Deferred: at viewDidMoveToWindow the window isn't yet on screen,
+            // and makeKey on an unmapped window is dropped silently.
+            DispatchQueue.main.async {
+                guard window.isVisible else { return }
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 }

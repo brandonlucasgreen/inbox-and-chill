@@ -66,10 +66,23 @@ protocol Connector: Actor {
     /// Start a push connection, delivering events via `emit`. Runs until
     /// cancelled. Default implementation returns immediately (poll-only).
     func run(emit: @escaping @Sendable (ConnectorEvent) -> Void) async
+
+    /// Whether the most recent `fetch()` returned the *entire* remote queue.
+    ///
+    /// A connector that pages through a large remote inbox and hits its page
+    /// cap must answer `false`, because `.remoteTruth` reads absence from a
+    /// snapshot as "the user dealt with this remotely" and archives it. On a
+    /// partial snapshot that inference is wrong — the item was merely on a
+    /// page we didn't fetch — and archiving it is destructive *and* sets up a
+    /// resurrection loop once the window slides and the item reappears.
+    func snapshotWasComplete() async -> Bool
 }
 
 extension Connector {
     nonisolated var pollInterval: TimeInterval { 45 }
+    /// Most connectors fetch everything in one call; only those that paginate
+    /// need to override this.
+    func snapshotWasComplete() async -> Bool { true }
     func markDone(externalID: String, payload: Data?) async throws {}
     func snooze(externalID: String, until: Date, payload: Data?) async throws {}
     func run(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {}

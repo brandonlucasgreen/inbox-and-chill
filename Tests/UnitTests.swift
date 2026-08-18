@@ -315,3 +315,460 @@ struct JSONPollerConnectorTests {
         }
     }
 }
+
+// MARK: - Claude Code hook command quoting
+// (Sources/App/Connectors/Local/ClaudeCodeIntegration.swift)
+//
+// Regression coverage for a silent, total failure of the Claude Code
+// integration: the app bundle is named "Inbox & Chill.app", and Claude Code
+// runs each hook command through a shell. Unquoted, the `&` split the command
+// in two — `.../Inbox` backgrounded, then `Chill.app/.../inchill claude-hook
+// stop` — so both halves died with "No such file or directory" and no item
+// ever reached the queue.
+
+struct ClaudeHookQuotingTests {
+    /// Runs `sh -c "printf %s <quoted>"` and returns what the shell resolved
+    /// the quoted path to — i.e. exactly the word the hook would execute.
+    private func shellExpansion(of path: String) throws -> String {
+        let quoted = ClaudeCodeIntegration.shellQuoted(path)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "printf %s \(quoted)"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    @Test("An ampersand in the bundle name survives the shell as one word")
+    func ampersandSurvivesShell() throws {
+        let path = "/Applications/Inbox & Chill.app/Contents/MacOS/inchill"
+        #expect(try shellExpansion(of: path) == path)
+    }
+
+    @Test("Spaces, parentheses and quotes all round-trip through the shell")
+    func awkwardCharactersRoundTrip() throws {
+        for path in [
+            "/Users/x/Library/Developer/Xcode/DerivedData/A-b/Build/Products/Debug/Inbox & Chill.app/Contents/MacOS/inchill",
+            "/tmp/it's a (weird) $path/inchill",
+            "/tmp/semi;colon && echo pwned/inchill",
+            "/usr/local/bin/inchill",
+        ] {
+            #expect(try shellExpansion(of: path) == path)
+        }
+    }
+
+    @Test("A quoted path cannot smuggle in a second command")
+    func noCommandInjection() throws {
+        let hostile = "/tmp/x'; touch /tmp/inchill-injection-canary; echo '"
+        let expanded = try shellExpansion(of: hostile)
+        #expect(expanded == hostile)
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: "/tmp/inchill-injection-canary"))
+    }
+}
+
+// MARK: - ntfy connector (Sources/App/Connectors/Ntfy/NtfyConnector.swift)
+
+struct NtfyConnectorTests {
+    private func frame(_ json: String) throws -> NtfyConnector.Frame {
+        try JSONDecoder().decode(NtfyConnector.Frame.self, from: Data(json.utf8))
+    }
+
+    // MARK: Frame → RemoteItem
+
+    @Test("A message with a title keeps the body as the snippet")
+    func titledMessage() throws {
+        let f = try frame(
+            #"{"id":"abc123","time":1700000000,"event":"message","topic":"deploys","title":"Deploy finished","message":"web@a1b2c3 is live"}"#)
+        let item = try #require(NtfyConnector.item(from: f))
+        #expect(item.externalID == "abc123")
+        #expect(item.title == "Deploy finished")
+        #expect(item.snippet == "web@a1b2c3 is live")
+        #expect(item.actorName == "deploys")
+        #expect(item.occurredAt == Date(timeIntervalSince1970: 1700000000))
+        #expect(item.kind == "ntfy_message")
+    }
+
+    @Test("With no title the body becomes the title and is not duplicated")
+    func untitledMessage() throws {
+        let f = try frame(#"{"id":"x","event":"message","message":"disk almost full"}"#)
+        let item = try #require(NtfyConnector.item(from: f))
+        #expect(item.title == "disk almost full")
+        #expect(item.snippet == nil)
+    }
+
+    @Test("Priority 4 and 5 are high-signal; 1-3 and the default are not")
+    func prioritySignal() throws {
+        for (priority, expected) in [(1, false), (2, false), (3, false), (4, true), (5, true)] {
+            let f = try frame(#"{"id":"p","event":"message","message":"m","priority":\#(priority)}"#)
+            #expect(try #require(NtfyConnector.item(from: f)).highSignal == expected)
+        }
+        // Absent priority means ntfy's default of 3.
+        let noPriority = try frame(#"{"id":"p","event":"message","message":"m"}"#)
+        #expect(try #require(NtfyConnector.item(from: noPriority)).highSignal == false)
+    }
+
+    @Test("click wins over attachment for the item URL")
+    func urlPreference() throws {
+        let both = try frame(
+            #"{"id":"u","event":"message","message":"m","click":"https://example.com/c","attachment":{"name":"f.png","url":"https://example.com/a"}}"#)
+        #expect(try #require(NtfyConnector.item(from: both)).url == "https://example.com/c")
+
+        let attachmentOnly = try frame(
+            #"{"id":"u","event":"message","message":"m","attachment":{"url":"https://example.com/a"}}"#)
+        #expect(
+            try #require(NtfyConnector.item(from: attachmentOnly)).url
+                == "https://example.com/a")
+    }
+
+    @Test("Control frames and empty messages produce no item")
+    func nonMessageFramesAreSkipped() throws {
+        for json in [
+            #"{"id":"1","event":"open","topic":"t"}"#,
+            #"{"id":"2","event":"keepalive","topic":"t"}"#,
+            #"{"id":"3","event":"poll_request","topic":"t"}"#,
+            // A message with neither title nor body has nothing to show.
+            #"{"id":"4","event":"message","topic":"t"}"#,
+            #"{"id":"5","event":"message","topic":"t","message":"   "}"#,
+        ] {
+            #expect(NtfyConnector.item(from: try frame(json)) == nil)
+        }
+    }
+
+    @Test("A frame with no event field is treated as a message")
+    func missingEventIsAMessage() throws {
+        let f = try frame(#"{"id":"m","message":"hello"}"#)
+        #expect(NtfyConnector.item(from: f) != nil)
+    }
+
+    /// Captured verbatim from ntfy.sh on 2026-08-18 (the response body of a
+    /// real publish). Guards against drift in the fields we depend on, and
+    /// proves unknown keys like `expires` decode harmlessly.
+    @Test("A real ntfy.sh payload decodes and maps correctly")
+    func realWirePayload() throws {
+        let captured = #"""
+            {"id":"xcKjTENRpmvh","time":1787069951,"expires":1787113151,"event":"message","topic":"inchill-smoketest","title":"Deploy finished","message":"web@a1b2c3 is live","priority":4,"tags":["rocket"],"click":"https://example.com/build/42"}
+            """#
+        let item = try #require(NtfyConnector.item(from: try frame(captured)))
+        #expect(item.externalID == "xcKjTENRpmvh")
+        #expect(item.title == "Deploy finished")
+        #expect(item.snippet == "web@a1b2c3 is live")
+        #expect(item.url == "https://example.com/build/42")
+        #expect(item.actorName == "inchill-smoketest")
+        #expect(item.highSignal)  // priority 4
+        #expect(item.occurredAt == Date(timeIntervalSince1970: 1787069951))
+    }
+
+    // MARK: Socket URL
+
+    @Test("https becomes wss and topics join with commas")
+    func socketURLBasics() {
+        let url = NtfyConnector.socketURL(
+            server: "https://ntfy.sh", topics: "deploys,alerts", since: "12h")
+        #expect(url?.absoluteString == "wss://ntfy.sh/deploys,alerts/ws?since=12h")
+    }
+
+    @Test("http downgrades to ws for a plain self-hosted instance")
+    func socketURLPlainHTTP() {
+        let url = NtfyConnector.socketURL(
+            server: "http://nas.local:8080", topics: "home", since: nil)
+        #expect(url?.absoluteString == "ws://nas.local:8080/home/ws")
+    }
+
+    @Test("A base path on the server URL is preserved")
+    func socketURLSubpath() {
+        for server in ["https://example.com/ntfy", "https://example.com/ntfy/"] {
+            let url = NtfyConnector.socketURL(server: server, topics: "t", since: nil)
+            #expect(url?.absoluteString == "wss://example.com/ntfy/t/ws")
+        }
+    }
+
+    @Test("Whitespace and blanks in the topic list are cleaned up")
+    func socketURLTopicHygiene() {
+        let url = NtfyConnector.socketURL(
+            server: "https://ntfy.sh", topics: " a , ,b ,", since: nil)
+        #expect(url?.absoluteString == "wss://ntfy.sh/a,b/ws")
+    }
+
+    @Test("No usable topics, or a non-HTTP scheme, yields no URL")
+    func socketURLRejections() {
+        #expect(NtfyConnector.socketURL(server: "https://ntfy.sh", topics: "", since: nil) == nil)
+        #expect(NtfyConnector.socketURL(server: "https://ntfy.sh", topics: " , ", since: nil) == nil)
+        #expect(NtfyConnector.socketURL(server: "ftp://ntfy.sh", topics: "t", since: nil) == nil)
+    }
+}
+
+// MARK: - Journal export (Sources/App/Journal/JournalWriter.swift)
+
+struct JournalWriterTests {
+    private let noon = Date(timeIntervalSince1970: 1787068800)  // 2026-08-18
+
+    private func entry(
+        action: JournalAction = .done, sourceName: String = "Linear",
+        title: String = "Fix the flaky sync test",
+        url: String? = "https://linear.app/x/ISS-1", detail: String? = nil
+    ) -> JournalEntry {
+        JournalEntry(
+            at: noon, action: action, sourceName: sourceName, title: title,
+            url: url, detail: detail)
+    }
+
+    // MARK: Path templating
+
+    @Test("Date tokens are replaced and a leading tilde expands")
+    func pathTokens() throws {
+        let url = try #require(
+            JournalWriter.resolvePath(
+                template: "~/Vault/daily/{{YYYY}}-{{MM}}-{{DD}}.md", date: noon))
+        #expect(url.path.hasSuffix("/Vault/daily/2026-08-18.md"))
+        #expect(url.path.hasPrefix("/"))
+        #expect(!url.path.contains("~"))
+    }
+
+    @Test("Months and days are zero-padded")
+    func pathZeroPadding() throws {
+        // 2026-01-05
+        let january = Date(timeIntervalSince1970: 1767625200)
+        let url = try #require(
+            JournalWriter.resolvePath(
+                template: "/tmp/{{YYYY}}/{{MM}}/{{DD}}.md", date: january))
+        #expect(url.path == "/tmp/2026/01/05.md")
+    }
+
+    @Test("A tilde inside the path is a literal directory name")
+    func pathInnerTildeIsLiteral() throws {
+        let url = try #require(
+            JournalWriter.resolvePath(template: "/tmp/a~b/note.md", date: noon))
+        #expect(url.path == "/tmp/a~b/note.md")
+    }
+
+    /// Obsidian's iCloud vault path is `iCloud~md~obsidian` — tildes in the
+    /// middle of the path, which must survive leading-tilde expansion.
+    @Test("Interior tildes survive when the path also starts with ~")
+    func pathObsidianICloudVault() throws {
+        let url = try #require(
+            JournalWriter.resolvePath(
+                template:
+                    "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain/daily-notes/{{YYYY}}-{{MM}}-{{DD}}.md",
+                date: noon))
+        #expect(url.path.contains("/iCloud~md~obsidian/"))
+        #expect(url.path.hasSuffix("/Brain/daily-notes/2026-08-18.md"))
+        #expect(!url.path.hasPrefix("~"))
+    }
+
+    @Test("Blank or relative templates resolve to nothing")
+    func pathRejections() {
+        #expect(JournalWriter.resolvePath(template: "", date: noon) == nil)
+        #expect(JournalWriter.resolvePath(template: "   ", date: noon) == nil)
+        #expect(JournalWriter.resolvePath(template: "notes/today.md", date: noon) == nil)
+    }
+
+    // MARK: Line rendering
+
+    @Test("A full entry renders every field in order")
+    func lineFull() {
+        let line = JournalWriter.line(for: entry(detail: "waited 11m"))
+        #expect(
+            line
+                == "- 12:00 · **done** · Linear · [Fix the flaky sync test](https://linear.app/x/ISS-1) · waited 11m"
+        )
+    }
+
+    @Test("With no URL the title stays plain text rather than a broken link")
+    func lineWithoutURL() {
+        let line = JournalWriter.line(for: entry(url: nil))
+        #expect(line == "- 12:00 · **done** · Linear · Fix the flaky sync test")
+        #expect(!line.contains("]("))
+
+        // An all-whitespace URL is the same case.
+        #expect(!JournalWriter.line(for: entry(url: "   ")).contains("]("))
+    }
+
+    @Test("Newlines in a title can't split one event across lines")
+    func lineFlattensMultilineTitles() {
+        let line = JournalWriter.line(
+            for: entry(title: "first line\nsecond line\n\nthird"))
+        #expect(line.components(separatedBy: "\n").count == 1)
+        #expect(line.contains("first line second line third"))
+    }
+
+    @Test("Brackets in a title can't break out of the markdown link")
+    func lineEscapesBrackets() {
+        let line = JournalWriter.line(for: entry(title: "[URGENT] ship it"))
+        #expect(line.contains("[(URGENT) ship it]("))
+    }
+
+    @Test("An empty source name degrades to a placeholder, not an empty field")
+    func lineEmptySource() {
+        #expect(JournalWriter.line(for: entry(sourceName: "")).contains("· unknown ·"))
+    }
+
+    // MARK: Dwell time
+
+    @Test("Waited renders minutes, hours and days; sub-minute is omitted")
+    func waitedFormatting() {
+        let start = Date(timeIntervalSince1970: 0)
+        #expect(JournalWriter.waited(from: start, to: start.addingTimeInterval(30)) == nil)
+        #expect(JournalWriter.waited(from: start, to: start.addingTimeInterval(660)) == "waited 11m")
+        #expect(
+            JournalWriter.waited(from: start, to: start.addingTimeInterval(3600 * 3 + 720))
+                == "waited 3h 12m")
+        #expect(
+            JournalWriter.waited(from: start, to: start.addingTimeInterval(86400 * 2 + 3600 * 4))
+                == "waited 2d 4h")
+    }
+
+    // MARK: Section insertion
+
+    @Test("An empty file gets the heading and the entry")
+    func insertIntoEmptyFile() {
+        let out = JournalWriter.insert(
+            line: "- a", into: "", heading: "## Inbox & Chill")
+        #expect(out == "## Inbox & Chill\n\n- a\n")
+    }
+
+    @Test("An existing section gains the entry after the entries already there")
+    func insertAppendsWithinSection() {
+        let existing = "# Daily\n\n## Inbox & Chill\n\n- first\n- second\n"
+        let out = JournalWriter.insert(
+            line: "- third", into: existing, heading: "## Inbox & Chill")
+        #expect(out.contains("- first\n- second\n- third"))
+    }
+
+    @Test("The entry lands inside our section, never in the next one")
+    func insertRespectsFollowingHeading() {
+        let existing = """
+            ## Inbox & Chill
+
+            - first
+
+            ## Notes
+
+            some other content
+            """
+        let out = JournalWriter.insert(
+            line: "- second", into: existing, heading: "## Inbox & Chill")
+        let lines = out.components(separatedBy: "\n")
+        let inserted = try! #require(lines.firstIndex(of: "- second"))
+        let notes = try! #require(lines.firstIndex(of: "## Notes"))
+        #expect(inserted < notes)
+        // And it must sit right after the existing entry, not after the blank.
+        #expect(lines[inserted - 1] == "- first")
+    }
+
+    @Test("A missing heading is created at the end without disturbing content")
+    func insertCreatesMissingSection() {
+        let existing = "# Daily 2026-08-18\n\nWoke up late.\n"
+        let out = JournalWriter.insert(
+            line: "- a", into: existing, heading: "## Inbox & Chill")
+        #expect(out == "# Daily 2026-08-18\n\nWoke up late.\n\n## Inbox & Chill\n\n- a\n")
+    }
+
+    @Test("Trailing blank lines don't accumulate when the section is created")
+    func insertNormalizesTrailingBlanks() {
+        let out = JournalWriter.insert(
+            line: "- a", into: "content\n\n\n\n", heading: "## H")
+        #expect(out == "content\n\n## H\n\n- a\n")
+    }
+
+    @Test("An empty heading setting still produces a valid section")
+    func insertBlankHeadingFallsBack() {
+        let out = JournalWriter.insert(line: "- a", into: "", heading: "   ")
+        #expect(out.contains("## Journal"))
+        #expect(out.contains("- a"))
+    }
+
+    @Test("Repeated inserts stay chronological and never duplicate a heading")
+    func insertIsRepeatable() {
+        var content = "# Daily\n"
+        for index in 1...4 {
+            content = JournalWriter.insert(
+                line: "- entry \(index)", into: content, heading: "## Inbox & Chill")
+        }
+        #expect(content.components(separatedBy: "## Inbox & Chill").count - 1 == 1)
+        let body = content.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }
+        #expect(body == ["- entry 1", "- entry 2", "- entry 3", "- entry 4"])
+    }
+}
+
+// MARK: - Journal permission diagnostics
+
+struct JournalPermissionMessageTests {
+    private func permissionError() -> Error {
+        NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+    }
+
+    @Test("An iCloud-container path explains Full Disk Access")
+    func iCloudContainerHint() {
+        let url = URL(
+            fileURLWithPath:
+                "/Users/x/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain/daily-notes/2026-08-18.md"
+        )
+        let message = (JournalWriter.explain(permissionError(), url: url) as? LocalizedError)?
+            .errorDescription ?? ""
+        #expect(message.contains("Full Disk Access"))
+        #expect(message.contains("another app's iCloud container"))
+        #expect(message.contains(url.path))
+    }
+
+    @Test("A plain protected path points at Files and Folders instead")
+    func filesAndFoldersHint() {
+        let url = URL(fileURLWithPath: "/Users/x/Documents/vault/2026-08-18.md")
+        let message = (JournalWriter.explain(permissionError(), url: url) as? LocalizedError)?
+            .errorDescription ?? ""
+        #expect(message.contains("Files and Folders"))
+        #expect(!message.contains("iCloud"))
+    }
+
+    @Test("A non-permission error is passed through untouched")
+    func nonPermissionErrorUnchanged() {
+        let original = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)
+        let out = JournalWriter.explain(original, url: URL(fileURLWithPath: "/tmp/a.md"))
+        #expect((out as NSError).code == NSFileWriteOutOfSpaceError)
+    }
+}
+
+// MARK: - Toggle-style connector fields (participating, etc.)
+
+struct ConnectorToggleFieldTests {
+    private var participating: ConnectorKindDescriptor.Field {
+        ConnectorCatalog.descriptor(for: "github")!
+            .fields.first { $0.key == "participating" }!
+    }
+
+    @Test("GitHub exposes participating as a toggle that defaults on")
+    func participatingFieldShape() {
+        let field = participating
+        #expect(field.isToggle)
+        #expect(field.defaultOn)
+        #expect(!field.isSecret)
+    }
+
+    /// An absent key means the user has never touched the setting, which must
+    /// resolve to the descriptor's default rather than to `false` — otherwise
+    /// adding a toggle silently flips behaviour for every existing source.
+    @Test("An unwritten toggle resolves to its default, not false")
+    func unwrittenToggleUsesDefault() {
+        #expect(participating.boolValue(in: [:]))
+        #expect(participating.boolValue(in: ["other": "false"]))
+    }
+
+    @Test("An explicit value always wins over the default")
+    func explicitValueWins() {
+        #expect(!participating.boolValue(in: ["participating": "false"]))
+        #expect(participating.boolValue(in: ["participating": "true"]))
+    }
+
+    /// An empty string is what the editor sheet can persist for a field the
+    /// user never touched, so it must agree with what the checkbox displays —
+    /// the default — rather than reading as off.
+    @Test("Empty reads as the default; other unparseable values read as off")
+    func emptyMatchesTheCheckbox() {
+        #expect(participating.boolValue(in: ["participating": ""]))
+        #expect(!participating.boolValue(in: ["participating": "yes"]))
+    }
+}
