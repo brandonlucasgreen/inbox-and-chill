@@ -67,6 +67,10 @@ enum ConnectorCatalog {
                     key: "saveEmoji", label: "Save Emoji", isSecret: false,
                     placeholder: "pushpin",
                     help: "Reacting with this emoji saves a message to the queue"),
+                .init(
+                    key: "searchTerms", label: "Keyword Watch", isSecret: false,
+                    placeholder: "@you, your project, a customer name",
+                    help: "Comma-separated. Polls Slack search every 5 minutes and queues matches from the last 24 hours — including public channels you're NOT in, which events can't see and Slack itself won't notify you about. Needs the search:read scope (re-install the app after adding it). Blank turns it off."),
             ],
             authNote: "Why paste tokens? Your workspace app's install page *is* Slack's OAuth flow — it ends by displaying the user token. A native app can't run Slack's OAuth itself: the token exchange requires your client secret (Slack has no PKCE public-client mode), and redirect URLs must be HTTPS, so there's no loopback to come back to. The app-level token never comes from OAuth at all.\n\nOnly the user token is required. Adding the app-level token turns on Socket Mode, which is the only supported way to receive channel mentions — Slack publishes no API for “messages that mention me”, so without it you get DM unreads, emoji saves and read-state auto-clear, but not mentions. Both tokens live in your Keychain and never leave this Mac."),
         .init(

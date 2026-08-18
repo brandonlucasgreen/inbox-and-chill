@@ -71,6 +71,13 @@ actor SlackConnector: Connector {
     private var mentions: [String: [String: RemoteItem]] = [:]
     /// External id → emoji-save item.
     private var saves: [String: RemoteItem] = [:]
+    /// Channel id → message ts → keyword-watch hit (from Slack search).
+    private var watchHits: [String: [String: RemoteItem]] = [:]
+    /// `channel:ts` already emitted this process, so a re-poll over the same
+    /// 24-hour window doesn't churn the store every five minutes.
+    private var seenWatchHits: Set<String> = []
+    /// Set when Slack rejects the search in a way retrying can't fix.
+    private var searchDisabled = false
     /// Newest message ts we've seen per channel — what `conversations.mark`
     /// marks up to, and what read-state comparisons measure against.
     private var latestTS: [String: String] = [:]
@@ -83,10 +90,26 @@ actor SlackConnector: Connector {
     /// Concurrency cap on seed `conversations.info` fan-out (rate-limit hygiene).
     private static let seedConcurrency = 5
 
-    init(sourceID: String = "slack", saveEmoji: String = "pushpin") {
+    /// How often the keyword watch polls Slack search.
+    private static let searchInterval: Duration = .seconds(300)
+    /// How far back one poll looks. Re-finding the same message is harmless
+    /// (see `searchLoop`), so this only needs to comfortably exceed the poll
+    /// interval and survive the app being closed for a while.
+    private static let searchWindow: TimeInterval = 24 * 60 * 60
+    /// Bounds the cost of a poll: it is one `search.messages` call per term.
+    private static let maxSearchTerms = 10
+    /// Matches requested per term. Slack sorts newest-first, so a term noisier
+    /// than this loses only the oldest hits in the window.
+    private static let searchCount = 20
+
+    /// Terms to watch for across the workspace, from settings.
+    private let searchTerms: [String]
+
+    init(sourceID: String = "slack", saveEmoji: String = "pushpin", searchTerms: String = "") {
         self.sourceID = sourceID
         let normalised = Self.normalizeEmoji(saveEmoji)
         self.saveEmoji = normalised.isEmpty ? "pushpin" : normalised
+        self.searchTerms = Self.parseSearchTerms(searchTerms)
     }
 
     // MARK: - Connector
@@ -101,16 +124,26 @@ actor SlackConnector: Connector {
             Array(unreadDMs.values)
             + mentions.values.flatMap { $0.values }
             + Array(saves.values)
+            + watchHits.values.flatMap { $0.values }
         return all.sorted { $0.occurredAt > $1.occurredAt }
     }
 
     func markDone(externalID: String, payload: Data?) async throws {
-        let api = try requireAPI()
         guard let ref = Self.reference(externalID: externalID, payload: payload) else {
             throw SlackError(
                 errorDescription: "Slack: don't know how to complete \(externalID).")
         }
 
+        // A keyword hit can live in a channel you're not a member of, where
+        // `conversations.mark` would fail — and where there is no read state
+        // to move in the first place. Clearing it locally *is* the verb, so it
+        // resolves before we even require a token.
+        if case .watch(let ts) = ref.kind {
+            watchHits[ref.channel]?.removeValue(forKey: ts)
+            return
+        }
+
+        let api = try requireAPI()
         switch ref.kind {
         case .dm:
             // Mark the conversation read up to the newest message we know of.
@@ -144,6 +177,9 @@ actor SlackConnector: Connector {
                 // Already gone (removed in Slack, or a double-tap here).
             }
             saves.removeValue(forKey: externalID)
+
+        case .watch:
+            break  // Cleared above; it needs no Slack call.
         }
     }
 
@@ -161,7 +197,14 @@ actor SlackConnector: Connector {
                 // emoji saves and read-state auto-clear are all pollable, so
                 // the source still works. This loop stands in for the socket.
                 emit(.status(.ok(.now)))
-                try await pollOnlyLoop(emit: emit)
+                // The keyword watch is pure Web API, so unlike mentions it
+                // works fine without an app-level token.
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask { [self] in try await self.pollOnlyLoop(emit: emit) }
+                    group.addTask { [self] in await self.searchLoop(emit: emit) }
+                    _ = try await group.next()
+                    group.cancelAll()
+                }
                 return
             }
 
@@ -178,6 +221,9 @@ actor SlackConnector: Connector {
                 }
                 group.addTask { [self] in
                     await self.readStateLoop(emit: emit)
+                }
+                group.addTask { [self] in
+                    await self.searchLoop(emit: emit)
                 }
                 _ = try await group.next()
                 group.cancelAll()
@@ -294,6 +340,165 @@ actor SlackConnector: Connector {
                 break  // interactive / slash_commands: not our surface.
             }
         }
+    }
+
+    // MARK: - Keyword watch
+
+    /// Polls Slack search for the configured terms.
+    ///
+    /// This is the only path that can see a message in a **public channel you
+    /// are not a member of** — `message.channels` is delivered for your
+    /// memberships only, so events structurally cannot carry it, and Slack
+    /// itself won't notify you either. Search is workspace-wide, so it closes
+    /// that blind spot and generalises to arbitrary keywords at the same time.
+    ///
+    /// Deliberately non-throwing, like `readStateLoop`: a search hiccup (an
+    /// expired scope, a rate limit) must not tear down the socket and take
+    /// DMs and mentions with it.
+    ///
+    /// Re-finding a message is safe by construction. A hit's `occurredAt` is
+    /// the message timestamp, which is always older than the moment you
+    /// dismissed it, so `Store.resurrectIfNeeded` leaves a done item done —
+    /// `seenWatchHits` is an efficiency measure, not a correctness one.
+    private func searchLoop(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
+        guard !searchTerms.isEmpty else { return }
+        while !Task.isCancelled, !searchDisabled {
+            await runSearch(emit: emit)
+            do { try await Task.sleep(for: Self.searchInterval) } catch { return }
+        }
+    }
+
+    private func runSearch(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
+        guard let api, !searchTerms.isEmpty else { return }
+        let cutoff = Date().addingTimeInterval(-Self.searchWindow)
+
+        var fresh: [RemoteItem] = []
+        for term in searchTerms {
+            guard !Task.isCancelled else { return }
+            let query = Self.searchQuery(term: term, after: cutoff)
+            let response: SlackJSON
+            do {
+                response = try await api.call(
+                    "search.messages",
+                    [
+                        "query": query, "count": String(Self.searchCount),
+                        "sort": "timestamp", "sort_dir": "desc",
+                    ])
+            } catch let error as SlackError
+                where Self.permanentSearchFailures.contains(error.slackCode ?? "")
+            {
+                // Not transient, and silence here would look identical to
+                // "nothing matched" forever. Say what's wrong and stop.
+                searchDisabled = true
+                emit(.status(.error(Self.searchScopeAdvice(code: error.slackCode ?? ""))))
+                return
+            } catch {
+                continue  // Transient (rate limit, network): try the next tick.
+            }
+
+            for match in response["messages"]["matches"].array ?? [] {
+                guard
+                    let hit = Self.watchHit(
+                        from: match, term: term, selfUserID: selfUserID, notBefore: cutoff)
+                else { continue }
+                let key = "\(hit.channel):\(hit.ts)"
+                guard !seenWatchHits.contains(key) else { continue }
+                // A channel you're in already produces a real mention item via
+                // events; don't shadow it with a search copy.
+                guard mentions[hit.channel]?[hit.ts] == nil else { continue }
+                seenWatchHits.insert(key)
+                watchHits[hit.channel, default: [:]][hit.ts] = hit.item
+                fresh.append(hit.item)
+            }
+        }
+        if !fresh.isEmpty { emit(.upsert(fresh)) }
+    }
+
+    /// Slack errors that re-polling will never fix.
+    private static let permanentSearchFailures: Set<String> = [
+        "missing_scope", "not_allowed_token_type", "invalid_auth",
+        "account_inactive", "token_revoked",
+    ]
+
+    nonisolated static func searchScopeAdvice(code: String) -> String {
+        switch code {
+        case "missing_scope", "not_allowed_token_type":
+            return
+                """
+                Slack Keyword Watch needs the `search:read` scope, which this token doesn't have (\(code)).                 Add it under OAuth & Permissions, reinstall the app to your workspace, then paste the new                 user token here. Clear the Keyword Watch field to turn the feature off instead.
+                """
+        default:
+            return "Slack rejected the keyword search (\(code)). Re-check the user token."
+        }
+    }
+
+    /// Splits the settings string into watch terms.
+    ///
+    /// Commas and newlines both separate, so the field accepts a typed list or
+    /// a pasted one. Case-insensitively deduped (Slack search is
+    /// case-insensitive, so two spellings would just cost an extra call) and
+    /// capped, because every term is one API request per poll.
+    nonisolated static func parseSearchTerms(_ raw: String) -> [String] {
+        var seen = Set<String>()
+        var terms: [String] = []
+        for piece in raw.split(whereSeparator: { $0 == "," || $0.isNewline }) {
+            let term = piece.trimmingCharacters(in: .whitespaces)
+            guard !term.isEmpty, seen.insert(term.lowercased()).inserted else { continue }
+            terms.append(term)
+            if terms.count == maxSearchTerms { break }
+        }
+        return terms
+    }
+
+    /// Builds one `search.messages` query.
+    ///
+    /// A multi-word term is quoted so it stays a phrase rather than an OR of
+    /// its words. `after:` is date-granular in Slack and *exclusive*, so it is
+    /// deliberately widened by a day and the precise cutoff enforced against
+    /// each match's timestamp in `watchHit`.
+    nonisolated static func searchQuery(term: String, after: Date) -> String {
+        let calendar = Calendar(identifier: .gregorian)
+        let widened = after.addingTimeInterval(-TimeInterval(24 * 60 * 60))
+        let parts = calendar.dateComponents([.year, .month, .day], from: widened)
+        let stamp = String(
+            format: "%04d-%02d-%02d", parts.year ?? 1970, parts.month ?? 1, parts.day ?? 1)
+        let needsQuotes = term.contains(" ") && !term.hasPrefix("\"")
+        let phrase = needsQuotes ? "\"\(term)\"" : term
+        return "\(phrase) after:\(stamp)"
+    }
+
+    /// Maps one `search.messages` match to a queue item.
+    ///
+    /// Returns nil for anything outside the window, authored by you, or
+    /// missing the ids a triage verb needs — pure, so the mapping is testable
+    /// without a workspace.
+    nonisolated static func watchHit(
+        from match: SlackJSON, term: String, selfUserID: String, notBefore: Date
+    ) -> (channel: String, ts: String, item: RemoteItem)? {
+        guard let ts = match["ts"].nonEmptyString,
+            let channel = match["channel"]["id"].nonEmptyString,
+            let occurredAt = SlackTS.date(ts), occurredAt >= notBefore
+        else { return nil }
+        // You writing your own keyword is not news.
+        if !selfUserID.isEmpty, match["user"].nonEmptyString == selfUserID { return nil }
+
+        let who =
+            match["username"].nonEmptyString
+            ?? match["user"].nonEmptyString ?? "Someone"
+        let channelLabel = match["channel"]["name"].nonEmptyString ?? "a channel"
+        return (
+            channel, ts,
+            RemoteItem(
+                externalID: "watch-\(channel)-\(ts)",
+                kind: "keyword_watch",
+                title: "“\(term)” in #\(channelLabel)",
+                snippet: truncate(match["text"].nonEmptyString, 100),
+                url: match["permalink"].nonEmptyString,
+                actorName: who,
+                occurredAt: occurredAt,
+                highSignal: true,
+                payload: payload(channel: channel, ts: ts))
+        )
     }
 
     /// Periodically re-checks Slack's read state for channels that currently
@@ -874,6 +1079,7 @@ actor SlackConnector: Connector {
         case dm
         case mention(ts: String)
         case save(ts: String)
+        case watch(ts: String)
     }
 
     private struct Reference {
@@ -912,6 +1118,9 @@ actor SlackConnector: Connector {
         case "save":
             guard let ts else { return nil }
             return Reference(kind: .save(ts: ts), channel: channel)
+        case "watch":
+            guard let ts else { return nil }
+            return Reference(kind: .watch(ts: ts), channel: channel)
         default:
             return nil
         }

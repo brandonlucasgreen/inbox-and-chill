@@ -670,7 +670,8 @@ enum ConnectorFactory {
                 sourceID: config.id,
                 saveEmoji: settings["saveEmoji"].flatMap {
                     $0.isEmpty ? nil : $0
-                } ?? "pushpin")
+                } ?? "pushpin",
+                searchTerms: settings["searchTerms"] ?? "")
         default:
             return nil
         }

@@ -45,6 +45,14 @@ oauth_config:
       - users:read         # display names for DM titles
       - reactions:read     # emoji-save gesture (reaction events)
       - reactions:write    # un-save = remove my own reaction
+      - search:read        # Keyword Watch: the ONLY way to see a message in a
+                           # public channel I'm not a member of. Events are
+                           # scoped to my memberships, so a mention (or any
+                           # keyword) in a room I'm not in is invisible to
+                           # message.channels — and Slack doesn't notify me
+                           # about it either. Optional: leave the scope off and
+                           # everything else still works, you just can't use
+                           # the Keyword Watch field.
 settings:
   event_subscriptions:
     user_events:
