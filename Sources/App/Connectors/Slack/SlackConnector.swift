@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Slack, as a push connector (PLAN.md §6.1).
 ///
@@ -189,42 +190,56 @@ actor SlackConnector: Connector {
         emit(.status(.connecting))
         do {
             let appToken = try await connect()
-            try await seed(emit: emit)
 
-            guard let appToken else {
-                // User token only. Channel mentions are unavailable — Slack
-                // has no polling API for them (see `seed`) — but DM unreads,
-                // emoji saves and read-state auto-clear are all pollable, so
-                // the source still works. This loop stands in for the socket.
-                emit(.status(.ok(.now)))
-                // The keyword watch is pure Web API, so unlike mentions it
-                // works fine without an app-level token.
-                try await withThrowingTaskGroup(of: Void.self) { group in
-                    group.addTask { [self] in try await self.pollOnlyLoop(emit: emit) }
-                    group.addTask { [self] in await self.searchLoop(emit: emit) }
-                    _ = try await group.next()
-                    group.cancelAll()
-                }
-                return
-            }
-
-            let socket = try await SlackSocket.open(appToken: appToken)
-            defer { socket.close() }
-            emit(.status(.ok(.now)))
-
-            // Two children: the socket reader, and the read-state safety net.
-            // Whichever finishes first ends this run; the SyncEngine restarts
-            // us after 5s.
             try await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask { [self] in
-                    try await self.readLoop(socket: socket, emit: emit)
+                // The keyword watch is pure Web API — it needs nothing that
+                // seeding, the socket, or the app-level token provide. It runs
+                // as a sibling of all of that, deliberately: `seed()` walks
+                // every conversation in the workspace, which on a large one
+                // takes minutes, and hanging the watch behind it meant it
+                // never ran at all.
+                //
+                // Only added when there is something to watch for. An empty
+                // search would return immediately, and in a task group the
+                // first child to finish tears down the run — so an unused
+                // keyword watch would restart the whole connector every 5s.
+                if !searchTerms.isEmpty {
+                    group.addTask { [self] in await self.searchLoop(emit: emit) }
                 }
+
                 group.addTask { [self] in
-                    await self.readStateLoop(emit: emit)
+                    try await self.seed(emit: emit)
+
+                    guard let appToken else {
+                        // User token only. Channel mentions are unavailable —
+                        // Slack has no polling API for them (see `seed`) — but
+                        // DM unreads, emoji saves and read-state auto-clear are
+                        // all pollable, so the source still works.
+                        emit(.status(.ok(.now)))
+                        try await self.pollOnlyLoop(emit: emit)
+                        return
+                    }
+
+                    let socket = try await SlackSocket.open(appToken: appToken)
+                    defer { socket.close() }
+                    emit(.status(.ok(.now)))
+
+                    // The socket reader and the read-state safety net;
+                    // whichever finishes first ends this branch.
+                    try await withThrowingTaskGroup(of: Void.self) { inner in
+                        inner.addTask { [self] in
+                            try await self.readLoop(socket: socket, emit: emit)
+                        }
+                        inner.addTask { [self] in
+                            await self.readStateLoop(emit: emit)
+                        }
+                        _ = try await inner.next()
+                        inner.cancelAll()
+                    }
                 }
-                group.addTask { [self] in
-                    await self.searchLoop(emit: emit)
-                }
+
+                // Whichever child finishes first ends this run; the SyncEngine
+                // restarts us after 5s.
                 _ = try await group.next()
                 group.cancelAll()
             }
@@ -232,6 +247,11 @@ actor SlackConnector: Connector {
             return
         } catch {
             if Task.isCancelled { return }
+            // A connector that dies here restarts every 5s forever. Without
+            // this line that loop is completely silent — the failure only
+            // ever reached the status dot.
+            Self.searchLog.error(
+                "slack run() failed: \(String(describing: error), privacy: .public)")
             if error is URLError {
                 // Transient network trouble reads as reconnecting, not broken.
                 emit(.status(.connecting))
@@ -360,16 +380,27 @@ actor SlackConnector: Connector {
     /// the message timestamp, which is always older than the moment you
     /// dismissed it, so `Store.resurrectIfNeeded` leaves a done item done —
     /// `seenWatchHits` is an efficiency measure, not a correctness one.
+    private static let searchLog = Logger(
+        subsystem: "lol.bgreen.inboxandchill", category: "keyword-watch")
+
     private func searchLoop(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
-        guard !searchTerms.isEmpty else { return }
-        while !Task.isCancelled, !searchDisabled {
-            await runSearch(emit: emit)
+        Self.searchLog.info(
+            "keyword watch started, terms=\(self.searchTerms.count, privacy: .public)")
+        // Never returns of its own accord: this runs as a task-group child, and
+        // a child that finishes cancels its siblings. When the watch is
+        // disabled by a permanent Slack rejection it parks here rather than
+        // completing, so the rest of the connector keeps running.
+        while !Task.isCancelled {
+            if !searchDisabled { await runSearch(emit: emit) }
             do { try await Task.sleep(for: Self.searchInterval) } catch { return }
         }
     }
 
     private func runSearch(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
-        guard let api, !searchTerms.isEmpty else { return }
+        guard let api, !searchTerms.isEmpty else {
+            Self.searchLog.error("runSearch bailed: api=\(self.api != nil, privacy: .public)")
+            return
+        }
         let cutoff = Date().addingTimeInterval(-Self.searchWindow)
 
         var fresh: [RemoteItem] = []
@@ -396,7 +427,10 @@ actor SlackConnector: Connector {
                 continue  // Transient (rate limit, network): try the next tick.
             }
 
-            for match in response["messages"]["matches"].array ?? [] {
+            let matches = response["messages"]["matches"].array ?? []
+            Self.searchLog.info(
+                "term=\(term, privacy: .public) matches=\(matches.count, privacy: .public)")
+            for match in matches {
                 guard
                     let hit = Self.watchHit(
                         from: match, term: term, selfUserID: selfUserID, notBefore: cutoff)
@@ -411,6 +445,7 @@ actor SlackConnector: Connector {
                 fresh.append(hit.item)
             }
         }
+        Self.searchLog.info("queueing \(fresh.count, privacy: .public) keyword hits")
         if !fresh.isEmpty { emit(.upsert(fresh)) }
     }
 
@@ -467,6 +502,14 @@ actor SlackConnector: Connector {
         return "\(phrase) after:\(stamp)"
     }
 
+    /// True for Slack ids masquerading as a channel name (`U…`, `D…`, `C…`,
+    /// `G…` followed by uppercase alphanumerics), which is what search returns
+    /// for direct and group messages.
+    nonisolated static func isRawChannelID(_ name: String) -> Bool {
+        guard name.count >= 8, let first = name.first, "UDCG".contains(first) else { return false }
+        return name.dropFirst().allSatisfy { $0.isUppercase || $0.isNumber }
+    }
+
     /// Maps one `search.messages` match to a queue item.
     ///
     /// Returns nil for anything outside the window, authored by you, or
@@ -485,7 +528,12 @@ actor SlackConnector: Connector {
         let who =
             match["username"].nonEmptyString
             ?? match["user"].nonEmptyString ?? "Someone"
-        let channelLabel = match["channel"]["name"].nonEmptyString ?? "a channel"
+        // Slack returns a raw id as the "name" for DMs and group DMs, which
+        // would render as "#U4NUMLRJQ". Anything that looks like an id gets
+        // described instead of printed.
+        let rawName = match["channel"]["name"].nonEmptyString
+        let channelLabel = rawName.map { Self.isRawChannelID($0) ? "a direct message" : $0 }
+            ?? "a channel"
         return (
             channel, ts,
             RemoteItem(

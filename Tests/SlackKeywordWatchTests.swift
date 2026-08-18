@@ -174,6 +174,23 @@ struct SlackKeywordWatchTests {
         #expect(SlackConnector.searchScopeAdvice(code: "weird_new_code").contains("weird_new_code"))
     }
 
+    /// Slack hands back a raw id as the channel "name" for DMs, which would
+    /// otherwise render as `“brandon” in #U4NUMLRJQ`.
+    @Test func directMessagesAreDescribedRatherThanPrintedAsAnID() {
+        let dm = match(
+            "{ \"ts\": \"\(insideWindow)\", \"user\": \"U9\", \"channel\": { \"id\": \"D1\", \"name\": \"U4NUMLRJQ\" } }")
+        let item = SlackConnector.watchHit(
+            from: dm, term: "brandon", selfUserID: "U001", notBefore: cutoff)
+        #expect(item?.item.title == "“brandon” in #a direct message")
+    }
+
+    @Test func realChannelNamesAreLeftAlone() {
+        #expect(!SlackConnector.isRawChannelID("buffer-build-week-2026"))
+        #expect(!SlackConnector.isRawChannelID("prod-apps"))
+        #expect(SlackConnector.isRawChannelID("U4NUMLRJQ"))
+        #expect(SlackConnector.isRawChannelID("D08ABCDEF12"))
+    }
+
     @Test func anUnnamedChannelStillReadsAsProse() {
         let unnamed = match(
             "{ \"ts\": \"\(insideWindow)\", \"user\": \"U9\", \"channel\": { \"id\": \"C1\" } }")
