@@ -44,6 +44,9 @@ struct SettingsView: View {
 
             SourcesPane()
                 .tabItem { Label("Sources", systemImage: "tray.2") }
+
+            AboutPane()
+                .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 640, height: 480)
     }

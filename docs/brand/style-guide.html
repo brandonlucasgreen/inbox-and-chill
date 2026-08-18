@@ -1,0 +1,543 @@
+<title>Inbox &amp; Chill Brand Kit</title>
+<style>
+  /* ---- Tokens. The bare :root carries the complete light palette; the two
+         blocks below redefine only the tokens, so nothing is ever defined
+         solely inside a media query. ---- */
+  :root {
+    --ground:   #F7F5F0;
+    --raised:   #FFFFFF;
+    --sunken:   #EFEBE4;
+    --text:     #200220;
+    --dim:      #6E5F6E;
+    --border:   #E2DCD4;
+    --hairline: #EAE4DC;
+    --accent:   #2A0B2A;
+    --warm:     #E8A33D;
+    --link:     #1565C0;
+    --shadow:   0 1px 2px rgba(32,2,32,.06), 0 6px 20px rgba(32,2,32,.05);
+
+    --f-body: system-ui, -apple-system, "Helvetica Neue", sans-serif;
+    --f-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --measure: 66ch;
+    --pad: clamp(1.25rem, 4vw, 3rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #190118;
+      --raised:   #2A0B2A;
+      --sunken:   #120010;
+      --text:     #F5F4F0;
+      --dim:      #B3A6B3;
+      --border:   #3A203A;
+      --hairline: #32173182;
+      --accent:   #E8A33D;
+      --link:     #8E93AE;
+      --shadow:   0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:   #190118;
+    --raised:   #2A0B2A;
+    --sunken:   #120010;
+    --text:     #F5F4F0;
+    --dim:      #B3A6B3;
+    --border:   #3A203A;
+    --hairline: #32173182;
+    --accent:   #E8A33D;
+    --link:     #8E93AE;
+    --shadow:   0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 78rem; margin: 0 auto; padding: 0 var(--pad) 6rem; }
+
+  /* ---- Eyebrow / label utility. Mono + tracking is the utility voice. ---- */
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: .7rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin: 0 0 .75rem;
+  }
+
+  h1, h2, h3 { text-wrap: balance; margin: 0; letter-spacing: -.025em; }
+  h1 { font-size: clamp(2.4rem, 6vw, 3.6rem); font-weight: 600; line-height: 1.05; }
+  h2 { font-size: clamp(1.5rem, 3vw, 1.9rem); font-weight: 600; line-height: 1.15; }
+  h3 { font-size: 1.05rem; font-weight: 600; letter-spacing: -.01em; }
+  p  { margin: 0; max-width: var(--measure); }
+  a  { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--warm); outline-offset: 3px; border-radius: 3px;
+  }
+  code, .mono { font-family: var(--f-mono); font-size: .88em; }
+
+  /* ---- Hero ---- */
+  .hero {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: clamp(1.5rem, 4vw, 3rem);
+    align-items: center;
+    padding: clamp(2.5rem, 7vw, 5rem) 0 clamp(2rem, 5vw, 3rem);
+  }
+  .hero-icon { width: clamp(112px, 16vw, 168px); height: auto; display: block; filter: drop-shadow(0 8px 24px rgba(32,2,32,.22)); }
+  .hero h1 { margin-bottom: .6rem; }
+  .lede { font-size: clamp(1.05rem, 2vw, 1.25rem); color: var(--dim); }
+  @media (max-width: 620px) { .hero { grid-template-columns: 1fr; } }
+
+  /* ---- Section rhythm ---- */
+  section { padding: clamp(2.5rem, 5vw, 3.75rem) 0; border-top: 1px solid var(--hairline); }
+  .sec-head { margin-bottom: 2rem; }
+  .sec-head p { margin-top: .75rem; color: var(--dim); }
+
+  .stack { display: flex; flex-direction: column; gap: 1.5rem; }
+  .grid  { display: grid; gap: 1.25rem; }
+
+  /* ---- Cards ---- */
+  .card {
+    background: var(--raised);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+  }
+
+  /* ---- Icon size ramp: real pixel sizes, so the ramp is evidence ---- */
+  .ramp { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2rem; }
+  .ramp figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+  .ramp figcaption { font-family: var(--f-mono); font-size: .7rem; color: var(--dim); }
+  .ramp svg { display: block; }
+
+  /* ---- Menu bar demo ---- */
+  .bars { display: grid; gap: .75rem; }
+  .bar {
+    display: flex; align-items: center; gap: 1.5rem;
+    padding: .55rem 1rem; border-radius: 8px;
+    font-family: var(--f-body); font-size: .82rem;
+    border: 1px solid var(--border);
+  }
+  .bar--light { background: #F2F2F2; color: #111; }
+  .bar--dark  { background: #1E1E1E; color: #FFF; }
+  .bar-item { display: inline-flex; align-items: center; gap: .3rem; }
+  .bar-item svg { width: 18px; height: 18px; }
+  .bar-note { margin-left: auto; opacity: .55; font-size: .72rem; font-family: var(--f-mono); }
+
+  /* ---- Swatches ---- */
+  .themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+  .swatches { display: grid; gap: .25rem; margin-top: 1rem; }
+  .sw {
+    display: grid; grid-template-columns: 2.5rem 1fr auto;
+    align-items: center; gap: .9rem;
+    padding: .45rem .5rem; border-radius: 8px;
+    background: none; border: 0; width: 100%; text-align: left;
+    color: inherit; font: inherit; cursor: pointer;
+  }
+  .sw:hover { background: var(--sunken); }
+  .sw-chip { width: 2.5rem; height: 2rem; border-radius: 6px; border: 1px solid rgba(128,110,128,.35); }
+  .sw-name { font-family: var(--f-mono); font-size: .82rem; }
+  .sw-use  { display: block; font-family: var(--f-body); font-size: .78rem; color: var(--dim); letter-spacing: 0; }
+  .sw-hex  { font-family: var(--f-mono); font-size: .78rem; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  /* ---- Do / Don't ---- */
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
+  .rules ul { margin: .75rem 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .5rem; }
+  .rules li { max-width: 46ch; }
+  .tag { font-family: var(--f-mono); font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; }
+  .tag--do   { color: #3F7A4B; }
+  .tag--dont { color: #A8442F; }
+  :root[data-theme="dark"] .tag--do, :root:not([data-theme="light"]) .tag--do { color: #7FBF8C; }
+  :root[data-theme="dark"] .tag--dont, :root:not([data-theme="light"]) .tag--dont { color: #E08B72; }
+
+  /* ---- Type specimen ---- */
+  .spec { display: flex; flex-direction: column; gap: 1.25rem; }
+  .spec-row { display: grid; grid-template-columns: 8rem 1fr; gap: 1.25rem; align-items: baseline; }
+  .spec-label { font-family: var(--f-mono); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  @media (max-width: 620px) { .spec-row { grid-template-columns: 1fr; gap: .3rem; } }
+  kbd {
+    font-family: var(--f-mono); font-size: .82em;
+    border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 5px; padding: .1em .4em; background: var(--sunken);
+  }
+
+  /* ---- Table ---- */
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  th, td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { font-family: var(--f-mono); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 400; }
+
+  .warm-note { color: var(--warm); font-weight: 600; }
+  .toast {
+    position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%) translateY(1rem);
+    background: var(--text); color: var(--ground);
+    padding: .5rem 1rem; border-radius: 100vmax; font-size: .82rem;
+    opacity: 0; pointer-events: none; transition: opacity 150ms cubic-bezier(.22,1,.36,1), transform 150ms cubic-bezier(.22,1,.36,1);
+  }
+  .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<!-- Reusable hand glyph. currentColor everywhere, so the menu bar demo tints
+     the same way a macOS template image does. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="hand-solid">
+      <g fill="currentColor" stroke="currentColor" stroke-linecap="round">
+        <line x1="27" y1="20" x2="41" y2="52" stroke-width="16"/>
+        <line x1="65" y1="18" x2="54" y2="52" stroke-width="16"/>
+        <rect x="55" y="48" width="25" height="30" rx="12" stroke="none"/>
+        <rect x="24" y="47" width="52" height="33" rx="15" stroke="none"/>
+        <line x1="26" y1="61" x2="48" y2="71" stroke-width="18"/>
+        <rect x="37" y="70" width="28" height="26" rx="9" stroke="none"/>
+      </g>
+    </g>
+    <mask id="hand-hollow">
+      <g fill="#fff" stroke="#fff" stroke-linecap="round">
+        <line x1="27" y1="20" x2="41" y2="52" stroke-width="16"/>
+        <line x1="65" y1="18" x2="54" y2="52" stroke-width="16"/>
+        <rect x="55" y="48" width="25" height="30" rx="12" stroke="none"/>
+        <rect x="24" y="47" width="52" height="33" rx="15" stroke="none"/>
+        <line x1="26" y1="61" x2="48" y2="71" stroke-width="18"/>
+        <rect x="37" y="70" width="28" height="26" rx="9" stroke="none"/>
+      </g>
+      <g fill="#000" stroke="#000" stroke-linecap="round">
+        <line x1="27" y1="22" x2="41" y2="50" stroke-width="9"/>
+        <line x1="65" y1="20" x2="54" y2="50" stroke-width="9"/>
+        <rect x="58.5" y="51.5" width="18" height="23" rx="9" stroke="none"/>
+        <rect x="27.5" y="50.5" width="45" height="26" rx="12" stroke="none"/>
+        <line x1="28" y1="61" x2="46" y2="69" stroke-width="11"/>
+        <rect x="40.5" y="70" width="21" height="26" rx="6" stroke="none"/>
+      </g>
+    </mask>
+    <linearGradient id="plum" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A0B2A"/><stop offset="1" stop-color="#190118"/>
+    </linearGradient>
+    <clipPath id="squircle"><rect x="100" y="100" width="824" height="824" rx="185.4"/></clipPath>
+    <g id="app-icon">
+      <rect x="100" y="100" width="824" height="824" rx="185.4" fill="url(#plum)"/>
+      <g clip-path="url(#squircle)">
+        <g transform="translate(192,192) scale(6.4)">
+          <g fill="#E8A33D" stroke="#E8A33D" stroke-linecap="round">
+            <line x1="27" y1="17" x2="41" y2="50" stroke-width="16"/>
+            <line x1="65" y1="15" x2="54" y2="50" stroke-width="16"/>
+            <rect x="55" y="46" width="25" height="32" rx="12" stroke="none"/>
+            <rect x="24" y="45" width="52" height="35" rx="15" stroke="none"/>
+            <line x1="26" y1="60" x2="48" y2="71" stroke-width="18"/>
+            <rect x="36" y="70" width="30" height="38" rx="9" stroke="none"/>
+          </g>
+        </g>
+      </g>
+    </g>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+  <header class="hero">
+    <svg class="hero-icon" viewBox="0 0 1024 1024" role="img" aria-label="Inbox and Chill app icon: an amber peace hand on a plum rounded square">
+      <use href="#app-icon"/>
+    </svg>
+    <div>
+      <p class="eyebrow">Brand kit</p>
+      <h1>Inbox &amp; Chill</h1>
+      <p class="lede">Everything waiting on you, in one queue — and a way to empty it.</p>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Position</p>
+      <h2>Quiet, warm, and honest about being small</h2>
+      <p>
+        The brand should feel like the app: keyboard-first, unhurried, and clearly the work of
+        one person rather than a company. Every value below is inherited from something that
+        already exists across bgreen.lol, Unstream, or Social Sindy — nothing here was invented
+        in isolation.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">The mark</p>
+      <h2>A peace sign, not a tray</h2>
+      <p>
+        The tray is what the app does; the peace sign is what it's for. Every competitor in this
+        space signals volume and urgency. This one signals that you're allowed to be done.
+      </p>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <h3>Size ramp</h3>
+        <p style="color:var(--dim); margin-top:.4rem;">Rendered at true pixel sizes. One drawing survives the whole range, which is why it carries no internal detail.</p>
+        <div class="ramp" style="margin-top:1.5rem;">
+          <figure><svg viewBox="0 0 1024 1024" width="16"  height="16"><use href="#app-icon"/></svg><figcaption>16</figcaption></figure>
+          <figure><svg viewBox="0 0 1024 1024" width="32"  height="32"><use href="#app-icon"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg viewBox="0 0 1024 1024" width="64"  height="64"><use href="#app-icon"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg viewBox="0 0 1024 1024" width="128" height="128"><use href="#app-icon"/></svg><figcaption>128</figcaption></figure>
+          <figure><svg viewBox="0 0 1024 1024" width="256" height="256"><use href="#app-icon"/></svg><figcaption>256</figcaption></figure>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Construction</h3>
+        <p style="margin-top:.5rem;">
+          1024&nbsp;×&nbsp;1024 canvas, rounded square 824&nbsp;×&nbsp;824 inset at (100,&nbsp;100) with a
+          185.4 corner radius — Apple's macOS icon grid. The hand is drawn in a 100-unit box,
+          scaled 6.4×, with the wrist running off the bottom of the content box so it reads as
+          attached to an arm rather than floating.
+        </p>
+      </div>
+
+      <div class="rules">
+        <div class="card">
+          <p class="tag tag--do">Do</p>
+          <ul>
+            <li>Keep it upright. Tilted was tested and rejected.</li>
+            <li>Keep the silhouette flat — no gradient on the hand.</li>
+            <li>Leave clear space of 10% of the icon width, already built into the 824-in-1024 inset.</li>
+            <li>Use the wordmark instead of the mark below 16px.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <p class="tag tag--dont">Don't</p>
+          <ul>
+            <li>Add finger separations, knuckle lines, or a cuff — they muddy everything under 64px.</li>
+            <li>Recolor the hand. Amber on plum is the icon; monochrome is the menu bar.</li>
+            <li>Crop the artwork out of its square.</li>
+            <li>Put the amber hand on a light ground at icon sizes. It loses contrast.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Menu bar glyph</p>
+      <h2>Two states, one alpha mask</h2>
+      <p>
+        Both glyphs are <strong>template images</strong> — a single alpha mask that macOS tints for the
+        light or dark bar. Hollow means the queue is empty; solid means something is waiting.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="bars">
+        <div class="bar bar--light">
+          <span class="bar-item"><svg viewBox="0 0 100 100" aria-label="Empty state"><rect width="100" height="100" fill="currentColor" mask="url(#hand-hollow)"/></svg></span>
+          <span class="bar-item"><svg viewBox="0 0 100 100" aria-label="Items waiting"><use href="#hand-solid"/></svg> 12</span>
+          <span class="bar-note">light bar</span>
+        </div>
+        <div class="bar bar--dark">
+          <span class="bar-item"><svg viewBox="0 0 100 100" aria-label="Empty state"><rect width="100" height="100" fill="currentColor" mask="url(#hand-hollow)"/></svg></span>
+          <span class="bar-item"><svg viewBox="0 0 100 100" aria-label="Items waiting"><use href="#hand-solid"/></svg> 12</span>
+          <span class="bar-note">dark bar</span>
+        </div>
+      </div>
+      <p style="margin-top:1.25rem; color:var(--dim); font-size:.92rem;">
+        The hollow glyph is the solid silhouette with an inset copy knocked out of it, so the whole
+        thing stays one mask. Drawing the gaps in white instead works on a light bar and disappears
+        on a dark one — a template image has no second color.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Palette</p>
+      <h2>Plum ground, cream text, one warm note</h2>
+      <p>
+        The plum descends from bgreen.lol's accent; the amber is the same warm note Social Sindy's
+        mark carries against its cool chrome; the cream is Unstream's light ground.
+        <span class="warm-note">If two things on a screen are amber, one of them is wrong.</span>
+        It is not a body-text color, not a link color, and not a background wash.
+      </p>
+      <p style="margin-top:.75rem; color:var(--dim); font-size:.9rem;">Click any swatch to copy its hex.</p>
+    </div>
+
+    <div class="themes">
+      <div class="card">
+        <h3>Light</h3>
+        <div class="swatches" data-swatches="light"></div>
+      </div>
+      <div class="card">
+        <h3>Dark</h3>
+        <div class="swatches" data-swatches="dark"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Typography</p>
+      <h2>SN Pro, with mono for anything mechanical</h2>
+      <p>
+        SN Pro is the face across bgreen.lol and Social Sindy, loaded from Google Fonts with a
+        <code>system-ui</code> fallback. This page renders in the fallback, so treat the specimen
+        below as scale and rhythm rather than letterforms.
+      </p>
+    </div>
+
+    <div class="card spec">
+      <div class="spec-row">
+        <span class="spec-label">Display</span>
+        <span style="font-size:2rem; font-weight:600; letter-spacing:-.025em; line-height:1.1;">Get to zero</span>
+      </div>
+      <div class="spec-row">
+        <span class="spec-label">Body</span>
+        <span>Items flow in, you act on them, and the queue goes to zero. <code>clamp(1rem, 0.96rem + 0.22vi, 1.125rem)</code> at 1.5–1.6 line-height.</span>
+      </div>
+      <div class="spec-row">
+        <span class="spec-label">Utility</span>
+        <span class="mono" style="letter-spacing:.14em; text-transform:uppercase; font-size:.75rem;">Eyebrows, labels, tokens</span>
+      </div>
+      <div class="spec-row">
+        <span class="spec-label">Keys</span>
+        <span>Shortcuts are a core feature, so set them properly: <kbd>⌘P</kbd> <kbd>E</kbd> <kbd>S</kbd> <kbd>⌘Z</kbd> — never plain text.</span>
+      </div>
+      <div class="spec-row">
+        <span class="spec-label">Case</span>
+        <span>Sentence case in prose and headings. The lowercase nav on bgreen.lol is a site mannerism, not a brand rule.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Geometry, motion, density</p>
+      <h2>Fast, shallow, and roomy</h2>
+    </div>
+    <div class="card tablewrap">
+      <table>
+        <thead><tr><th>Property</th><th>Value</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">pill</td><td class="mono">100vmax</td><td>Buttons and inputs, matching Social Sindy</td></tr>
+          <tr><td class="mono">radius-panel</td><td class="mono">1.25rem</td><td>Cards and panels</td></tr>
+          <tr><td class="mono">radius-small</td><td class="mono">0.625rem</td><td>Selects and chips</td></tr>
+          <tr><td class="mono">motion</td><td class="mono">150ms cubic-bezier(.22, 1, .36, 1)</td><td>Hover and active states only — no scroll or entrance animation</td></tr>
+          <tr><td class="mono">tap target</td><td class="mono">≥ 24pt</td><td>Roomy over dense, everywhere</td></tr>
+          <tr><td class="mono">body (in-app)</td><td class="mono">13–14pt</td><td>Grouped scrolling forms in sheets, never a layout that clips</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:1.25rem; color:var(--dim); font-size:.92rem;">
+        None of this applies inside the macOS app — use stock SwiftUI chrome there. The one rule
+        that carries over: focus and selection are <strong>neutral, not system blue</strong>. A tonal
+        <code>Color.primary</code> step over hover plus a selection-only hairline. System blue reads
+        as an alert rather than a cursor.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Voice</p>
+      <h2>Write it the way you'd write a post</h2>
+      <p>If a line would look out of place on bgreen.lol, it's wrong for the landing page.</p>
+    </div>
+    <div class="rules">
+      <div class="card">
+        <p class="tag tag--do">Do</p>
+        <ul>
+          <li>First person. “I built this because…”, not “Inbox &amp; Chill was built…”</li>
+          <li>Lead with the concrete thing it does, not the feeling it gives you.</li>
+          <li>Use real numbers. “1,199 GitHub notifications” beats “a lot of noise.”</li>
+          <li>Name the tradeoff out loud. “This is pre-release. Expect rough edges.”</li>
+          <li>Say what it <em>isn't</em> — triage queue, not a client. That distinction is the product.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="tag tag--dont">Don't</p>
+        <ul>
+          <li>Hype verbs: supercharge, revolutionize, unlock, 10x, effortlessly.</li>
+          <li>Productivity moralizing. The app doesn't think the reader is lazy.</li>
+          <li>Fake scale. One person made this; don't write “we.”</li>
+          <li>Urgency or FOMO. It's an app about <em>not</em> being urgent.</li>
+          <li>Feature lists where a sentence would do.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Naming</p>
+      <h2>Inbox &amp; Chill, <span class="mono" style="font-size:.7em; letter-spacing:0;">inchill</span></h2>
+    </div>
+    <div class="card">
+      <ul style="margin:0; padding-left:1.1rem; display:flex; flex-direction:column; gap:.5rem;">
+        <li>The app is <strong>Inbox &amp; Chill</strong> — ampersand, both words capitalized, no hyphen.</li>
+        <li>The CLI is <code>inchill</code>, lowercase, always in mono.</li>
+        <li>Bundle ID <code>lol.bgreen.inboxandchill</code>.</li>
+        <li>Never abbreviate to “I&amp;C.”</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">Copied</div>
+
+<script>
+  const PALETTES = {
+    light: [
+      ["--ground",  "#F7F5F0", "Page background"],
+      ["--raised",  "#FFFFFF", "Cards, panels"],
+      ["--text",    "#200220", "Body text"],
+      ["--text-dim","#6E5F6E", "Secondary text"],
+      ["--border",  "#E2DCD4", "Dividers, input borders"],
+      ["--accent",  "#2A0B2A", "Primary buttons, headings"],
+      ["--warm",    "#E8A33D", "The one warm note"],
+      ["--link",    "#1565C0", "Links"]
+    ],
+    dark: [
+      ["--ground",  "#190118", "Page background"],
+      ["--raised",  "#2A0B2A", "Cards, panels"],
+      ["--text",    "#F5F4F0", "Body text"],
+      ["--text-dim","#B3A6B3", "Secondary text"],
+      ["--border",  "#3A203A", "Dividers, input borders"],
+      ["--accent",  "#E8A33D", "Primary buttons"],
+      ["--warm",    "#E8A33D", "The one warm note"],
+      ["--link",    "#8E93AE", "Links"]
+    ]
+  };
+
+  const toast = document.getElementById("toast");
+  let toastTimer;
+  function flash(msg) {
+    toast.textContent = msg;
+    toast.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("on"), 1400);
+  }
+
+  for (const [theme, rows] of Object.entries(PALETTES)) {
+    const host = document.querySelector(`[data-swatches="${theme}"]`);
+    for (const [name, hex, use] of rows) {
+      const b = document.createElement("button");
+      b.className = "sw";
+      b.type = "button";
+      b.innerHTML =
+        `<span class="sw-chip" style="background:${hex}"></span>` +
+        `<span><span class="sw-name">${name}</span><span class="sw-use">${use}</span></span>` +
+        `<span class="sw-hex">${hex}</span>`;
+      b.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(hex); flash(`Copied ${hex}`); }
+        catch { flash(hex); }
+      });
+      host.appendChild(b);
+    }
+  }
+</script>

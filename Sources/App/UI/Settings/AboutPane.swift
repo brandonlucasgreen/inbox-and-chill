@@ -1,0 +1,95 @@
+import AppKit
+import SwiftUI
+
+/// About: what this is, who made it, and how to chip in.
+///
+/// A menu bar app has no app menu, so there is no "About Inbox & Chill" item
+/// for macOS to hang a standard about window off. Settings is the only place
+/// this can live.
+struct AboutPane: View {
+    var body: some View {
+        Form {
+            Section {
+                HStack(alignment: .top, spacing: 16) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 72, height: 72)
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Inbox & Chill")
+                            .font(.system(size: 20, weight: .semibold))
+                        Text(Self.versionLine)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text("Everything waiting on you, in one queue — and a way to empty it.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section {
+                Text(
+                    "Inbox & Chill pulls the things that actually need you out of Linear, GitHub, Slack, ntfy, your terminal, and anything else that speaks JSON. It's a triage queue, not another client — items come in, you act on them, the queue goes to zero. The moment something needs real work, it hands you off to the app that owns it."
+                )
+                .font(.system(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Made by") {
+                LabeledContent("Brandon Lucas Green") {
+                    Link("bgreen.lol", destination: URL(string: "https://bgreen.lol")!)
+                }
+                LabeledContent("Also mine") {
+                    Link("unstream.stream", destination: URL(string: "https://unstream.stream")!)
+                }
+                LabeledContent("Found a bug, or want to say hi?") {
+                    Link("hi@bgreen.lol", destination: URL(string: "mailto:hi@bgreen.lol")!)
+                }
+            }
+
+            Section("Support") {
+                Text(
+                    "This is free, and it's staying that way. If it saves you some time, a dollar or two a month keeps me building things like it."
+                )
+                .font(.system(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
+
+                Link(destination: URL(string: "https://liberapay.com/brandonlucasgreen/donate")!) {
+                    Label("Donate on Liberapay", systemImage: "heart")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top, 2)
+            }
+
+            Section("Thanks") {
+                LabeledContent("Keyboard shortcut recording") {
+                    Link(
+                        "KeyboardShortcuts by Sindre Sorhus (MIT)",
+                        destination: URL(string: "https://github.com/sindresorhus/KeyboardShortcuts")!)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    /// "Version 0.1.0 (12)" — falls back gracefully if either key is missing,
+    /// which is what a plain `xcodebuild` with no version set will hand us.
+    static var versionLine: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String
+        let build = info?["CFBundleVersion"] as? String
+        switch (short, build) {
+        case let (short?, build?): return "Version \(short) (\(build))"
+        case let (short?, nil): return "Version \(short)"
+        default: return "Pre-release build"
+        }
+    }
+}

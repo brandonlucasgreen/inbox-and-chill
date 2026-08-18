@@ -54,14 +54,17 @@ struct InboxAndChillApp: App {
 struct MenuBarLabel: View {
     var badgeText: String?
 
+    // Solid hand when something is waiting, hollow when the queue is empty --
+    // the same read the tray glyphs used to carry. Both are template images,
+    // so macOS tints them for the light or dark menu bar on its own.
     var body: some View {
         if let badgeText, badgeText != "●" {
-            Image(systemName: "tray.full")
+            Image("MenuBarPeace")
             Text(badgeText)
         } else if badgeText == "●" {
-            Image(systemName: "tray.full.fill")
+            Image("MenuBarPeace")
         } else {
-            Image(systemName: "tray")
+            Image("MenuBarPeaceOutline")
         }
     }
 }
