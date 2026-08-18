@@ -28,8 +28,8 @@
 #     a hosted relay.
 # Hence: each user creates their own app from this manifest.
 display_information:
-  name: Inbox & Chill
-  description: "Personal notification triage: surfaces my own mentions, unread DMs, and emoji-saved messages in a private menu bar app. Read-mostly; acts only on my own account."
+  name: Inbox and Chill
+  description: "Surfaces my own mentions, unread DMs and emoji-saved messages in a private menu bar app. Acts only on my own account."
   background_color: "#2b2d31"
 oauth_config:
   scopes:
@@ -54,10 +54,12 @@ settings:
       - message.mpim
       - reaction_added
       - reaction_removed
-      - im_marked
-      - channel_marked
-      - group_marked
-      - mpim_marked
+      # NOTE: no im_marked / channel_marked / group_marked / mpim_marked here.
+      # Those are RTM-era and are not valid Events API user event types —
+      # Slack's manifest validator rejects them outright. Read-state ("you
+      # read it in Slack, it clears here") is handled by polling
+      # conversations.info instead; see the "Read-state without *_marked"
+      # note in Sources/App/Connectors/Slack/SlackConnector.swift.
   interactivity:
     is_enabled: false
   org_deploy_enabled: false
