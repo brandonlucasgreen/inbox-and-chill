@@ -167,6 +167,14 @@ actor LinearConnector: Connector {
     // MARK: Connector
 
     func fetch() async throws -> [RemoteItem] {
+        // `Notification` is an interface: the shared fields come straight
+        // off it, and each concrete type contributes its own entity via an
+        // inline fragment. Without these fragments every non-issue
+        // notification arrives with no entity at all and can only be
+        // described as "Linear notification".
+        //
+        // `DocumentNotification` has no `document` relation at all, only
+        // `documentId`, so its name is resolved in a second pass below.
         let query = """
             query {
               notifications(first: 50) {
@@ -178,18 +186,89 @@ actor LinearConnector: Connector {
                   archivedAt
                   createdAt
                   actor { displayName }
+                  url
+                  subtitle
+                  ... on DocumentNotification {
+                    documentId
+                  }
                   ... on IssueNotification {
                     issue { identifier title url }
                     comment { body }
+                  }
+                  ... on InitiativeNotification {
+                    initiative { name url }
+                    initiativeUpdate { url }
+                    document { title url }
+                    comment { body }
+                  }
+                  ... on ProjectNotification {
+                    project { name url }
+                    projectUpdate { url }
+                    document { title url }
+                    comment { body }
+                  }
+                  ... on PullRequestNotification {
+                    pullRequest { title url }
+                  }
+                  ... on CustomerNotification {
+                    customer { name url }
+                  }
+                  ... on ProductAnnouncementNotification {
+                    productAnnouncement { title }
                   }
                 }
               }
             }
             """
         let payload: LinearNotificationsPayload = try await execute(query)
-        return payload.notifications.nodes
+        var nodes = payload.notifications.nodes
             .filter { $0.readAt == nil && $0.snoozedUntilAt == nil && $0.archivedAt == nil }
-            .map(Self.mapItem)
+
+        let documents = await resolveDocuments(for: nodes)
+        for index in nodes.indices {
+            if let id = nodes[index].documentId, let document = documents[id] {
+                nodes[index].document = document
+            }
+        }
+        return nodes.map(Self.mapItem)
+    }
+
+    /// Resolves the `documentId` on any `DocumentNotification` to a title
+    /// and URL, keyed by id.
+    ///
+    /// `DocumentNotification` is the one notification type that exposes no
+    /// relation to its subject, so without this a document mention can only
+    /// say "Mentioned you" with no idea *where*. One extra request per poll,
+    /// and only when the inbox actually holds a document notification.
+    ///
+    /// Best-effort by design: this is enrichment, and a failure here must
+    /// not fail the poll and empty the queue. A document that can't be
+    /// named still gets its own title-free phrasing and a working deep link.
+    private func resolveDocuments(for nodes: [LinearNotificationNode]) async
+        -> [String: LinearNotificationNode.TitledEntity]
+    {
+        let ids = Set(nodes.compactMap(\.documentId)).sorted()
+        guard !ids.isEmpty else { return [:] }
+
+        // `execute` carries variables as `[String: String]`, which can't
+        // express `[ID!]`. JSON-encoding the ids into the document is safe —
+        // the encoder escapes them, and they are Linear-issued ids echoed
+        // straight back to Linear.
+        let encoded = (try? JSONEncoder().encode(ids))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let query = """
+            query {
+              documents(filter: { id: { in: \(encoded) } }, first: \(ids.count)) {
+                nodes { id title url }
+              }
+            }
+            """
+        guard let payload: LinearDocumentsPayload = try? await execute(query) else {
+            return [:]
+        }
+        return payload.documents.nodes.reduce(into: [:]) { result, document in
+            result[document.id] = .init(title: document.title, url: document.url)
+        }
     }
 
     func markDone(externalID: String, payload: Data?) async throws {
@@ -226,7 +305,8 @@ actor LinearConnector: Connector {
 
     // MARK: Mapping
 
-    private static func mapItem(_ node: LinearNotificationNode) -> RemoteItem {
+    /// Pure, network-free so the row text is unit-testable.
+    nonisolated static func mapItem(_ node: LinearNotificationNode) -> RemoteItem {
         let occurredAt = parseISO8601(node.createdAt) ?? .now
         let (title, snippet, url) = describe(node)
         return RemoteItem(
@@ -241,40 +321,234 @@ actor LinearConnector: Connector {
             payload: nil)
     }
 
-    private static func describe(_ node: LinearNotificationNode) -> (
+    /// The row's headline, snippet and deep link.
+    ///
+    /// The row renders `actor.displayName` on its own line, so the title
+    /// deliberately leaves the actor out and leads with the action and the
+    /// thing it happened to: "Mentioned in Q3 Roadmap", not
+    /// "amaan mentioned you in Q3 Roadmap".
+    nonisolated static func describe(_ node: LinearNotificationNode) -> (
         title: String, snippet: String?, url: String?
     ) {
-        guard let issue = node.issue else {
-            return ("\(node.type): Linear notification", nil, "https://linear.app/inbox")
-        }
-        let issueRef = "\(issue.identifier): \(issue.title)"
-        let title: String
-        switch node.type {
-        case "issueMention":
-            title = "Mentioned in \(issueRef)"
-        case "issueAssignedToYou":
-            title = "Assigned: \(issueRef)"
-        case "issueNewComment":
-            title = "New comment on \(issueRef)"
-        default:
-            title = "\(node.type): \(issueRef)"
-        }
-        let snippet = node.comment?.body.flatMap { body -> String? in
-            body.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
+        // Linear's `subtitle` is the notification's body text, so it backs
+        // the snippet for the types that expose no `comment` relation.
+        let body = node.comment?.body ?? node.subtitle
+        let snippet = body.flatMap { text -> String? in
+            text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
                 .first.map { String($0).trimmingCharacters(in: .whitespaces) }
         }
-        return (title, snippet?.isEmpty == false ? snippet : nil, issue.url)
+        return (
+            headline(type: node.type, entity: entityName(node)),
+            snippet?.nonEmptyOrNil,
+            deepLink(node)
+        )
     }
 
-    /// Simple heuristic: anything that reads as a mention, an assignment to
-    /// you, or a reaction on your content is worth surfacing loudly;
-    /// everything else (new comments, status changes, etc.) is not.
-    private static func isHighSignal(_ type: String) -> Bool {
-        type.contains("Mention") || type.contains("AssignedToYou")
-            || type.localizedCaseInsensitiveContains("reaction to your")
+    /// The best human name for whatever the notification is about.
+    ///
+    /// Only public, stable entity relations are consulted. Linear's own
+    /// `[Internal]` `subtitle` is deliberately *not* a candidate: against
+    /// live data it holds the whole comment body, so using it here produced
+    /// titles hundreds of characters long. Notifications whose subject
+    /// can't be named return nil and get the standalone phrasing.
+    nonisolated static func entityName(_ node: LinearNotificationNode) -> String? {
+        if let issue = node.issue {
+            return "\(issue.identifier): \(issue.title)".nonEmptyOrNil
+        }
+        // A document attached to an initiative or project is the subject of
+        // the notification, so it outranks its container's name.
+        if let document = node.document?.title?.nonEmptyOrNil { return document }
+        if let pullRequest = node.pullRequest?.title?.nonEmptyOrNil { return pullRequest }
+        if let initiative = node.initiative?.name.nonEmptyOrNil { return initiative }
+        if let project = node.project?.name.nonEmptyOrNil { return project }
+        if let customer = node.customer?.name.nonEmptyOrNil { return customer }
+        if let announcement = node.productAnnouncement?.title?.nonEmptyOrNil {
+            return announcement
+        }
+        return nil
+    }
+
+    /// Deep link, best target first.
+    ///
+    /// The notification's own `url` points at the exact comment or update
+    /// and so beats the entity's canonical URL, but it is an `[Internal]`
+    /// schema field; the entity URLs behind it mean losing it costs
+    /// precision rather than dropping every row back to the inbox.
+    nonisolated static func deepLink(_ node: LinearNotificationNode) -> String {
+        node.url?.nonEmptyOrNil
+            ?? node.issue?.url.nonEmptyOrNil
+            ?? node.document?.url?.nonEmptyOrNil
+            ?? node.pullRequest?.url?.nonEmptyOrNil
+            ?? node.initiativeUpdate?.url?.nonEmptyOrNil
+            ?? node.projectUpdate?.url?.nonEmptyOrNil
+            ?? node.initiative?.url?.nonEmptyOrNil
+            ?? node.project?.url?.nonEmptyOrNil
+            ?? node.customer?.url?.nonEmptyOrNil
+            ?? "https://linear.app/inbox"
+    }
+
+    /// How one family of notification types reads in the queue.
+    struct Phrasing: Sendable {
+        /// Text placed directly before the entity name.
+        var withEntity: String
+        /// Used when no name could be resolved for the entity.
+        var alone: String
+    }
+
+    /// Phrasing by type suffix. Linear's type strings are
+    /// `<entity><Action>` (`documentCommentMention`, `issueAssignedToYou`),
+    /// so the action is the suffix and one entry covers every entity that
+    /// can carry it — `Mention` handles `issueMention`, `documentMention`,
+    /// `initiativeUpdateCommentMention` and the rest alike.
+    ///
+    /// Order matters: the first matching suffix wins, so a longer suffix
+    /// must precede any shorter one it ends with (`ThreadResolved` before
+    /// `Resolved`).
+    private nonisolated static let phrasings: [(suffix: String, phrasing: Phrasing)] = [
+        ("Mention", .init(withEntity: "Mentioned in ", alone: "Mentioned you")),
+        ("NewComment", .init(withEntity: "New comment on ", alone: "New comment")),
+        ("Commented", .init(withEntity: "New comment on ", alone: "New comment")),
+        ("Reaction", .init(withEntity: "Reaction on ", alone: "New reaction")),
+        ("AssignedToYou", .init(withEntity: "Assigned: ", alone: "Assigned to you")),
+        (
+            "UnassignedFromYou",
+            .init(withEntity: "Unassigned: ", alone: "Unassigned from you")
+        ),
+        ("StatusChangedAll", .init(withEntity: "Status changed: ", alone: "Status changed")),
+        ("StatusChanged", .init(withEntity: "Status changed: ", alone: "Status changed")),
+        ("ThreadResolved", .init(withEntity: "Thread resolved on ", alone: "Thread resolved")),
+        ("Resolved", .init(withEntity: "Resolved: ", alone: "Resolved")),
+        ("Reminder", .init(withEntity: "Reminder: ", alone: "Reminder")),
+        (
+            "ReviewRerequested",
+            .init(withEntity: "Review requested again: ", alone: "Review requested again")
+        ),
+        ("ReviewRequested", .init(withEntity: "Review requested: ", alone: "Review requested")),
+        (
+            "ChangesRequested",
+            .init(withEntity: "Changes requested: ", alone: "Changes requested")
+        ),
+        ("ChecksFailed", .init(withEntity: "Checks failed: ", alone: "Checks failed")),
+        ("Approved", .init(withEntity: "Approved: ", alone: "Approved")),
+        ("Due", .init(withEntity: "Due soon: ", alone: "Due soon")),
+        ("Blocking", .init(withEntity: "Blocking: ", alone: "Blocking")),
+        ("Unblocked", .init(withEntity: "Unblocked: ", alone: "Unblocked")),
+        ("Unsubscribed", .init(withEntity: "Unsubscribed from ", alone: "Unsubscribed")),
+        ("Subscribed", .init(withEntity: "Subscribed to ", alone: "Subscribed")),
+        (
+            "AddedAsOwner",
+            .init(withEntity: "You're now an owner of ", alone: "You're now an owner")
+        ),
+        (
+            "AddedAsLead",
+            .init(withEntity: "You're now the lead of ", alone: "You're now the lead")
+        ),
+        ("AddedAsMember", .init(withEntity: "Added to ", alone: "Added as a member")),
+        ("AddedToTriage", .init(withEntity: "Added to triage: ", alone: "Added to triage")),
+        ("AddedToView", .init(withEntity: "Added to view: ", alone: "Added to a view")),
+        ("SlaBreached", .init(withEntity: "SLA breached: ", alone: "SLA breached")),
+        ("SlaHighRisk", .init(withEntity: "SLA at risk: ", alone: "SLA at risk")),
+        ("PriorityUrgent", .init(withEntity: "Marked urgent: ", alone: "Marked urgent")),
+        (
+            "MarkedAsImportant",
+            .init(withEntity: "Marked important: ", alone: "Marked important")
+        ),
+        ("ContentChange", .init(withEntity: "Content changed: ", alone: "Content changed")),
+        ("Reopened", .init(withEntity: "Reopened: ", alone: "Reopened")),
+        ("Restored", .init(withEntity: "Restored: ", alone: "Restored")),
+        ("Deleted", .init(withEntity: "Deleted: ", alone: "Deleted")),
+        ("Moved", .init(withEntity: "Moved: ", alone: "Moved")),
+    ]
+
+    /// Turns a Linear notification type into the row's headline.
+    ///
+    /// A type with no explicit phrasing still has to read as prose. Linear
+    /// adds types faster than it publishes them — `projectUpdateMentionPrompt`
+    /// is live in the API but absent from the `OtherNotificationType` enum —
+    /// so the fallback decomposes the camelCase identifier into a sentence
+    /// rather than leaking it verbatim.
+    nonisolated static func headline(type: String, entity: String?) -> String {
+        if let match = phrasings.first(where: { type.hasSuffix($0.suffix) }) {
+            guard let entity else { return match.phrasing.alone }
+            return match.phrasing.withEntity + entity
+        }
+        let sentence = sentenceCase(type).nonEmptyOrNil ?? "Linear notification"
+        guard let entity else { return sentence }
+        return "\(sentence) — \(entity)"
+    }
+
+    /// `projectMilestoneThreadResolved` -> "Project milestone thread resolved".
+    ///
+    /// Splits only on lower-to-upper boundaries, so an acronym run stays in
+    /// one piece instead of shattering into single letters.
+    nonisolated static func sentenceCase(_ camelCase: String) -> String {
+        var words: [String] = []
+        var current = ""
+        var previous: Character?
+        for character in camelCase {
+            if character.isUppercase, let previous, previous.isLowercase || previous.isNumber {
+                words.append(current)
+                current = ""
+            }
+            current.append(character)
+            previous = character
+        }
+        if !current.isEmpty { words.append(current) }
+        let joined = words.map { $0.lowercased() }.joined(separator: " ")
+        return joined.prefix(1).uppercased() + joined.dropFirst()
+    }
+
+    /// Types worth interrupting for: something is being asked of you.
+    ///
+    /// Listed explicitly rather than pattern-matched — the type list is
+    /// knowable (Linear's `OtherNotificationType` enum plus the per-type
+    /// issue scalars), and a substring test quietly mis-files new ones.
+    ///
+    /// Reactions stay quiet: they are pleasant, not actionable. That also
+    /// preserves today's behaviour, despite the old comment claiming
+    /// otherwise — its `contains("reaction to your")` test never matched,
+    /// because no Linear type string contains that phrase.
+    private nonisolated static let highSignalTypes: Set<String> = [
+        // Someone typed your name.
+        "issueMention", "issueCommentMention",
+        "documentMention", "documentCommentMention",
+        "initiativeMention", "initiativeCommentMention",
+        "initiativeUpdateMention", "initiativeUpdateCommentMention",
+        "projectMention", "projectCommentMention",
+        "projectUpdateMention", "projectUpdateCommentMention",
+        "projectMilestoneMention", "projectMilestoneCommentMention",
+        "teamUpdateMention", "teamUpdateCommentMention",
+        "pullRequestMention", "pullRequestCommentMention",
+        "agentConversationMention",
+        // Work handed to you.
+        "issueAssignedToYou", "issueAddedToTriage",
+        "triageResponsibilityIssueAddedToTriage",
+        "documentAddedAsOwner", "initiativeAddedAsOwner",
+        "customerAddedAsOwner", "projectAddedAsLead",
+        // Someone is waiting on your review.
+        "pullRequestReviewRequested", "pullRequestReviewRerequested",
+        "pullRequestChangesRequested",
+        // Time-critical, on work that is already yours.
+        "issueDue", "issueSlaBreached",
+    ]
+
+    nonisolated static func isHighSignal(_ type: String) -> Bool {
+        if highSignalTypes.contains(type) { return true }
+        // Linear ships mention variants ahead of the published schema —
+        // `projectUpdateMentionPrompt` is live in the API but absent from
+        // the enum. A type that names a mention is unambiguous, so the old
+        // substring test survives as the residual case rather than letting
+        // new mention types silently drop to low signal.
+        return type.contains("Mention")
     }
 
     private static func parseISO8601(_ string: String) -> Date? {
         iso8601Fractional.date(from: string) ?? iso8601Whole.date(from: string)
     }
+}
+
+extension String {
+    /// `nil` rather than `""`, so an optional-chained blank field falls
+    /// through to the next candidate.
+    fileprivate var nonEmptyOrNil: String? { isEmpty ? nil : self }
 }
