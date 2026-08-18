@@ -123,7 +123,13 @@ An `{ "items": [...] }` wrapper works the same way.
 1. Pick a topic name. Anything you like — but on the public server the name is the **only** thing keeping strangers out, so make it unguessable (`deploys-3f9a2c81`, not `deploys`).
 2. Add an **ntfy** source. Leave **Server** as `https://ntfy.sh`, or point it at your own instance.
 3. Put your topic in **Topics**. Several are fine, comma-separated: `deploys-3f9a2c81,alerts-77b1`.
-4. **Access Token** is optional — only needed for a protected topic (`ntfy token add` on a self-hosted instance, or a token from your ntfy.sh account).
+4. Credentials are optional — an unprotected topic needs none. For a protected one, fill in **either**:
+   - **Access Token** (`tk_…`), from `ntfy token add` on a self-hosted instance or your ntfy.sh account; or
+   - **Username** and **Password**, if your server only has accounts.
+
+   Both filled in? The token wins — it's the narrower credential and can be revoked without touching your account password. Half a basic credential (username but no password, or vice versa) is treated as none at all, because sending half would only ever fail.
+
+   **A wrong credential is worse than no credential.** ntfy answers `401` even on a topic that would have worked anonymously, so if a public topic stops arriving after you type a password, clear both fields rather than trying to fix them. The app names that specific case in the source's error rather than sitting in "connecting…" — a typo'd password is a configuration problem, not a flaky network, and it shouldn't look like one.
 
 Publish to it from anything:
 
@@ -136,7 +142,7 @@ curl -H "Title: Deploy finished" -H "Priority: 4" \
 
 **How ntfy fields map to items:** `title` becomes the item title (with `message` as the snippet); with no `title`, the message body becomes the title. `click` becomes the item's link — so ⏎ on the item opens your build, dashboard, or wherever. `priority` 4 (high) and 5 (max) arrive as **high-signal**, so they count toward the badge and can raise a banner; 1–3 stay quiet. `topic` shows as the item's actor, which is how you tell several topics apart inside one source.
 
-**No OAuth, and none missing:** ntfy has no accounts to sign into on unprotected topics. Publishing to a topic *is* the whole API.
+**No OAuth, and none missing:** ntfy has no accounts to sign into on unprotected topics. Publishing to a topic *is* the whole API. The token and password live in your Keychain; the username, being non-secret, sits with the rest of the source's settings.
 
 **What you don't get:** there's no read-state to sync back — ntfy messages are fire-and-forget events, not rows in a remote inbox. So items stay until you mark them done, exactly like terminal and Claude Code items.
 

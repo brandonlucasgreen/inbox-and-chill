@@ -521,7 +521,8 @@ enum ConnectorFactory {
         case "ntfy":
             return NtfyConnector(
                 sourceID: config.id, server: settings["server"] ?? "",
-                topics: settings["topics"] ?? "")
+                topics: settings["topics"] ?? "",
+                username: settings["username"] ?? "")
         case "jsonPoller":
             return JSONPollerConnector(
                 sourceID: config.id, urlString: settings["url"] ?? "",

@@ -108,10 +108,17 @@ enum ConnectorCatalog {
                 .init(
                     key: "token", label: "Access Token", isSecret: true,
                     placeholder: "tk_…",
-                    help: "Optional — only for protected topics (`ntfy token add`)"),
+                    help: "Optional — for a protected topic. Takes precedence over username/password below."),
+                .init(
+                    key: "username", label: "Username", isSecret: false,
+                    placeholder: "phil",
+                    help: "Optional — use instead of a token if your server only has accounts."),
+                .init(
+                    key: "password", label: "Password", isSecret: true,
+                    help: "Optional — sent as HTTP basic auth alongside the username."),
             ],
             bannersDefaultOn: true,
-            authNote: "No OAuth needed, and none to skip: ntfy has no accounts on unprotected topics — publishing to a topic is the whole API. Priority 4–5 messages arrive as high-signal; `click` becomes the item's link. The token is optional, stored in your Keychain, and never leaves this Mac."),
+            authNote: "No OAuth needed, and none to skip: ntfy has no accounts on unprotected topics — publishing to a topic is the whole API. Priority 4–5 messages arrive as high-signal; `click` becomes the item's link.\n\nFor a protected topic, use either an access token or a username and password — whichever your server is set up for. A token wins if you fill in both, since it's the narrower credential and can be revoked without touching your account password. The token and password are stored in your Keychain and never leave this Mac."),
         .init(
             id: "local", displayName: "Local (Terminal & Claude Code)", systemImage: "terminal",
             fields: [], bannersDefaultOn: true),

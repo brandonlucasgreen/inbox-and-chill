@@ -29,14 +29,17 @@ actor NtfyConnector: Connector {
 
     private let server: String
     private let topics: String
+    /// Non-secret half of basic auth; the password lives in the Keychain.
+    private let username: String
 
     /// Last *message* id delivered — the reconnect cursor. Deliberately not
     /// updated for `open`/`keepalive` frames: those carry ids too, and using
     /// one as `since=` would skip every message published before it.
     private var lastMessageID: String?
 
-    init(sourceID: String, server: String, topics: String) {
+    init(sourceID: String, server: String, topics: String, username: String = "") {
         self.sourceID = sourceID
+        self.username = username.trimmingCharacters(in: .whitespacesAndNewlines)
         self.server =
             server.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "https://ntfy.sh"
@@ -137,6 +140,64 @@ actor NtfyConnector: Connector {
         return components.url
     }
 
+    /// Builds the `Authorization` header value, or `nil` for an unprotected
+    /// topic (ntfy's default — no account needed).
+    ///
+    /// ntfy accepts either an access token as a bearer, or plain
+    /// username/password as HTTP basic. A token wins when both are present:
+    /// it's the narrower credential, and it's revocable without changing the
+    /// account password.
+    ///
+    /// `nonisolated static` so the precedence rules are unit-testable without
+    /// a Keychain or a socket.
+    nonisolated static func authorizationHeader(
+        token: String?, username: String?, password: String?
+    ) -> String? {
+        if let token = token?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !token.isEmpty
+        {
+            return "Bearer \(token)"
+        }
+        // Basic auth needs both halves; half a credential is a
+        // misconfiguration, and sending it would just 401.
+        guard
+            let user = username?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !user.isEmpty,
+            let pass = password, !pass.isEmpty
+        else { return nil }
+
+        let encoded = Data("\(user):\(pass)".utf8).base64EncodedString()
+        return "Basic \(encoded)"
+    }
+
+    /// Classifies a dropped/refused socket. Anything transient reads as
+    /// reconnecting, but a credential or address problem must not: ntfy
+    /// answers **401 even for a topic that works anonymously** when the
+    /// credentials it was handed are wrong, so a typo'd password would
+    /// otherwise sit in "connecting…" forever while quietly never delivering.
+    ///
+    /// `nonisolated static` to keep it testable without a socket.
+    nonisolated static func status(forHTTPStatus code: Int?) -> ConnectorStatus {
+        switch code {
+        case 401:
+            return .error(
+                "ntfy rejected the credentials (401). Check the token, or the username and password — note that ntfy also returns 401 on an otherwise-public topic when the credentials sent are wrong, so clearing them entirely is the fix if the topic needs no account."
+            )
+        case 403:
+            return .error(
+                "ntfy refused access to this topic (403). The account authenticated, but isn't allowed to read it."
+            )
+        case 404:
+            return .error(
+                "ntfy returned 404 — check the server URL and topic name (a self-hosted instance behind a subpath needs that path included)."
+            )
+        default:
+            // Network blips, server restarts, sleep/wake: the SyncEngine
+            // restarts us and we resume from `lastMessageID`.
+            return .connecting
+        }
+    }
+
     private func makeRequest() -> URLRequest? {
         guard
             let url = Self.socketURL(
@@ -147,9 +208,13 @@ actor NtfyConnector: Connector {
         var request = URLRequest(url: url)
         // Optional: only protected topics need it. Sent as a header rather
         // than ntfy's `?auth=` query param — that form exists for browsers
-        // that can't set headers, and would put the token in the URL.
-        if let token = Keychain.get("\(sourceID).token"), !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // that can't set headers, and would put the credential in the URL.
+        if let header = Self.authorizationHeader(
+            token: Keychain.get("\(sourceID).token"),
+            username: username,
+            password: Keychain.get("\(sourceID).password"))
+        {
+            request.setValue(header, forHTTPHeaderField: "Authorization")
         }
         return request
     }
@@ -207,10 +272,8 @@ actor NtfyConnector: Connector {
             return
         } catch {
             if Task.isCancelled { return }
-            // The SyncEngine restarts push connectors after a short backoff,
-            // and we'll resume from `lastMessageID` — so a dropped socket is
-            // reconnecting, not broken.
-            emit(.status(.connecting))
+            let httpStatus = (socket.response as? HTTPURLResponse)?.statusCode
+            emit(.status(Self.status(forHTTPStatus: httpStatus)))
         }
     }
 }

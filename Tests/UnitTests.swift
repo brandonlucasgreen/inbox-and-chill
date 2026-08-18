@@ -772,3 +772,101 @@ struct ConnectorToggleFieldTests {
         #expect(!participating.boolValue(in: ["participating": "yes"]))
     }
 }
+
+// MARK: - ntfy authentication
+
+struct NtfyAuthTests {
+    @Test("No credentials means no header — an unprotected topic needs none")
+    func anonymous() {
+        #expect(NtfyConnector.authorizationHeader(token: nil, username: nil, password: nil) == nil)
+        #expect(NtfyConnector.authorizationHeader(token: "", username: "", password: "") == nil)
+    }
+
+    @Test("A token becomes a bearer header")
+    func bearerToken() {
+        #expect(
+            NtfyConnector.authorizationHeader(
+                token: "tk_3gd7d2yftt4b8ixyfe9mnmro88o76", username: nil, password: nil)
+                == "Bearer tk_3gd7d2yftt4b8ixyfe9mnmro88o76")
+    }
+
+    @Test("Username and password become base64 basic auth")
+    func basicAuth() {
+        let header = NtfyConnector.authorizationHeader(
+            token: nil, username: "phil", password: "mypass")
+        // base64("phil:mypass")
+        #expect(header == "Basic cGhpbDpteXBhc3M=")
+    }
+
+    @Test("A token wins over username and password")
+    func tokenTakesPrecedence() {
+        let header = NtfyConnector.authorizationHeader(
+            token: "tk_abc", username: "phil", password: "mypass")
+        #expect(header == "Bearer tk_abc")
+    }
+
+    /// Half a credential would only ever 401, and sending it would make the
+    /// failure look like a server problem rather than a filled-in-wrong field.
+    @Test("Half a basic credential sends nothing at all")
+    func incompleteBasicAuthIsIgnored() {
+        #expect(
+            NtfyConnector.authorizationHeader(token: nil, username: "phil", password: nil) == nil)
+        #expect(
+            NtfyConnector.authorizationHeader(token: nil, username: "phil", password: "") == nil)
+        #expect(
+            NtfyConnector.authorizationHeader(token: nil, username: nil, password: "mypass") == nil)
+    }
+
+    @Test("Surrounding whitespace in a pasted credential is trimmed")
+    func trimsPastedWhitespace() {
+        #expect(
+            NtfyConnector.authorizationHeader(
+                token: "  tk_abc\n", username: nil, password: nil) == "Bearer tk_abc")
+        #expect(
+            NtfyConnector.authorizationHeader(
+                token: "   ", username: " phil ", password: "mypass")
+                == "Basic cGhpbDpteXBhc3M=")
+    }
+
+    @Test("A password's own characters are never trimmed")
+    func passwordIsTakenVerbatim() {
+        // Leading/trailing spaces can be legitimate password characters, so
+        // unlike the username they must survive intact.
+        let header = NtfyConnector.authorizationHeader(
+            token: nil, username: "phil", password: " pass ")
+        #expect(header == "Basic " + Data("phil: pass ".utf8).base64EncodedString())
+    }
+}
+
+// MARK: - ntfy failure classification
+
+struct NtfyFailureStatusTests {
+    private func message(_ status: ConnectorStatus) -> String? {
+        if case .error(let text) = status { return text }
+        return nil
+    }
+
+    /// The one that matters: ntfy 401s even on a topic that works anonymously
+    /// when it's handed wrong credentials. Reporting that as "connecting"
+    /// would leave a typo'd password silently never delivering.
+    @Test("401 is a visible error naming the public-topic trap")
+    func unauthorizedIsAnError() throws {
+        let text = try #require(message(NtfyConnector.status(forHTTPStatus: 401)))
+        #expect(text.contains("401"))
+        #expect(text.lowercased().contains("public"))
+    }
+
+    @Test("403 and 404 are errors too, each pointing somewhere useful")
+    func forbiddenAndNotFound() throws {
+        #expect(try #require(message(NtfyConnector.status(forHTTPStatus: 403))).contains("403"))
+        let notFound = try #require(message(NtfyConnector.status(forHTTPStatus: 404)))
+        #expect(notFound.contains("server URL"))
+    }
+
+    @Test("Transient and unknown failures read as reconnecting, not broken")
+    func transientFailuresReconnect() {
+        for code in [nil, 500, 502, 503, 429] as [Int?] {
+            #expect(NtfyConnector.status(forHTTPStatus: code) == .connecting)
+        }
+    }
+}
