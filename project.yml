@@ -24,6 +24,14 @@ settings:
     DEVELOPMENT_TEAM: CV926C8KS8
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Developer ID Application"
+  configs:
+    Release:
+      # Xcode otherwise injects `com.apple.security.get-task-allow` — the
+      # entitlement that lets a debugger attach to the process. It is correct
+      # for Debug and wrong for anything shipped: it weakens the hardened
+      # runtime, and notarization rejects a Developer ID binary that carries
+      # it. Scoped to Release so debugging a Debug build still works.
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 targets:
   InboxAndChill:
     type: application
