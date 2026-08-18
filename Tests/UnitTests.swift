@@ -252,6 +252,86 @@ struct SnoozePresetTests {
     }
 }
 
+// MARK: - Footer hints (Sources/App/UI/PanelHint.swift)
+
+/// The footer is icon-only and `.help()` tooltips never render inside a
+/// `MenuBarExtra(.window)` panel, so these strings are the only explanation
+/// the footer has. A wrong one is invisible until someone hovers.
+struct PanelHintTests {
+    @Test("A hint with a shortcut reads as one help line")
+    func helpTextWithShortcut() {
+        #expect(
+            PanelHint.helpText("Refresh all sources", shortcut: "⌘R")
+                == "Refresh all sources (⌘R)")
+    }
+
+    @Test("A hint without a shortcut gains no empty parentheses")
+    func helpTextWithoutShortcut() {
+        #expect(PanelHint.helpText("Slack — connecting…", shortcut: nil)
+            == "Slack — connecting…")
+        #expect(PanelHint.helpText("Settings", shortcut: "") == "Settings")
+    }
+
+    @Test("The bubble text and the help text stay in sync")
+    func helpTextMatchesInstance() {
+        let hint = PanelHint(text: "Quit Inbox & Chill", shortcut: "⌘Q")
+        #expect(hint.helpText == "Quit Inbox & Chill (⌘Q)")
+    }
+}
+
+// MARK: - Sync dot descriptions (Sources/App/UI/PanelSupport.swift)
+
+/// 7pt of colour is the whole message a status dot carries; `describe` is the
+/// only place the app says *why* one went red.
+struct SourceStatusDotTests {
+    @Test("A synced source names itself and how stale it is")
+    func describesOK() {
+        let now = Date()
+        let synced = now.addingTimeInterval(-5 * 60)
+        #expect(
+            SourceStatusDot.describe(
+                name: "Linear", status: .ok(synced), now: now)
+                == "Linear — synced 5m ago")
+    }
+
+    @Test("Every status case says the source name and a reason")
+    func describesEveryCase() {
+        for status: ConnectorStatus? in [
+            .ok(.now), .error("invalid_auth"), .connecting, nil,
+        ] {
+            let text = SourceStatusDot.describe(name: "Slack", status: status)
+            #expect(text.hasPrefix("Slack — "))
+            #expect(text.count > "Slack — ".count)
+        }
+    }
+
+    @Test("A never-synced dot doesn't read as an error")
+    func describesUnsynced() {
+        #expect(
+            SourceStatusDot.describe(name: "GitHub", status: nil)
+                == "GitHub — not synced yet")
+        #expect(
+            SourceStatusDot.describe(name: "GitHub", status: .connecting)
+                == "GitHub — connecting…")
+    }
+
+    @Test("A long error is clamped so the one-line bubble still fits")
+    func clampsLongError() {
+        let long = String(repeating: "scope_missing ", count: 12)
+        let text = SourceStatusDot.describe(name: "Slack", status: .error(long))
+        #expect(text.hasSuffix("…"))
+        #expect(text.count < 70)
+        #expect(text.hasPrefix("Slack — error: scope_missing"))
+    }
+
+    @Test("A short error is passed through whole")
+    func keepsShortError() {
+        #expect(
+            SourceStatusDot.describe(name: "ntfy", status: .error("HTTP 401"))
+                == "ntfy — error: HTTP 401")
+    }
+}
+
 // MARK: - Row focus weights (Sources/App/UI/PanelSupport.swift)
 
 /// The row's selection background is tuned by eye, but the *relationships*

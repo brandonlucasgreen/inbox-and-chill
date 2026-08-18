@@ -279,7 +279,11 @@ struct MainWindowView: View {
             HStack(spacing: 4) {
                 ForEach(statusSources) { source in
                     SourceStatusDot(
-                        display: source, status: appState.statuses[source.id])
+                        display: source, status: appState.statuses[source.id],
+                        // A real window renders `.help()` tooltips, so the
+                        // in-panel hint bubble isn't needed here — and two
+                        // tooltips for one dot would be worse than one.
+                        hoveredHint: .constant(nil))
                 }
             }
         }

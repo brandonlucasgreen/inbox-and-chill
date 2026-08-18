@@ -146,16 +146,25 @@ enum PanelPasteboard {
 }
 
 /// Footer sync indicator for one source.
+///
+/// 7pt of colour is the entire message, so the hint is the only thing that
+/// explains it — and a system tooltip never renders in the menu bar panel
+/// (`PanelHint`). The hit target is padded well past the dot itself, because
+/// a 7×7 hover target is a target nobody hits by accident.
 struct SourceStatusDot: View {
     let display: SourceDisplay
     let status: ConnectorStatus?
+    @Binding var hoveredHint: PanelHint?
 
     var body: some View {
         Circle()
             .fill(tint)
             .frame(width: 7, height: 7)
-            .help(tooltip)
-            .accessibilityLabel(Text(tooltip))
+            .frame(width: 13, height: 24)
+            .contentShape(.rect)
+            .panelHint(
+                SourceStatusDot.describe(name: display.name, status: status),
+                highlight: false, hovered: $hoveredHint)
     }
 
     private var tint: Color {
@@ -166,15 +175,31 @@ struct SourceStatusDot: View {
         }
     }
 
-    private var tooltip: String {
+    /// What this dot's colour means, in words.
+    ///
+    /// Pure and static so the tests can cover every status case: this string
+    /// is the only place the app ever says why a dot is red.
+    nonisolated static func describe(
+        name: String, status: ConnectorStatus?, now: Date = .now
+    ) -> String {
         switch status {
         case .ok(let date)?:
-            return "\(display.name) — synced \(PanelFormat.relative(date)) ago"
+            return "\(name) — synced \(PanelFormat.relative(date, now: now)) ago"
         case .error(let message)?:
-            return "\(display.name) — error: \(message)"
-        case .connecting?: return "\(display.name) — connecting…"
-        case nil: return "\(display.name) — not synced yet"
+            return "\(name) — error: \(clamped(message))"
+        case .connecting?: return "\(name) — connecting…"
+        case nil: return "\(name) — not synced yet"
         }
+    }
+
+    /// Connector errors are usually a short API code, but not always — and
+    /// the hint bubble is one line inside a 420pt panel. Settings shows the
+    /// full message; this only has to say which dot went red and roughly why.
+    private nonisolated static func clamped(_ message: String) -> String {
+        let limit = 48
+        guard message.count > limit else { return message }
+        let head = message.prefix(limit).trimmingCharacters(in: .whitespaces)
+        return "\(head)…"
     }
 }
 

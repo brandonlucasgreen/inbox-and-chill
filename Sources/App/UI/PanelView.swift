@@ -24,6 +24,8 @@ struct PanelView: View {
     @State private var showArchive = false
     @State private var snoozeTargetUID: String?
     @State private var isRefreshing = false
+    /// Which footer control the mouse is over, if any — see `PanelHint`.
+    @State private var hoveredHint: PanelHint?
     @FocusState private var focus: PanelFocus?
 
     var body: some View {
@@ -204,13 +206,16 @@ struct PanelView: View {
             }
             .keyboardShortcut("r", modifiers: .command)
             .disabled(isRefreshing)
-            .help("Refresh all sources (⌘R)")
-            .accessibilityLabel("Refresh all sources")
+            // No `isRefreshing` variant: a disabled control takes no hover
+            // events, so that string could never be read.
+            .panelHint(
+                "Refresh all sources", shortcut: "⌘R", hovered: $hoveredHint)
 
-            HStack(spacing: 3) {
+            HStack(spacing: 1) {
                 ForEach(statusSources) { source in
                     SourceStatusDot(
-                        display: source, status: appState.statuses[source.id])
+                        display: source, status: appState.statuses[source.id],
+                        hoveredHint: $hoveredHint)
                 }
             }
 
@@ -220,8 +225,8 @@ struct PanelView: View {
                 } label: {
                     footerIcon("arrow.uturn.backward")
                 }
-                .help("Undo last done (⌘Z)")
-                .accessibilityLabel("Undo last done")
+                .panelHint(
+                    "Undo last done", shortcut: "⌘Z", hovered: $hoveredHint)
             }
 
             Spacer()
@@ -234,11 +239,11 @@ struct PanelView: View {
                 footerIcon(showArchive ? "archivebox.fill" : "archivebox")
             }
             .keyboardShortcut("a", modifiers: [.command, .shift])
-            .help(
+            .panelHint(
                 showArchive
                     ? "Back to the queue"
-                    : "Archive — done items, last 90 days (⇧⌘A)")
-            .accessibilityLabel(showArchive ? "Back to the queue" : "Archive")
+                    : "Archive — done items, last 90 days",
+                shortcut: "⇧⌘A", hovered: $hoveredHint)
 
             Button {
                 openWindow(id: "main")
@@ -248,8 +253,9 @@ struct PanelView: View {
                 footerIcon("macwindow")
             }
             .keyboardShortcut("0", modifiers: .command)
-            .help("Open as Window (⌘0)")
-            .accessibilityLabel("Open as window")
+            .panelHint(
+                "Open the queue in a window", shortcut: "⌘0",
+                hovered: $hoveredHint)
 
             Button {
                 openSettings()
@@ -259,8 +265,9 @@ struct PanelView: View {
                 footerIcon("gearshape")
             }
             .keyboardShortcut(",", modifiers: .command)
-            .help("Settings (⌘,)")
-            .accessibilityLabel("Settings")
+            .panelHint(
+                "Settings — sources and general", shortcut: "⌘,",
+                hovered: $hoveredHint)
 
             Button {
                 NSApp.terminate(nil)
@@ -268,14 +275,15 @@ struct PanelView: View {
                 footerIcon("power")
             }
             .keyboardShortcut("q", modifiers: .command)
-            .help("Quit Inbox & Chill (⌘Q)")
-            .accessibilityLabel("Quit Inbox & Chill")
+            .panelHint(
+                "Quit Inbox & Chill", shortcut: "⌘Q", hovered: $hoveredHint)
         }
         .font(.system(size: 14))
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(.bar)
+        .panelHintHost(hovered: hoveredHint)
     }
 
     /// Footer buttons are icon-only; without an explicit frame their hit
