@@ -172,6 +172,36 @@ the connector 5s later. Two failures have come from this:
 - Saving a source in the editor already calls `bootstrapConnectors()`, so
   connectors reload without an app restart.
 
+## Distribution (Developer ID + notarization)
+
+The app needs **no App ID registration and no provisioning profile**. Those only
+authorize entitlements Apple must bless — iCloud, App Groups, Push, Keychain
+Sharing — and this app uses none. It is unsandboxed, so network access, the
+loopback listener and the Keychain all work without entitlements.
+
+Release must therefore ship with **no entitlements at all**, a hardened runtime,
+and a secure timestamp. Both of the last two were wrong at first and neither was
+visible in a normal build:
+
+- Xcode injects `com.apple.security.get-task-allow` (the debugger-attach
+  entitlement) unless told not to. Notarization rejects it.
+- Xcode signs local builds `--timestamp=none`. Notarization requires a secure
+  timestamp. The embedded `inchill` had one — its post-build script asks
+  explicitly — while the bundle around it did not.
+
+Both are fixed in `project.yml` under `settings.configs.Release`. Check an
+installed build before trusting it, because neither shows up as a build failure:
+
+```bash
+codesign -dvv "/Applications/Inbox & Chill.app" 2>&1 | grep -E "Timestamp|flags="
+codesign -d --entitlements - "/Applications/Inbox & Chill.app"   # expect none
+codesign --verify --deep --strict "/Applications/Inbox & Chill.app"
+```
+
+Remaining for a real release: `notarytool submit --wait` then `stapler staple`.
+`spctl -a` reporting "rejected — Unnotarized Developer ID" is expected until
+then and is harmless locally, since Gatekeeper only evaluates quarantined apps.
+
 ## Working in a git worktree
 
 Bash `cd` lands in the primary checkout and stays there, so edits intended for a
