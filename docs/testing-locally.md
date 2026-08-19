@@ -143,8 +143,6 @@ Fastest first:
    approval), paste the xoxp + xapp tokens. Then: have someone @-mention
    you, watch it arrive live; react to any message with 📌 and watch it
    become a saved item; remove the reaction and watch it clear.
-4. **Campsite**: needs a Doorkeeper token from whoever runs Buffer's
-   instance; base URL + org slug + token.
 
 ## 5. Run the test suite
 

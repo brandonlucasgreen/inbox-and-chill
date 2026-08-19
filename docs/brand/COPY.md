@@ -75,7 +75,7 @@ This is the most important block on the page. Lead with it.
 Keep these to a sentence each. No bullets-within-bullets.
 
 **Sources**
-> Linear, GitHub, Slack, ntfy, Campsite, any JSON feed, and your terminal —
+> Linear, GitHub, Slack, ntfy, any JSON feed, and your terminal —
 > including Claude Code, which can push you a notification when it finishes or
 > needs an answer.
 

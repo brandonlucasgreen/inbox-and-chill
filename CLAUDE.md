@@ -1,7 +1,7 @@
 # Inbox & Chill — working notes for agents
 
 Native macOS menu bar app (macOS 15+, SwiftUI + SwiftData) that aggregates one
-triage queue from Slack, Linear, GitHub, Campsite, ntfy, and local producers
+triage queue from Slack, Linear, GitHub, ntfy, and local producers
 (the `inchill` CLI, Claude Code hooks).
 
 `PLAN.md` is the design source of truth. This file is the operating manual:
@@ -158,7 +158,6 @@ the connector 5s later. Two failures have come from this:
 | `linear` | GraphQL poll 30s | markDone, remoteSnooze, remoteTruth | Per-type inline fragments; `DocumentNotification` has no `document` relation (resolved by a second `documents(filter:)` pass). `Notification.subtitle` is the comment **body**, not a name. |
 | `github` | REST poll | markDone, remoteTruth | Classic PAT only (OAuth tokens rejected). Paginates; `participating=true` by default. |
 | `slack` | Socket Mode + poll | markDone, remoteTruth, push | User token `xoxp-` required; app-level `xapp-` optional (adds channel mentions). Keyword Watch polls `search.messages` — the only way to see a channel you're not in. |
-| `campsite` | REST poll | markDone, remoteTruth | Self-hosted. v1 accepts Bearer Doorkeeper tokens; v2 has no notifications endpoint. Currently unconfigured. |
 | `ntfy` | WebSocket | push | No remote read-state; items die by explicit done. `since=<id>` is exclusive-after. |
 | `jsonPoller` | HTTP poll 120s | remoteTruth | Generic: any URL returning a JSON array or `{items: [...]}`, fields mapped via a user-supplied `id=id,title=title,...` string. Optional bearer auth header from the Keychain. |
 | `local` | HTTP listener | push | `inchill` CLI + Claude Code hooks. Push-only: it sees only what a hook POSTs. |

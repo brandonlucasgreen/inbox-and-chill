@@ -720,10 +720,6 @@ enum ConnectorFactory {
             return JSONPollerConnector(
                 sourceID: config.id, urlString: settings["url"] ?? "",
                 mapping: settings["mapping"] ?? "")
-        case "campsite":
-            return CampsiteConnector(
-                sourceID: config.id, baseURL: settings["baseURL"] ?? "",
-                orgSlug: settings["orgSlug"] ?? "")
         case "slack":
             return SlackConnector(
                 sourceID: config.id,

@@ -119,7 +119,7 @@ struct SourceConfigSettingsTests {
     }
 
     @Test func settingEmptyDictionaryRoundTrips() {
-        let config = SourceConfig(kind: "campsite", displayName: "Campsite")
+        let config = SourceConfig(kind: "ntfy", displayName: "ntfy")
         config.settings = ["a": "b"]
         config.settings = [:]
         #expect(config.settings.isEmpty)

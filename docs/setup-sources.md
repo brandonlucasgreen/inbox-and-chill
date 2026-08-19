@@ -63,18 +63,6 @@ Slack setup has more steps because you're creating your own Slack app rather tha
 
 **One thing to expect:** channel mentions only appear for activity happening *after* you set the source up — they arrive as events, and there's no history API to backfill them from (see above). DM unreads and emoji saves *are* backfilled, because both have real polling endpoints (`conversations.info` and `reactions.list`).
 
-## Campsite
-
-**Fields:** Base URL, Organization Slug, Access Token
-
-Campsite here means a **self-hosted** instance running the open-source Campsite codebase — this connector talks to the same internal v1 API the Campsite web app itself uses, not the public v2 bot API (which can't see your inbox at all).
-
-1. **Base URL** — the root of your instance, e.g. `https://campsite.buffer.com`.
-2. **Organization Slug** — the org segment in your Campsite URLs (e.g. the `buffer` in `campsite.buffer.com/buffer/...`).
-3. **Access Token** — a Doorkeeper (OAuth2) bearer token for your account. This isn't self-serve: since v1 auth is first-party/session-based, **you'll need an admin of your Campsite instance to register a Doorkeeper OAuth app** on the instance so you can obtain a token. If your organization already runs an internal tool or MCP server against Campsite, whoever maintains that has almost certainly solved this exact problem already — ask them.
-
-Once configured, this source polls notifications and follow-ups every 60 seconds and writes through on done (it archives the notification, or deletes the follow-up, on Campsite's side).
-
 ## Custom JSON feed
 
 **Fields:** Feed URL, Authorization Header (optional), Field Mapping

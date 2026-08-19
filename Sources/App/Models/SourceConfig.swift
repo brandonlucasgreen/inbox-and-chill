@@ -6,7 +6,7 @@ import SwiftData
 @Model
 final class SourceConfig {
     @Attribute(.unique) var id: String
-    /// Connector kind: linear, github, slack, campsite, local, jsonPoller, fake.
+    /// Connector kind: linear, github, slack, local, ntfy, jsonPoller, fake.
     var kind: String
     var displayName: String
     var isEnabled: Bool
@@ -17,7 +17,7 @@ final class SourceConfig {
     /// local/Claude sources default on — decision §2.1.4).
     var bannersEnabled: Bool
     /// Non-secret connector settings as JSON (e.g. Slack save emoji,
-    /// Campsite base URL, JSON poller mapping).
+    /// ntfy server and topics, JSON poller mapping).
     var settingsJSON: Data?
 
     init(

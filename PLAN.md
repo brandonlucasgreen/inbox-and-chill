@@ -1,6 +1,6 @@
 # Inbox & Chill — Plan
 
-*A native macOS menu bar app that aggregates your unread/actionable queue across Slack, Linear, GitHub, Campsite, Notion, terminal apps (incl. Claude Code), and custom sources.*
+*A native macOS menu bar app that aggregates your unread/actionable queue across Slack, Linear, GitHub, ntfy, terminal apps (incl. Claude Code), and custom sources.*
 
 > Status: v3 — BUILT (2026-08-17). All milestones implemented; 33 tests green. Remaining human steps: Slack app install approval, Campsite Doorkeeper token, per-source API keys, Developer ID signing for release. See README.md and docs/.
 
@@ -116,7 +116,7 @@ Verified against current documentation, August 2026:
 | Terminal / Claude Code | ✅ Hooks + local CLI | Push (localhost listener) | local | Claude Code `Notification`/`Stop` hooks → `inchill` CLI |
 | Slack | ✅ Mentions/unreads · ❌ Later · ✅ emoji-save | Push (Socket Mode) after seed | ✅ (`conversations.mark`) | Internal app = exempt from 2025 limits; may need workspace-admin install approval; `reaction_added` replaces Later |
 | Notion | ⚠️ Approximation | Webhook (comments) + poll (assigned-to-me) | ❌ (local only) | No inbox API exists; needs relay for webhooks |
-| Campsite | ⚠️ Internal-API conversation | Poll v1 `notifications` | ✅ (v1) | Public v2 API can't see inbox; needs a Doorkeeper app on Buffer's instance |
+| ~~Campsite~~ | **Removed 2026-08-19** | — | — | Was: poll v1 `notifications`; needed a Doorkeeper app on Buffer's instance. See §6.5. |
 | Custom | ✅ By design | Poll or relay push | local | §4.4 |
 
 ### 6.1 Slack — ✅ Viable (mentions + unreads), ❌ Saved-for-Later
@@ -162,7 +162,21 @@ Confirmed: the public API has **no notifications/inbox endpoint** and no mention
 - **Gotcha:** fine-grained PATs *still* can't call the notifications API in 2026 — there's no notifications permission at all. You need a **classic PAT with the `notifications` scope**. Check whether Buffer's org enforces SSO authorization on classic PATs (usually just a one-click authorize).
 - No GraphQL notifications, no personal-notification webhooks. Poll; it's the canonical pattern (Gitify, Trailer, etc. all do this).
 
-### 6.5 Campsite — ⚠️ Feasible, but via the internal API, not the public one
+### 6.5 Campsite — REMOVED 2026-08-19 (analysis kept)
+
+> **The connector is gone from the app.** Brandon paused it indefinitely
+> rather than spend a teammate's time on *"an internal tool we're likely
+> going to sunset"*, and removed it outright before sharing the app with
+> teammates who have no Campsite at all. `CampsiteConnector.swift` and its
+> catalog entry are deleted; nothing else referenced it.
+>
+> **The findings below stand and are why it is not worth rebuilding on a
+> whim** — they were verified against the private fork's source, and
+> re-deriving them would cost the same day again. If it ever comes back, the
+> route is a Doorkeeper token against v1; v2 still cannot see a notification
+> inbox.
+
+#### Original analysis — Feasible, but via the internal API, not the public one
 
 Campsite the hosted product wound down Feb 2025; the code is open source (CC BY-NC, with self-hosting explicitly allowed — Buffer's situation). That cuts both ways: the API is knowable down to the controller source, but nothing will ever improve upstream.
 
@@ -235,7 +249,7 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 | Buffer Slack requires admin approval for custom apps | **Open — Day 0 ask** | Read-only personal app is an easy pitch; assumed quick per Brandon |
 | Slack Saved-for-Later unavailable | **Confirmed — no API** | Scoped out; unofficial client-token route rejected (Slack flags it as a security threat on corporate workspaces) |
 | Notion coverage gaps | Confirmed limitation | Approximation is honest: mentions via comment webhooks + assigned-to-me; label the source as partial in-app |
-| Campsite v1 auth | **Open — needs a human** | Ask the internal maintainer for a Doorkeeper OAuth app; MCP layer proves user-level access is already solved once |
+| ~~Campsite v1 auth~~ | **Closed — source removed 2026-08-19** | Was blocked on a Doorkeeper OAuth app from Buffer's instance maintainer |
 | GitHub classic PAT + org SSO | Minor | One-time SSO authorization of the PAT |
 | Polling battery cost | Design-level | Only Linear/GitHub (+ optional pollers) poll, 30–60s, cheap; Slack/local sources are push. Coalesce timers; pause polling when screen locked |
 | Relay = infrastructure | **Deferred out of v1** | Nothing in v1 needs it; Notion (its main customer) is demoted; connector protocol unchanged when it lands |

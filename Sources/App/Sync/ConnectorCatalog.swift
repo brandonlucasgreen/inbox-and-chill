@@ -117,22 +117,6 @@ enum ConnectorCatalog {
             setupPayload: .init(label: "App Manifest", text: slackAppManifest),
             authNote: "Why paste tokens? Your workspace app's install page *is* Slack's OAuth flow — it ends by displaying the user token. A native app can't run Slack's OAuth itself: the token exchange requires your client secret (Slack has no PKCE public-client mode), and redirect URLs must be HTTPS, so there's no loopback to come back to. The app-level token never comes from OAuth at all.\n\nOnly the user token is required. Adding the app-level token turns on Socket Mode, which is the only supported way to receive channel mentions — Slack publishes no API for “messages that mention me”, so without it you get DM unreads, emoji saves and read-state auto-clear, but not mentions. Both tokens live in your Keychain and never leave this Mac."),
         .init(
-            id: "campsite", displayName: "Campsite", systemImage: "tent",
-            fields: [
-                .init(
-                    key: "baseURL", label: "Base URL", isSecret: false,
-                    placeholder: "https://campsite.buffer.com"),
-                .init(
-                    key: "orgSlug", label: "Organization Slug", isSecret: false,
-                    placeholder: "buffer",
-                    help: "The org segment in your Campsite URLs"),
-                .init(key: "token", label: "Access Token", isSecret: true),
-            ],
-            setupSteps: [
-                "Campsite is self-hosted, and its v1 API is the only one with notifications.",
-                "Ask whoever runs your instance for a Doorkeeper access token — there is no self-serve page for it.",
-            ]),
-        .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [
                 .init(

@@ -1,6 +1,6 @@
 # Inbox & Chill
 
-A native macOS menu bar app that pulls your unread/actionable items from Linear, GitHub, Slack, Campsite, custom JSON feeds, and your terminal (including Claude Code) into one queue — and then helps you empty it.
+A native macOS menu bar app that pulls your unread/actionable items from Linear, GitHub, Slack, ntfy, custom JSON feeds, and your terminal (including Claude Code) into one queue — and then helps you empty it.
 
 Inbox & Chill is a **triage queue, not a status mirror**. It doesn't try to be a client for any of these services — no composing Slack messages, no editing Linear issues. Items flow in, you act on them (open, done, snooze, pin, archive), and the queue goes to zero. The moment an item needs real work, it deep-links you into the app that owns it. The menu bar is the primary surface: click the icon (or hit a global hotkey) and a panel drops down with everything waiting for you, grouped by source.
 
@@ -10,7 +10,6 @@ Inbox & Chill is a **triage queue, not a status mirror**. It doesn't try to be a
 - Linear — full inbox mirror (mentions, assignments, comments), with real remote snooze
 - GitHub — notifications inbox (review requests, mentions, assignments)
 - Slack — mentions and unreads via Socket Mode, plus an emoji-reaction "save for later"
-- Campsite — self-hosted internal API (notifications + follow-ups)
 - ntfy — push notifications over a topic's WebSocket
 - Custom JSON feeds — point it at any URL that returns a JSON array (or `{items: [...]}`)
 - Terminal / Claude Code — local push from shell commands and Claude Code hooks

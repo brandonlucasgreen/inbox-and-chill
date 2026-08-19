@@ -13,7 +13,6 @@ the audit fixed.
 | Linear OAuth access/refresh tokens | Keychain `<sourceID>.oauthAccessToken` / `.oauthRefreshToken` / `.oauthExpiresAt` | Written by the PKCE flow; refreshed in place |
 | GitHub classic PAT | Keychain `<sourceID>.pat` | |
 | Slack user + app tokens | Keychain `<sourceID>.userToken` / `.appToken` | |
-| Campsite token | Keychain `<sourceID>.token` | |
 | JSON poller auth header | Keychain `<sourceID>.authHeader` | |
 | Local listener bearer token | In-memory + `~/Library/Application Support/InboxAndChill/local-api.json` (0600) | See below |
 
