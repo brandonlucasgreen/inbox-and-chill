@@ -12,50 +12,51 @@ those properties, it says so.
 
 ## Mark
 
-A right hand, palm out, index and middle finger raised — ✌️ — in amber on a
-plum rounded square. Silhouette only: no internal linework, no gradient on the
-hand, no outline.
+Microsoft's Fluent Emoji **victory hand** — ✌️ — Flat variant, on a plum rounded square.
+Not a hand-drawn interpretation: the actual emoji, so the icon reads as the thing people
+already know rather than as a logo of it.
 
-Source of truth: [icon.svg](icon.svg). The app's rendered sizes live in
-`Sources/App/Resources/Assets.xcassets/AppIcon.appiconset/`.
+- **Source:** [Fluent Emoji](https://github.com/microsoft/fluentui-emoji), MIT licensed
+- **Vendored:** `docs/brand/vendor/` — see its [README](vendor/README.md) for provenance,
+  licence, and how each shipped file is derived
+- **Composition:** [icon.svg](icon.svg). Rendered sizes live in
+  `Sources/App/Resources/Assets.xcassets/AppIcon.appiconset/`
 
-**Why a hand and not a tray.** The tray is what the app *does*; the peace sign is
-what it's *for*. Every competitor in this space signals volume and urgency. This
-one signals that you're allowed to be done.
+**Why a hand and not a tray.** The tray is what the app *does*; the peace sign is what it's
+*for*. Every competitor in this space signals volume and urgency. This one signals that
+you're allowed to be done.
 
-**Construction.** 1024×1024 canvas, rounded square 824×824 inset at (100,100)
-with a 185.4 corner radius — Apple's macOS icon grid. The hand is drawn in a
-100-unit box scaled 6.4× and centred, with the wrist running off the bottom of
-the content box so the hand reads as attached to an arm rather than floating.
+**Construction.** 1024×1024 canvas, rounded square 824×824 inset at (100,100) with a 185.4
+corner radius — Apple's macOS icon grid. The emoji is placed in a 640×640 box centred on
+the canvas, i.e. `translate(192,192) scale(20)` from its native 32×32 viewBox.
 
 **Rules**
 
-- Don't add finger separations, knuckle lines, or a cuff. They were tested; they
-  muddy everything below 64px and the silhouette reads fine without them.
-- Don't tilt it. Upright was chosen deliberately.
-- Don't recolor the hand. Amber on plum is the icon; monochrome is the menu bar.
+- Use the **Flat** variant. The Color variant's skin gradient turns pink against the plum
+  and muddies below 32px; Flat holds its shape to 16px.
+- Don't recolor the hand. It ships in Fluent's own `#FFC83D` / `#D67D00`.
+- Don't rotate, skew, or re-draw it. If it needs to change, change the *ground*.
 - Minimum size 16px. Below that, use the wordmark instead.
-- Clear space: 10% of the icon's width on all sides — already built into the
-  824-in-1024 inset, so don't crop the artwork out of the square.
-- Never place the hand on a light ground at icon sizes. The amber loses contrast.
+- Clear space: 10% of the icon's width on all sides — already built into the 824-in-1024
+  inset, so don't crop the artwork out of the square.
+- Keep the MIT licence file shipped alongside it in any distribution.
 
 ### Menu bar glyph
 
-Two states, both **template images** — a single alpha mask that macOS tints for
-the light or dark menu bar. Never ship them colored.
+Two states, both **template images** — a single alpha mask that macOS tints for the light
+or dark menu bar. Never ship them colored.
 
-| State | Asset | Meaning |
+| State | Asset | Derived from |
 |---|---|---|
-| Queue empty | `MenuBarPeaceOutline` | Hollow hand |
-| Something waiting | `MenuBarPeace` | Solid hand, optionally followed by a count |
+| Queue empty | `MenuBarPeaceOutline` | Fluent **High Contrast**, used as-is — already one color, so its alpha is the line art |
+| Something waiting | `MenuBarPeace` | Fluent **Flat** with every fill collapsed to one color, unioning its detail strokes into a silhouette |
 
-Sources: [menubar-solid.svg](menubar-solid.svg),
-[menubar-outline.svg](menubar-outline.svg). Drawn at 18pt, shipped at @1x and
-@2x.
+Sources: [menubar-solid.svg](menubar-solid.svg), [menubar-outline.svg](menubar-outline.svg),
+shipped at @1x (18pt) and @2x.
 
-The outline is the solid silhouette with an inset copy knocked out of it, so the
-whole glyph stays one mask. Drawing the gaps in white instead works on a light
-menu bar and disappears on a dark one — a template image has no second color.
+A multi-color emoji can never be a menu bar glyph directly — a template image carries no
+color of its own, only coverage. That constraint is why the solid state has to be flattened
+rather than simply scaled down.
 
 ---
 
@@ -69,6 +70,10 @@ The plum descends from bgreen.lol's `--accent` (`#200220`); the amber is the
 same warm note that Social Sindy's mark carries against its cool chrome; the
 cream is Unstream's light ground (`#f5f4f0`).
 
+The icon itself carries Fluent's own yellow (`#FFC83D`) rather than `--warm`. They are
+neighbours, not twins — don't "correct" either one to match the other. `--warm` is the UI
+token; the emoji's yellow belongs to the emoji.
+
 ### Light
 
 | Token | Value | Use |
@@ -79,7 +84,7 @@ cream is Unstream's light ground (`#f5f4f0`).
 | `--text-dim` | `#6E5F6E` | Secondary text |
 | `--border` | `#E2DCD4` | Dividers, input borders |
 | `--accent` | `#2A0B2A` | Primary buttons, headings |
-| `--warm` | `#E8A33D` | The one warm note — badges, marks, highlights |
+| `--warm` | `#E8A33D` | The one warm note — badges, highlights |
 | `--link` | `#1565C0` | Links (bgreen.lol's link color) |
 
 ### Dark
