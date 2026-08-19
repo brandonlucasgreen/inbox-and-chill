@@ -441,8 +441,18 @@ actor SlackConnector: Connector {
                 // events; don't shadow it with a search copy.
                 guard mentions[hit.channel]?[hit.ts] == nil else { continue }
                 seenWatchHits.insert(key)
-                watchHits[hit.channel, default: [:]][hit.ts] = hit.item
-                fresh.append(hit.item)
+                var item = hit.item
+                // `watchHit` is static so it can be tested without a socket,
+                // which also means it can't reach the name caches — it leaves
+                // the raw text, `<@U056HVBKTSA>` and all. Rendering has to
+                // happen here, where the ids can actually be looked up.
+                if let raw = match["text"].nonEmptyString {
+                    await resolveReferences(in: raw)
+                    item.snippet = Self.truncate(
+                        renderText(raw), Self.snippetLimit) ?? item.snippet
+                }
+                watchHits[hit.channel, default: [:]][hit.ts] = item
+                fresh.append(item)
             }
         }
         Self.searchLog.info("queueing \(fresh.count, privacy: .public) keyword hits")
@@ -1003,6 +1013,52 @@ actor SlackConnector: Connector {
             }
         }
         return "someone"
+    }
+
+    /// Warms the name caches for every id a message refers to, so
+    /// `renderText` can turn `<@U056…>` into `@bruno` rather than the
+    /// nothing-word "@someone".
+    ///
+    /// One `users.info` per id never seen before, then cached for the
+    /// connector's life. Labelled references (`<@U056…|bruno>`) carry their
+    /// own name and cost no call at all.
+    private func resolveReferences(in raw: String) async {
+        let references = Self.unlabelledReferences(in: raw)
+        for id in references.users where userNames[id] == nil {
+            _ = await displayName(userID: id)
+        }
+        for id in references.channels where channelNames[id] == nil {
+            _ = await channelName(id)
+        }
+    }
+
+    /// The user and channel ids in a message that Slack did *not* label.
+    ///
+    /// Pure and static so the parsing can be tested directly — it is the
+    /// same `<…>` token grammar `renderText` walks, and getting it wrong
+    /// means either a missed name or a wasted API call per message.
+    nonisolated static func unlabelledReferences(
+        in raw: String
+    ) -> (users: [String], channels: [String]) {
+        var users: [String] = []
+        var channels: [String] = []
+        var rest = Substring(raw)
+        while let open = rest.firstIndex(of: "<"),
+            let close = rest[open...].firstIndex(of: ">")
+        {
+            let token = rest[rest.index(after: open)..<close]
+            rest = rest[rest.index(after: close)...]
+            // A label after "|" is the name already; nothing to look up.
+            guard !token.contains("|"), let kind = token.first else { continue }
+            let id = String(token.dropFirst())
+            guard !id.isEmpty else { continue }
+            switch kind {
+            case "@" where !users.contains(id): users.append(id)
+            case "#" where !channels.contains(id): channels.append(id)
+            default: break
+            }
+        }
+        return (users, channels)
     }
 
     private func displayName(userID: String) async -> String {

@@ -32,6 +32,55 @@ struct SlackKeywordWatchTests {
             """)
     }
 
+    // MARK: Reference resolution
+    //
+    // Keyword-watch snippets are built by a static function that cannot
+    // reach the connector's name caches, so they arrived carrying raw Slack
+    // markup — 23 of them in the live store before this was fixed, every
+    // one a `keyword_watch` and no other kind. The connector re-renders
+    // them, and this is the parse that tells it which ids to look up first.
+
+    @Test("Bare user and channel ids are collected for lookup")
+    func bareReferencesAreCollected() {
+        let refs = SlackConnector.unlabelledReferences(
+            in: "I've added <@U056HVBKTSA>'s ID to <#C0421ABCD> so we keep it")
+        #expect(refs.users == ["U056HVBKTSA"])
+        #expect(refs.channels == ["C0421ABCD"])
+    }
+
+    @Test("A labelled reference already carries its name and costs no call")
+    func labelledReferencesAreSkipped() {
+        let refs = SlackConnector.unlabelledReferences(
+            in: "thanks <@U056HVBKTSA|bruno> and <#C0421ABCD|proj-api>")
+        #expect(refs.users.isEmpty)
+        #expect(refs.channels.isEmpty)
+    }
+
+    @Test("Each id is looked up once however often it appears")
+    func referencesAreDeduped() {
+        let refs = SlackConnector.unlabelledReferences(
+            in: "<@U1> asked <@U2>, then <@U1> answered")
+        #expect(refs.users == ["U1", "U2"])
+    }
+
+    @Test("Special tokens and links are not mistaken for ids")
+    func otherTokensAreIgnored() {
+        // `<!here>`, links and an unterminated angle bracket all share the
+        // same grammar; treating any of them as an id would burn a users.info
+        // call per message and cache a name for something that isn't a user.
+        let refs = SlackConnector.unlabelledReferences(
+            in: "<!here> see <https://example.com/x> and <@ and <#")
+        #expect(refs.users.isEmpty)
+        #expect(refs.channels.isEmpty)
+    }
+
+    @Test("Text with no references asks for nothing")
+    func plainTextNeedsNoLookup() {
+        let refs = SlackConnector.unlabelledReferences(in: "no mentions here")
+        #expect(refs.users.isEmpty)
+        #expect(refs.channels.isEmpty)
+    }
+
     private var now: Date { Date(timeIntervalSince1970: 1_760_000_000) }
     private var cutoff: Date { now.addingTimeInterval(-24 * 60 * 60) }
     private var insideWindow: String { String(now.timeIntervalSince1970 - 60) }
