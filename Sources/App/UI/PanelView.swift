@@ -207,7 +207,7 @@ struct PanelView: View {
                     .font(.system(size: 12))
                     .help("Show every source and clear the text filter")
             } else if let date = lastRefresh {
-                Text("Last refreshed \(PanelFormat.relative(date)) ago")
+                Text(PanelFormat.refreshed(date))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .help(PanelFormat.full(date))

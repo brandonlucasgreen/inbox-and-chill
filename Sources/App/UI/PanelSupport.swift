@@ -82,6 +82,19 @@ enum PanelFormat {
         }
     }
 
+    /// "Last refreshed just now" / "Last refreshed 4m ago".
+    ///
+    /// `relative` is built for row timestamps, where a bare "now" reads fine
+    /// next to a title. Slotted into a sentence it produced "Last refreshed
+    /// now ago", so the phrase is composed here rather than at each call site
+    /// — a clock skew that puts the refresh slightly in the future ("soon
+    /// ago") has the same problem and is handled by the same branch.
+    static func refreshed(_ date: Date, now: Date = .now) -> String {
+        let seconds = now.timeIntervalSince(date)
+        guard seconds >= 60 else { return "Last refreshed just now" }
+        return "Last refreshed \(relative(date, now: now)) ago"
+    }
+
     static func full(_ date: Date) -> String {
         date.formatted(date: .abbreviated, time: .shortened)
     }

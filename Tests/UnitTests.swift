@@ -351,6 +351,43 @@ struct PanelMotionTests {
     }
 }
 
+// MARK: - Refresh phrasing (Sources/App/UI/PanelSupport.swift)
+
+/// `PanelFormat.relative` is written for row timestamps, where "now" stands
+/// alone. The empty-queue footer slots it into a sentence, which is how
+/// "Last refreshed now ago" reached a screenshot — so the phrase is composed
+/// once, and these pin the two ends of it.
+struct PanelRefreshPhraseTests {
+    private let now = Date(timeIntervalSince1970: 1_760_000_000)
+
+    @Test("A just-completed refresh reads as a sentence, not \"now ago\"")
+    func aFreshRefreshReadsAsASentence() {
+        #expect(PanelFormat.refreshed(now, now: now) == "Last refreshed just now")
+        #expect(
+            PanelFormat.refreshed(now.addingTimeInterval(-59), now: now)
+                == "Last refreshed just now")
+    }
+
+    /// A clock that puts the last refresh slightly in the future would
+    /// otherwise render "Last refreshed soon ago".
+    @Test("A future timestamp never produces \"soon ago\"")
+    func aFutureRefreshDoesNotSaySoonAgo() {
+        let phrase = PanelFormat.refreshed(now.addingTimeInterval(30), now: now)
+        #expect(phrase == "Last refreshed just now")
+        #expect(!phrase.contains("ago"))
+    }
+
+    @Test("Past the minute it goes back to the compact form")
+    func olderRefreshesKeepTheCompactForm() {
+        #expect(
+            PanelFormat.refreshed(now.addingTimeInterval(-240), now: now)
+                == "Last refreshed 4m ago")
+        #expect(
+            PanelFormat.refreshed(now.addingTimeInterval(-7200), now: now)
+                == "Last refreshed 2h ago")
+    }
+}
+
 // MARK: - Menu bar badge (Sources/App/Models/MenuBarBadge.swift)
 
 /// Two independent counters, rendered as `total • high-signal`.

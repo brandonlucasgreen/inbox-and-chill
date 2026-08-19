@@ -333,7 +333,7 @@ struct MainWindowView: View {
         if let detail = scope.emptyDetail { return detail }
         guard case .all = scope else { return nil }
         guard let lastRefresh else { return "Waiting for the first sync…" }
-        return "Last refreshed \(PanelFormat.relative(lastRefresh)) ago."
+        return PanelFormat.refreshed(lastRefresh) + "."
     }
 
     // MARK: Context menu
