@@ -82,8 +82,13 @@ struct MainWindowView: View {
     // MARK: Detail
 
     private var detail: some View {
-        table
-            .navigationTitle(scope.title(in: index))
+        // Built once here, not once per row. `index` walks every item, and
+        // reading it inside the table's column builders (and `tooltip`) made
+        // that walk happen for every visible row — invisible at ten items,
+        // very visible at a thousand.
+        let sources = index
+        return table(sources)
+            .navigationTitle(scope.title(in: sources))
             .navigationSubtitle(subtitle)
             .searchable(
                 text: $searchText,
@@ -95,7 +100,7 @@ struct MainWindowView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
     }
 
-    private var table: some View {
+    private func table(_ index: SourceIndex) -> some View {
         Table(rows, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("Source", value: \.sourceKind) { item in
                 let source = index.display(for: item)
@@ -107,7 +112,7 @@ struct MainWindowView: View {
             TableColumn("Title", value: \.title) { item in
                 Text(item.title)
                     .fontWeight(item.highSignal ? .semibold : .regular)
-                    .help(tooltip(for: item))
+                    .help(tooltip(for: item, in: index))
                     .draggable(ItemDragPayload(item))
             }
             .width(min: 200, ideal: 420)
@@ -629,7 +634,7 @@ struct MainWindowView: View {
             .max()
     }
 
-    private func tooltip(for item: Item) -> String {
+    private func tooltip(for item: Item, in index: SourceIndex) -> String {
         var lines = [item.title]
         if let snippet = item.snippet, !snippet.isEmpty {
             lines.append(snippet)

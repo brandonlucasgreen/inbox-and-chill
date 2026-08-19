@@ -479,6 +479,134 @@ struct PanelKeyInputTests {
     }
 }
 
+// MARK: - Panel layout (Sources/App/UI/PanelQueue.swift)
+
+/// The panel's sections, order and filter rules, derived in one pass.
+///
+/// These used to be a dozen chained computed properties on the view, each
+/// re-running on every read — including `index`, which was read *inside* the
+/// row loop and walked every item in the store to answer one lookup. Pulling
+/// them into a value is what made the panel linear instead of quadratic, and
+/// this suite is what says the behaviour came through the move unchanged.
+struct PanelQueueTests {
+    private func item(
+        _ uid: String, source: String = "a", title: String = "T",
+        snippet: String? = nil, actor: String? = nil, minutesAgo: Int = 0,
+        pinned: Bool = false, snoozedForHours: Int? = nil
+    ) -> Item {
+        let item = Item(
+            uid: uid, sourceID: source, sourceKind: "test", kind: "mention",
+            title: title, snippet: snippet, actorName: actor,
+            occurredAt: Date(timeIntervalSinceNow: TimeInterval(-60 * minutesAgo)))
+        if pinned { item.pinnedAt = .now }
+        if let hours = snoozedForHours {
+            item.snoozedUntil = Date(timeIntervalSinceNow: TimeInterval(3600 * hours))
+        }
+        return item
+    }
+
+    private let configs = [
+        SourceConfig(id: "a", kind: "test", displayName: "Alpha", sortOrder: 0),
+        SourceConfig(id: "b", kind: "test", displayName: "Beta", sortOrder: 1),
+    ]
+
+    private func layout(
+        _ items: [Item], filter: String? = nil, text: String = "",
+        showSnoozed: Bool = false
+    ) -> PanelQueue {
+        PanelQueue(
+            queued: items, configs: configs, sourceFilter: filter,
+            filterText: text, showSnoozed: showSnoozed)
+    }
+
+    @Test("Pinned rows leave their source group rather than appearing twice")
+    func pinnedIsExclusive() {
+        let queue = layout([item("1", pinned: true), item("2")])
+        #expect(queue.pinned.map(\.uid) == ["1"])
+        #expect(queue.groups.flatMap { $0.items.map(\.uid) } == ["2"])
+    }
+
+    @Test("Snoozed rows are their own section, and pinned outranks snoozed")
+    func snoozedIsExclusiveAndPinnedWins() {
+        let queue = layout([
+            item("1", snoozedForHours: 3),
+            item("2", pinned: true, snoozedForHours: 3),
+        ])
+        #expect(queue.snoozed.map(\.uid) == ["1"])
+        #expect(queue.pinned.map(\.uid) == ["2"])
+        #expect(queue.groups.isEmpty)
+    }
+
+    @Test("Groups follow configured source order, not item order")
+    func groupsFollowSourceOrder() {
+        let queue = layout([item("1", source: "b"), item("2", source: "a")])
+        #expect(queue.groups.map(\.source.id) == ["a", "b"])
+    }
+
+    @Test("Traversal order is pinned, then groups, then snoozed when shown")
+    func visibleOrderMatchesTheScreen() {
+        let items = [
+            item("p", pinned: true), item("a1"), item("b1", source: "b"),
+            item("s", snoozedForHours: 2),
+        ]
+        #expect(layout(items).visibleUIDs == ["p", "a1", "b1"])
+        #expect(
+            layout(items, showSnoozed: true).visibleUIDs
+                == ["p", "a1", "b1", "s"])
+    }
+
+    @Test("A collapsed Snoozed section is skipped by the keyboard")
+    func collapsedSnoozedIsNotTraversable() {
+        // Otherwise ↓ would move the selection onto a row nobody can see.
+        let queue = layout([item("s", snoozedForHours: 2)])
+        #expect(queue.snoozed.count == 1)
+        #expect(queue.visibleUIDs.isEmpty)
+        #expect(!queue.isEmpty)
+    }
+
+    @Test("The text filter reads title, snippet, person and source name")
+    func textFilterFields() {
+        let items = [
+            item("1", title: "Deploy failed"),
+            item("2", title: "T", snippet: "the roadmap doc"),
+            item("3", title: "T", actor: "Amaan"),
+            item("4", source: "b", title: "T"),
+        ]
+        #expect(layout(items, text: "deploy").matchCount == 1)
+        #expect(layout(items, text: "ROADMAP").matchCount == 1)
+        #expect(layout(items, text: "amaan").matchCount == 1)
+        #expect(layout(items, text: "beta").matchCount == 1)
+        #expect(layout(items, text: "  ").matchCount == 4)
+    }
+
+    @Test("Chip counts describe the text filter, before the source scope")
+    func chipCountsIgnoreTheSourceScope() {
+        // Otherwise picking a chip would zero every other chip's count and
+        // there would be no way to see what switching to it would show.
+        let items = [item("1"), item("2"), item("3", source: "b")]
+        let queue = layout(items, filter: "a")
+        #expect(queue.chipCounts == ["a": 2, "b": 1])
+        #expect(queue.matchCount == 3)
+        #expect(queue.groups.map(\.source.id) == ["a"])
+    }
+
+    @Test("The active filter keeps its chip after its last item leaves")
+    func filteredSourceKeepsItsChip() {
+        // Without this the scope is stuck: the chip you would click to get
+        // back to "All" isn't on screen.
+        let queue = layout([item("1", source: "a")], filter: "b")
+        #expect(queue.chips.map(\.id) == ["a", "b"])
+        #expect(queue.isEmpty)
+    }
+
+    @Test("An unconfigured source still gets a named group")
+    func unknownSourceFallsBack() {
+        let queue = layout([item("1", source: "gone")])
+        #expect(queue.groups.count == 1)
+        #expect(!queue.groups[0].source.name.isEmpty)
+    }
+}
+
 // MARK: - Keychain write failures (Sources/App/Support/Keychain.swift)
 
 /// A credential that fails to save is indistinguishable from one that saved
@@ -813,6 +941,65 @@ struct NtfyConnectorTests {
         let item = try #require(NtfyConnector.item(from: f))
         #expect(item.title == "disk almost full")
         #expect(item.snippet == nil)
+    }
+
+    // MARK: Click-through (Sources/App/Connectors/Ntfy/NtfyConnector.swift)
+    //
+    // ntfy rows were the only ones in the queue that did nothing on ⏎,
+    // because most publishers put the link in the message text rather than
+    // in any of the three structured fields that carry one.
+
+    @Test("An explicit click URL wins over everything else")
+    func clickOutranksTheRest() throws {
+        let f = try frame(
+            #"{"id":"x","event":"message","message":"see https://body.example","click":"https://click.example","attachment":{"url":"https://file.example"}}"#)
+        #expect(NtfyConnector.link(for: f) == "https://click.example")
+    }
+
+    @Test("A view action is used when there is no click URL")
+    func viewActionIsUsed() throws {
+        let f = try frame(
+            #"{"id":"x","event":"message","message":"build failed","actions":[{"action":"broadcast","label":"nope"},{"action":"view","label":"Open","url":"https://ci.example/1"}]}"#)
+        #expect(NtfyConnector.link(for: f) == "https://ci.example/1")
+    }
+
+    @Test("http and broadcast actions are never opened")
+    func nonViewActionsAreIgnored() throws {
+        // Clicking a row must not fire a publisher-defined HTTP request.
+        let f = try frame(
+            #"{"id":"x","event":"message","message":"no link here","actions":[{"action":"http","label":"Delete","url":"https://api.example/delete"}]}"#)
+        #expect(NtfyConnector.link(for: f) == nil)
+    }
+
+    @Test("A URL in the message body is the last resort, and does get used")
+    func bodyURLIsDetected() throws {
+        let f = try frame(
+            #"{"id":"x","event":"message","title":"PR ready","message":"Review it at https://github.com/a/b/pull/9 please."}"#)
+        // The trailing full stop belongs to the sentence, not the URL.
+        #expect(
+            NtfyConnector.link(for: f) == "https://github.com/a/b/pull/9")
+    }
+
+    @Test("The title is read when the body has no URL")
+    func titleURLIsDetected() throws {
+        let f = try frame(
+            #"{"id":"x","event":"message","title":"https://status.example is down","message":"paging you"}"#)
+        #expect(NtfyConnector.link(for: f) == "https://status.example")
+    }
+
+    @Test("Plain text stays unclickable rather than guessing")
+    func plainTextHasNoLink() throws {
+        for message in ["disk almost full", "deploy took 3.2s", "v1.2.3 shipped"] {
+            #expect(NtfyConnector.firstURL(in: message) == nil)
+        }
+    }
+
+    @Test("Email addresses and bare hostnames are not opened")
+    func onlyHTTPSchemesAreOpened() throws {
+        // NSDataDetector matches both; a click that opened a mail composer
+        // because the message mentioned an address would be a surprise.
+        #expect(NtfyConnector.firstURL(in: "mail brandon@buffer.com") == nil)
+        #expect(NtfyConnector.firstURL(in: "ftp://files.example/x") == nil)
     }
 
     @Test("Priority 4 and 5 are high-signal; 1-3 and the default are not")

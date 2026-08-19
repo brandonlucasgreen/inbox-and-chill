@@ -13,7 +13,14 @@ struct PanelView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @Query(sort: \Item.occurredAt, order: .reverse) private var items: [Item]
+    /// The queue only — done items are the archive's business, and there
+    /// are two orders of magnitude more of them. Fetching them here meant
+    /// every panel render walked the entire 90-day archive to find the
+    /// handful of rows on screen.
+    @Query(
+        filter: #Predicate<Item> { $0.doneAt == nil },
+        sort: \Item.occurredAt, order: .reverse)
+    private var items: [Item]
     @Query(sort: \SourceConfig.sortOrder)
     private var sourceConfigs: [SourceConfig]
 
@@ -29,24 +36,26 @@ struct PanelView: View {
     @FocusState private var focus: PanelFocus?
 
     var body: some View {
+        // Once per body pass, not once per read and not once per row.
+        let queue = queue
         VStack(spacing: 0) {
             if showArchive {
                 ArchiveView(
-                    items: archivedItems, index: index,
+                    index: queue.index,
                     restore: { restoreFromArchive($0) },
                     onClose: { showArchive = false })
             } else {
                 FilterBar(
-                    sources: chipSources, counts: chipCounts,
-                    totalCount: textFiltered(queued).count,
+                    sources: queue.chips, counts: queue.chipCounts,
+                    totalCount: queue.matchCount,
                     selection: sourceFilterBinding, filterText: $filterText,
                     isFiltering: $isFiltering, focus: $focus,
                     onClearFilter: { clearFilter() })
                 Divider()
-                queue
+                queueList(queue)
             }
             Divider()
-            footer
+            footer(queue.index)
         }
         .frame(width: 420, height: 560)
         .background { commandShortcuts }
@@ -58,9 +67,9 @@ struct PanelView: View {
         .onKeyPress(phases: .down) { handleKey($0) }
         .onAppear {
             focus = .list
-            if selectedUID == nil { selectedUID = visibleUIDs.first }
+            if selectedUID == nil { selectedUID = queue.visibleUIDs.first }
         }
-        .onChange(of: visibleUIDs) { old, new in
+        .onChange(of: queue.visibleUIDs) { old, new in
             reconcileSelection(old: old, new: new)
         }
         .task(id: selectedUID) {
@@ -85,8 +94,8 @@ struct PanelView: View {
 
     // MARK: Queue
 
-    @ViewBuilder private var queue: some View {
-        if pinnedItems.isEmpty && activeItems.isEmpty && snoozedItems.isEmpty {
+    @ViewBuilder private func queueList(_ queue: PanelQueue) -> some View {
+        if queue.isEmpty {
             emptyState
         } else {
             ScrollViewReader { proxy in
@@ -95,18 +104,18 @@ struct PanelView: View {
                         alignment: .leading, spacing: 0,
                         pinnedViews: [.sectionHeaders]
                     ) {
-                        if !pinnedItems.isEmpty {
+                        if !queue.pinned.isEmpty {
                             Section {
-                                rows(pinnedItems)
+                                rows(queue.pinned, index: queue.index)
                             } header: {
                                 PanelSectionHeader(
                                     title: "Pinned", systemImage: "pin.fill",
-                                    count: pinnedItems.count)
+                                    count: queue.pinned.count)
                             }
                         }
-                        ForEach(activeGroups) { group in
+                        ForEach(queue.groups) { group in
                             Section {
-                                rows(group.items)
+                                rows(group.items, index: queue.index)
                             } header: {
                                 PanelSectionHeader(
                                     title: group.source.name,
@@ -114,13 +123,13 @@ struct PanelView: View {
                                     count: group.items.count)
                             }
                         }
-                        if !snoozedItems.isEmpty { snoozedSection }
+                        if !queue.snoozed.isEmpty { snoozedSection(queue) }
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 4)
                     .animation(
                         PanelMotion.queue(reduceMotion: reduceMotion),
-                        value: visibleUIDs)
+                        value: queue.visibleUIDs)
                     // Selection opens the focused row and closes the one it
                     // left (`ExpandingText`). Animating it at the list level
                     // too is what makes every row below the pair slide with
@@ -144,7 +153,9 @@ struct PanelView: View {
         }
     }
 
-    @ViewBuilder private func rows(_ list: [Item]) -> some View {
+    @ViewBuilder private func rows(
+        _ list: [Item], index: SourceIndex
+    ) -> some View {
         ForEach(list) { item in
             ItemRowView(
                 item: item, display: index.display(for: item),
@@ -159,9 +170,9 @@ struct PanelView: View {
         }
     }
 
-    private var snoozedSection: some View {
+    private func snoozedSection(_ queue: PanelQueue) -> some View {
         Section {
-            if showSnoozed { rows(snoozedItems) }
+            if showSnoozed { rows(queue.snoozed, index: queue.index) }
         } header: {
             Button {
                 withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
@@ -170,13 +181,13 @@ struct PanelView: View {
             } label: {
                 PanelSectionHeader(
                     title: "Snoozed", systemImage: "clock",
-                    count: snoozedItems.count,
+                    count: queue.snoozed.count,
                     disclosureExpanded: showSnoozed)
             }
             .buttonStyle(.plain)
             .help(showSnoozed ? "Hide snoozed items" : "Show snoozed items")
             .accessibilityLabel(
-                "Snoozed, ^[\(snoozedItems.count) item](inflect: true)")
+                "Snoozed, ^[\(queue.snoozed.count) item](inflect: true)")
             .accessibilityAddTraits(showSnoozed ? [.isSelected] : [])
         }
     }
@@ -214,7 +225,7 @@ struct PanelView: View {
 
     // MARK: Footer
 
-    private var footer: some View {
+    private func footer(_ index: SourceIndex) -> some View {
         HStack(spacing: 8) {
             Button {
                 refresh()
@@ -235,7 +246,7 @@ struct PanelView: View {
                 "Refresh all sources", shortcut: "⌘R", hovered: $hoveredHint)
 
             HStack(spacing: 1) {
-                ForEach(statusSources) { source in
+                ForEach(statusSources(index)) { source in
                     SourceStatusDot(
                         display: source, status: appState.statuses[source.id],
                         hoveredHint: $hoveredHint)
@@ -456,7 +467,7 @@ struct PanelView: View {
     /// keeps ←/← predictable instead of teleporting to the far side.
     private func moveFilter(_ delta: Int) {
         guard focus != .filter else { return }
-        let options: [String?] = [nil] + chipSources.map { $0.id as String? }
+        let options: [String?] = [nil] + queue.chips.map { $0.id as String? }
         guard options.count > 1 else { return }
         let current = options.firstIndex(of: appState.selectedSourceFilter) ?? 0
         let next = min(max(current + delta, 0), options.count - 1)
@@ -473,7 +484,7 @@ struct PanelView: View {
     private func moveSelection(_ delta: Int) {
         guard
             let next = PanelSelection.next(
-                from: selectedUID, in: visibleUIDs, by: delta)
+                from: selectedUID, in: queue.visibleUIDs, by: delta)
         else { return }
         selectedUID = next
         focus = .list
@@ -546,8 +557,13 @@ struct PanelView: View {
 
     // MARK: Derived state
 
-    private var index: SourceIndex {
-        SourceIndex(configs: sourceConfigs, items: items)
+    /// The whole visible layout, derived in one pass. Read once per body
+    /// evaluation and passed down — never re-read inside a loop.
+    private var queue: PanelQueue {
+        PanelQueue(
+            queued: items, configs: sourceConfigs,
+            sourceFilter: appState.selectedSourceFilter,
+            filterText: filterText, showSnoozed: showSnoozed)
     }
 
     private var sourceFilterBinding: Binding<String?> {
@@ -559,71 +575,15 @@ struct PanelView: View {
             })
     }
 
-    /// Everything still in the queue: pinned, active, or snoozed.
-    private var queued: [Item] { items.filter { !$0.isDone } }
-
-    private var pinnedItems: [Item] { scoped(queued.filter(\.isPinned)) }
-
-    private var activeItems: [Item] {
-        scoped(queued.filter { $0.isActive && !$0.isPinned })
-    }
-
-    private var snoozedItems: [Item] {
-        scoped(queued.filter { $0.isSnoozed && !$0.isPinned })
-    }
-
-    private var activeGroups: [SourceGroup] {
-        let grouped = Dictionary(grouping: activeItems, by: \.sourceID)
-        return index.ordered(ids: grouped.keys).compactMap { source in
-            guard let group = grouped[source.id], !group.isEmpty else {
-                return nil
-            }
-            return SourceGroup(source: source, items: group)
-        }
-    }
-
-    /// Keyboard traversal order: exactly what is on screen, top to bottom.
-    private var visibleUIDs: [String] {
-        pinnedItems.map(\.uid) + activeGroups.flatMap { $0.items.map(\.uid) }
-            + (showSnoozed ? snoozedItems.map(\.uid) : [])
-    }
-
     private var selectedItem: Item? {
         guard let selectedUID else { return nil }
         return items.first { $0.uid == selectedUID }
     }
 
-    /// One chip per source with queued items, plus the current filter even if
-    /// its source just emptied out (so the scope never gets stuck invisible).
-    private var chipSources: [SourceDisplay] {
-        var ids = Set(textFiltered(queued).map(\.sourceID))
-        if let filter = appState.selectedSourceFilter { ids.insert(filter) }
-        return index.ordered(ids: ids)
-    }
-
-    private var chipCounts: [String: Int] {
-        textFiltered(queued).reduce(into: [:]) { counts, item in
-            counts[item.sourceID, default: 0] += 1
-        }
-    }
-
-    private var statusSources: [SourceDisplay] {
+    private func statusSources(_ index: SourceIndex) -> [SourceDisplay] {
         index.ordered(
             ids: Set(sourceConfigs.map(\.id))
                 .union(appState.statuses.keys.filter { !$0.isEmpty }))
-    }
-
-    private var archivedItems: [Item] {
-        let cutoff = TriagePolicy.purgeCutoff()
-        return items
-            .compactMap { item -> (Item, Date)? in
-                guard let doneAt = item.doneAt, doneAt >= cutoff else {
-                    return nil
-                }
-                return (item, doneAt)
-            }
-            .sorted { $0.1 > $1.1 }
-            .map { $0.0 }
     }
 
     private var lastRefresh: Date? {
@@ -640,28 +600,6 @@ struct PanelView: View {
             || !filterText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    // MARK: Filtering
-
-    private func scoped(_ list: [Item]) -> [Item] {
-        var result = textFiltered(list)
-        if let filter = appState.selectedSourceFilter {
-            result = result.filter { $0.sourceID == filter }
-        }
-        return result
-    }
-
-    private func textFiltered(_ list: [Item]) -> [Item] {
-        let query = filterText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return list }
-        let sources = index
-        return list.filter { item in
-            [
-                item.title, item.snippet ?? "", item.actorName ?? "",
-                sources.display(for: item).name,
-            ]
-            .contains { $0.lowercased().contains(query) }
-        }
-    }
 }
 
 /// Sticky section header: glyph, title, count, optional disclosure chevron.

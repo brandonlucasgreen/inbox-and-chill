@@ -1,10 +1,21 @@
 import AppKit
+import SwiftData
 import SwiftUI
 
 /// In-panel archive: done items from the last 90 days (§2.1.6), searchable,
 /// each restorable back into the active queue.
+///
+/// It owns its own query rather than being handed the panel's. The archive
+/// is where nearly every item ends up — over a thousand after two days of
+/// real use — and the panel was fetching all of them on every render just to
+/// filter them back out. Querying here means they are fetched only while
+/// this view is actually on screen.
 struct ArchiveView: View {
-    let items: [Item]
+    @Query(
+        filter: #Predicate<Item> { $0.doneAt != nil },
+        sort: \Item.doneAt, order: .reverse)
+    private var items: [Item]
+
     let index: SourceIndex
     var restore: (Item) -> Void
     var onClose: () -> Void
@@ -76,10 +87,17 @@ struct ArchiveView: View {
         .padding(.vertical, 6)
     }
 
+    /// Retention is enforced here as well as by the purge: an item that is
+    /// past the cutoff but not yet swept shouldn't reappear in the archive.
+    private var retained: [Item] {
+        let cutoff = TriagePolicy.purgeCutoff()
+        return items.filter { ($0.doneAt ?? .distantPast) >= cutoff }
+    }
+
     private var matches: [Item] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return items }
-        return items.filter { item in
+        guard !query.isEmpty else { return retained }
+        return retained.filter { item in
             [
                 item.title, item.snippet ?? "", item.actorName ?? "",
                 index.display(for: item).name,

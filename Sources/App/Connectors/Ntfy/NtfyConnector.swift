@@ -58,6 +58,14 @@ actor NtfyConnector: Connector {
             var name: String?
             var url: String?
         }
+        /// A publisher-defined action button. Only `view` carries somewhere
+        /// to go; `http` and `broadcast` fire a request the app has no
+        /// business making on a click, so they are ignored.
+        struct Action: Decodable, Sendable {
+            var action: String?
+            var label: String?
+            var url: String?
+        }
         var id: String
         var time: Double?
         var event: String?
@@ -67,6 +75,7 @@ actor NtfyConnector: Connector {
         var priority: Int?
         var tags: [String]?
         var click: String?
+        var actions: [Action]?
         var attachment: Attachment?
     }
 
@@ -99,12 +108,60 @@ actor NtfyConnector: Connector {
             kind: "ntfy_message",
             title: title,
             snippet: snippet,
-            url: frame.click?.nonEmptyOrNil ?? frame.attachment?.url?.nonEmptyOrNil,
+            url: link(for: frame),
             // The topic is the closest thing ntfy has to a channel, and one
             // source can subscribe to several — so it earns the actor slot.
             actorName: frame.topic?.nonEmptyOrNil,
             occurredAt: frame.time.map { Date(timeIntervalSince1970: $0) } ?? .now,
             highSignal: priority >= 4)
+    }
+
+    /// Where a click on this row should go, most explicit source first.
+    ///
+    /// ntfy has three structured places a publisher can put a destination —
+    /// `click`, a `view` action, an attachment — and most publishers use
+    /// none of them: the link is simply sitting in the message text, which
+    /// left these rows as the only ones in the queue that did nothing when
+    /// you pressed ⏎ on them. Reading the text is a guess, so it ranks below
+    /// all three of the places that are not a guess.
+    nonisolated static func link(for frame: Frame) -> String? {
+        if let click = frame.click?.nonEmptyOrNil { return click }
+        if let view = frame.actions?.first(where: {
+            ($0.action ?? "view").lowercased() == "view"
+                && $0.url?.nonEmptyOrNil != nil
+        }) {
+            return view.url?.nonEmptyOrNil
+        }
+        if let attachment = frame.attachment?.url?.nonEmptyOrNil {
+            return attachment
+        }
+        return firstURL(in: frame.message) ?? firstURL(in: frame.title)
+    }
+
+    /// The first http(s) URL in a piece of text, or `nil`.
+    ///
+    /// `NSDataDetector` rather than a regex, because it already knows what a
+    /// URL looks like at the end of a sentence — trailing full stops and
+    /// closing brackets are exactly what hand-rolled patterns swallow.
+    /// Restricted to http and https on purpose: the detector also matches
+    /// bare hostnames and email addresses, and opening a mail composer
+    /// because a message mentioned an address would be a surprise.
+    nonisolated static func firstURL(in text: String?) -> String? {
+        guard let text, !text.isEmpty,
+            let detector = try? NSDataDetector(
+                types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        var found: String?
+        detector.enumerateMatches(in: text, range: range) { match, _, stop in
+            guard let url = match?.url,
+                let scheme = url.scheme?.lowercased(),
+                scheme == "http" || scheme == "https"
+            else { return }
+            found = url.absoluteString
+            stop.pointee = true
+        }
+        return found
     }
 
     // MARK: - URL construction
