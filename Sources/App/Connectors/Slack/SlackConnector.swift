@@ -433,7 +433,8 @@ actor SlackConnector: Connector {
             for match in matches {
                 guard
                     let hit = Self.watchHit(
-                        from: match, term: term, selfUserID: selfUserID, notBefore: cutoff)
+                        from: match, term: term, selfUserID: selfUserID,
+                        teamID: teamID, notBefore: cutoff)
                 else { continue }
                 let key = "\(hit.channel):\(hit.ts)"
                 guard !seenWatchHits.contains(key) else { continue }
@@ -526,7 +527,8 @@ actor SlackConnector: Connector {
     /// missing the ids a triage verb needs — pure, so the mapping is testable
     /// without a workspace.
     nonisolated static func watchHit(
-        from match: SlackJSON, term: String, selfUserID: String, notBefore: Date
+        from match: SlackJSON, term: String, selfUserID: String, teamID: String = "",
+        notBefore: Date
     ) -> (channel: String, ts: String, item: RemoteItem)? {
         guard let ts = match["ts"].nonEmptyString,
             let channel = match["channel"]["id"].nonEmptyString,
@@ -544,6 +546,7 @@ actor SlackConnector: Connector {
         let rawName = match["channel"]["name"].nonEmptyString
         let channelLabel = rawName.map { Self.isRawChannelID($0) ? "a direct message" : $0 }
             ?? "a channel"
+        let permalink = match["permalink"].nonEmptyString
         return (
             channel, ts,
             RemoteItem(
@@ -551,11 +554,14 @@ actor SlackConnector: Connector {
                 kind: "keyword_watch",
                 title: "“\(term)” in #\(channelLabel)",
                 snippet: truncate(match["text"].nonEmptyString, snippetLimit),
-                url: match["permalink"].nonEmptyString,
+                // Native first: Slack.app can't be handed an https URL, so a
+                // permalink would go out to the default browser and bounce.
+                url: permalink.flatMap { nativeLink(fromPermalink: $0, teamID: teamID) }
+                    ?? permalink,
                 actorName: who,
                 occurredAt: occurredAt,
                 highSignal: true,
-                payload: payload(channel: channel, ts: ts))
+                payload: payload(channel: channel, ts: ts, permalink: permalink))
         )
     }
 
@@ -973,13 +979,16 @@ actor SlackConnector: Connector {
             kind: "emoji_save",
             title: "Saved: \(body)",
             snippet: nil,
-            // Permalinks are https and hand off to the Slack app; unlike our
-            // slack:// links they still work if Slack isn't installed.
-            url: permalink ?? deepLink(channel: channel, message: ts),
+            // Prefer a native deep link built from the permalink; the
+            // permalink itself rides along in the payload as the fallback
+            // for a Mac with no Slack app (see `AppState.open`).
+            url: permalink.flatMap {
+                Self.nativeLink(fromPermalink: $0, teamID: teamID)
+            } ?? permalink ?? deepLink(channel: channel, message: ts),
             actorName: nil,
             occurredAt: SlackTS.date(ts) ?? .now,
             highSignal: false,
-            payload: Self.payload(channel: channel, ts: ts))
+            payload: Self.payload(channel: channel, ts: ts, permalink: permalink))
     }
 
     /// `slack://` opens the native client and jumps straight to the message,
@@ -1202,10 +1211,70 @@ actor SlackConnector: Connector {
     private struct StoredRef: Codable {
         var channel: String
         var ts: String
+        /// The https permalink, kept so a row whose link is `slack://` can
+        /// still fall back to the web when Slack isn't installed — and so
+        /// the shareable form of the link is never thrown away.
+        var permalink: String?
     }
 
-    private static func payload(channel: String, ts: String) -> Data? {
-        try? JSONEncoder().encode(StoredRef(channel: channel, ts: ts))
+    /// Rewrites a Slack permalink as a native deep link.
+    ///
+    /// Slack.app registers the `slack` URL scheme and **nothing else**: it
+    /// declares no associated domains, so an `https://…slack.com/archives/…`
+    /// URL cannot be handed to it directly. Opening one goes to the default
+    /// https handler — a browser, or a picker like Velja — which loads a page
+    /// whose only job is to bounce back into Slack. This skips all of that.
+    ///
+    /// Permalinks look like
+    /// `https://<workspace>.slack.com/archives/<CHANNEL>/p<ts without its dot>`,
+    /// optionally with `?thread_ts=…&cid=…`. Returns nil for anything that
+    /// isn't that shape, so an unfamiliar link is left alone rather than
+    /// turned into a deep link that goes nowhere.
+    nonisolated static func nativeLink(
+        fromPermalink permalink: String, teamID: String
+    ) -> String? {
+        guard !teamID.isEmpty,
+            let url = URL(string: permalink),
+            url.host()?.hasSuffix("slack.com") == true
+        else { return nil }
+        let parts = url.pathComponents.filter { $0 != "/" }
+        guard parts.count >= 3, parts[0] == "archives" else { return nil }
+        let channel = parts[1]
+        // `p1786640860239779` → `1786640860.239779`: the dot always sits six
+        // digits from the end.
+        let stamp = parts[2]
+        guard stamp.hasPrefix("p") else { return nil }
+        let digits = stamp.dropFirst()
+        guard digits.count > 6, digits.allSatisfy(\.isNumber) else { return nil }
+        let ts = "\(digits.dropLast(6)).\(digits.suffix(6))"
+
+        var link = "slack://channel?team=\(teamID)&id=\(channel)&message=\(ts)"
+        // A permalink to a threaded reply carries the parent's ts; without it
+        // Slack opens the channel rather than the thread.
+        if let thread = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "thread_ts" })?.value,
+            !thread.isEmpty
+        {
+            link += "&thread_ts=\(thread)"
+        }
+        return link
+    }
+
+    /// The https permalink stored alongside a Slack item, if it has one.
+    /// `AppState.open` uses it when nothing on this Mac handles `slack://`.
+    nonisolated static func permalink(in payload: Data) -> String? {
+        let stored = try? JSONDecoder().decode(StoredRef.self, from: payload)
+        guard let permalink = stored?.permalink, !permalink.isEmpty else {
+            return nil
+        }
+        return permalink
+    }
+
+    private static func payload(
+        channel: String, ts: String, permalink: String? = nil
+    ) -> Data? {
+        try? JSONEncoder().encode(
+            StoredRef(channel: channel, ts: ts, permalink: permalink))
     }
 
     /// Recovers the channel/ts a triage verb needs. Prefers the item's stored

@@ -460,9 +460,34 @@ final class AppState {
     // MARK: Triage actions (called from UI)
 
     func open(_ item: Item) {
-        if let url = item.url { NSWorkspace.shared.open(url) }
+        guard let url = item.url else { return }
+        NSWorkspace.shared.open(Self.openable(url, payload: item.payload))
         // Open ≠ done (decision §2.1.2).
     }
+
+    /// Which of an item's links to actually open.
+    ///
+    /// Slack rows carry a `slack://` deep link so they land in the Slack app
+    /// rather than bouncing through a browser. That link is dead on a Mac
+    /// without Slack installed, so the https permalink rides along in the
+    /// payload and is used instead when nothing handles the scheme.
+    static func openable(_ url: URL, payload: Data?) -> URL {
+        guard url.scheme == "slack", !handlesSlackScheme() else { return url }
+        guard let payload,
+            let fallback = SlackConnector.permalink(in: payload),
+            let web = URL(string: fallback)
+        else { return url }
+        return web
+    }
+
+    /// Cached: it's a Launch Services round trip, and the answer only
+    /// changes if the user installs or removes Slack mid-session.
+    private static let slackSchemeHandled: Bool = {
+        guard let probe = URL(string: "slack://channel") else { return false }
+        return NSWorkspace.shared.urlForApplication(toOpen: probe) != nil
+    }()
+
+    private static func handlesSlackScheme() -> Bool { slackSchemeHandled }
 
     func markDone(_ item: Item) {
         undoStack.append(item.uid)

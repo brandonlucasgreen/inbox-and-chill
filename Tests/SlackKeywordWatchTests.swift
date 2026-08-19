@@ -32,6 +32,71 @@ struct SlackKeywordWatchTests {
             """)
     }
 
+    // MARK: Native deep links
+    //
+    // Slack.app registers the `slack` scheme and declares no associated
+    // domains, so an https permalink cannot be handed to it — it goes to the
+    // default https handler (a browser, or a picker like Velja) which loads
+    // a page whose only job is to bounce back into Slack. Rewriting the
+    // permalink skips the round trip.
+
+    @Test("A permalink becomes a slack:// deep link")
+    func permalinkBecomesDeepLink() {
+        let link = SlackConnector.nativeLink(
+            fromPermalink: "https://buffer.slack.com/archives/C096W5L93V2/p1786640860239779",
+            teamID: "T02ABCD")
+        // The dot always sits six digits from the end of the p-stamp.
+        #expect(
+            link == "slack://channel?team=T02ABCD&id=C096W5L93V2&message=1786640860.239779")
+    }
+
+    @Test("A threaded permalink carries its parent so Slack opens the thread")
+    func threadedPermalinkKeepsThreadTS() {
+        let link = SlackConnector.nativeLink(
+            fromPermalink:
+                "https://buffer.slack.com/archives/C0DLE9LRJ/p1786603992508259?thread_ts=1786603992.508259&cid=C0DLE9LRJ",
+            teamID: "T02ABCD")
+        #expect(link?.hasSuffix("&thread_ts=1786603992.508259") == true)
+    }
+
+    @Test("Anything that isn't an archives permalink is left alone")
+    func unfamiliarLinksAreNotRewritten() {
+        // Returning a malformed deep link would be worse than the round trip:
+        // it goes nowhere at all.
+        for url in [
+            "https://buffer.slack.com/team/U056HVBKTSA",
+            "https://example.com/archives/C1/p1786640860239779",
+            "https://buffer.slack.com/archives/C1/1786640860239779",
+            "https://buffer.slack.com/archives/C1/pnotdigits",
+            "not a url",
+        ] {
+            #expect(
+                SlackConnector.nativeLink(fromPermalink: url, teamID: "T02ABCD") == nil,
+                "rewrote \(url)")
+        }
+    }
+
+    @Test("Without a team id there is no deep link to build")
+    func noTeamIDMeansNoRewrite() {
+        #expect(
+            SlackConnector.nativeLink(
+                fromPermalink: "https://buffer.slack.com/archives/C1/p1786640860239779",
+                teamID: "") == nil)
+    }
+
+    @Test("A watch hit keeps its permalink for the no-Slack fallback")
+    func watchHitStoresItsPermalink() {
+        let permalink = "https://buffer.slack.com/archives/C123/p1786640860239779"
+        let result = SlackConnector.watchHit(
+            from: hit(ts: "1786640860.239779", permalink: permalink),
+            term: "brandon", selfUserID: "U1", teamID: "T02ABCD",
+            notBefore: Date(timeIntervalSince1970: 0))
+        let item = try! #require(result?.item)
+        #expect(item.url?.hasPrefix("slack://") == true)
+        let payload = try! #require(item.payload)
+        #expect(SlackConnector.permalink(in: payload) == permalink)
+    }
+
     // MARK: Reference resolution
     //
     // Keyword-watch snippets are built by a static function that cannot
