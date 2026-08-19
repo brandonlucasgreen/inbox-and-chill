@@ -11,8 +11,15 @@ Inbox & Chill is a **triage queue, not a status mirror**. It doesn't try to be a
 - GitHub — notifications inbox (review requests, mentions, assignments)
 - Slack — mentions and unreads via Socket Mode, plus an emoji-reaction "save for later"
 - Campsite — self-hosted internal API (notifications + follow-ups)
-- Custom JSON feeds — point it at any URL that returns a JSON list
+- ntfy — push notifications over a topic's WebSocket
+- Custom JSON feeds — point it at any URL that returns a JSON array (or `{items: [...]}`)
 - Terminal / Claude Code — local push from shell commands and Claude Code hooks
+
+**Two surfaces**
+The menu bar panel is the default: click the icon (or hit a global hotkey) and it drops down over everything waiting for you, grouped by source. `⌘0` (or the window icon in the footer) opens the same queue as a regular window instead, with every triage action mirrored as a real menu item under **Queue** — useful for keeping it around on a second display.
+
+**Automation**
+Siri Shortcuts / App Intents expose the queue outside the app: get items, get a count, snooze, or mark done from Shortcuts.app, Spotlight, or a voice command.
 
 **Triage verbs**
 - Open — deep-links into the owning app or URL
@@ -38,11 +45,16 @@ The menu bar icon can show a total count, a high-signal-only count (the default)
 | `⌘P` | Pin / unpin |
 | `⌘Z` | Undo last done |
 | `⌘C` | Copy (title + URL) |
+| `←` / `→` | Cycle the source filter chips |
 | `⌘1`…`⌘9` | Jump to a source filter chip |
 | type | Type-to-filter the visible list |
+| `⌘F` | Start typing a filter |
 | `Esc` | Clear filter, close snooze picker, or close the panel |
 | `⌘R` | Refresh all sources |
+| `⇧⌘A` | Toggle the archive |
+| `⌘0` | Open the queue in a window |
 | `⌘,` | Settings |
+| `⌘Q` | Quit |
 
 ## Requirements
 

@@ -160,6 +160,7 @@ the connector 5s later. Two failures have come from this:
 | `slack` | Socket Mode + poll | markDone, remoteTruth, push | User token `xoxp-` required; app-level `xapp-` optional (adds channel mentions). Keyword Watch polls `search.messages` — the only way to see a channel you're not in. |
 | `campsite` | REST poll | markDone, remoteTruth | Self-hosted. v1 accepts Bearer Doorkeeper tokens; v2 has no notifications endpoint. Currently unconfigured. |
 | `ntfy` | WebSocket | push | No remote read-state; items die by explicit done. `since=<id>` is exclusive-after. |
+| `jsonPoller` | HTTP poll 120s | remoteTruth | Generic: any URL returning a JSON array or `{items: [...]}`, fields mapped via a user-supplied `id=id,title=title,...` string. Optional bearer auth header from the Keychain. |
 | `local` | HTTP listener | push | `inchill` CLI + Claude Code hooks. Push-only: it sees only what a hook POSTs. |
 
 ## Already exists — do not rebuild
@@ -171,6 +172,12 @@ the connector 5s later. Two failures have come from this:
   source; needs Full Disk Access for iCloud vault paths.
 - Saving a source in the editor already calls `bootstrapConnectors()`, so
   connectors reload without an app restart.
+- **A full main window** (`UI/MainWindow/`), opened via `⌘0` or the panel
+  footer — same queue, every triage action mirrored as a real `Commands` menu
+  item (`MainWindowCommands.swift`) via `@FocusedValue(\.triageActions)`, not
+  a second implementation of triage.
+- **App Intents / Siri Shortcuts** (`Intents/QueueIntents.swift`) — get,
+  count, snooze, mark-done, all against the same `Store`.
 
 ## Distribution (Developer ID + notarization)
 
