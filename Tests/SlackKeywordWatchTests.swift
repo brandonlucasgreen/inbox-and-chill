@@ -244,6 +244,45 @@ struct SlackKeywordWatchTests {
                 from: noTS, term: "x", selfUserID: "U001", notBefore: cutoff) == nil)
     }
 
+    // MARK: Muted channels
+
+    /// The field has to accept what a person types, which is a Slack channel
+    /// name with its `#` on, in whatever casing they used at the time.
+    @Test func mutingAcceptsHashesCasingAndPastedLists() {
+        let muted = SlackConnector.parseMutedChannels("#Random, deploys\n  #Bot-Spam  ,,")
+        #expect(muted == ["random", "deploys", "bot-spam"])
+        #expect(SlackConnector.parseMutedChannels("  ").isEmpty)
+    }
+
+    /// A raw id is what "Copy link" gives you, and the search API always
+    /// carries one even when the name is missing.
+    @Test func mutingMatchesByNameOrByChannelID() {
+        let byName = SlackConnector.parseMutedChannels("#random")
+        #expect(
+            SlackConnector.isMuted(channelName: "random", channelID: "C123", muted: byName))
+        #expect(
+            SlackConnector.isMuted(channelName: "#RANDOM", channelID: nil, muted: byName))
+        #expect(
+            !SlackConnector.isMuted(channelName: "growth", channelID: "C123", muted: byName))
+
+        let byID = SlackConnector.parseMutedChannels("C0FF33")
+        #expect(SlackConnector.isMuted(channelName: nil, channelID: "C0FF33", muted: byID))
+        #expect(!SlackConnector.isMuted(channelName: nil, channelID: "C0FF34", muted: byID))
+    }
+
+    /// Nothing muted must mean nothing filtered — the check runs on every
+    /// mention, and an empty list is the overwhelmingly common case.
+    @Test func anEmptyMuteListMutesNothing() {
+        #expect(
+            !SlackConnector.isMuted(channelName: "random", channelID: "C1", muted: []))
+    }
+
+    /// Muting is not a keyword: "#general" must not silence "#general-eng".
+    @Test func mutingIsExactPerChannelNotAPrefix() {
+        let muted = SlackConnector.parseMutedChannels("#general")
+        #expect(!SlackConnector.isMuted(channelName: "general-eng", channelID: "C9", muted: muted))
+    }
+
     // MARK: Dismissal is local to I&C
 
     /// The whole point of a keyword hit: it is I&C's *own* inbox record of

@@ -751,7 +751,8 @@ enum ConnectorFactory {
                 saveEmoji: settings["saveEmoji"].flatMap {
                     $0.isEmpty ? nil : $0
                 } ?? "pushpin",
-                searchTerms: settings["searchTerms"] ?? "")
+                searchTerms: settings["searchTerms"] ?? "",
+                mutedChannels: settings["mutedChannels"] ?? "")
         default:
             return nil
         }

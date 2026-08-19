@@ -102,15 +102,27 @@ actor SlackConnector: Connector {
     /// Matches requested per term. Slack sorts newest-first, so a term noisier
     /// than this loses only the oldest hits in the window.
     private static let searchCount = 20
+    /// Matches requested per term when channels are muted. Muted hits are
+    /// dropped *after* Slack has ranked them, so a chatty muted channel would
+    /// otherwise spend the whole page on messages you asked not to see and
+    /// push real hits out of the window. Asking for more restores the yield.
+    private static let mutedSearchCount = 60
 
     /// Terms to watch for across the workspace, from settings.
     private let searchTerms: [String]
+    /// Channels whose messages never become items, from settings. Names are
+    /// lowercased and `#`-stripped; a raw channel id is kept as-is.
+    private let mutedChannels: Set<String>
 
-    init(sourceID: String = "slack", saveEmoji: String = "pushpin", searchTerms: String = "") {
+    init(
+        sourceID: String = "slack", saveEmoji: String = "pushpin", searchTerms: String = "",
+        mutedChannels: String = ""
+    ) {
         self.sourceID = sourceID
         let normalised = Self.normalizeEmoji(saveEmoji)
         self.saveEmoji = normalised.isEmpty ? "pushpin" : normalised
         self.searchTerms = Self.parseSearchTerms(searchTerms)
+        self.mutedChannels = Self.parseMutedChannels(mutedChannels)
     }
 
     // MARK: - Connector
@@ -412,7 +424,9 @@ actor SlackConnector: Connector {
                 response = try await api.call(
                     "search.messages",
                     [
-                        "query": query, "count": String(Self.searchCount),
+                        "query": query,
+                        "count": String(
+                            mutedChannels.isEmpty ? Self.searchCount : Self.mutedSearchCount),
                         "sort": "timestamp", "sort_dir": "desc",
                     ])
             } catch let error as SlackError
@@ -436,6 +450,14 @@ actor SlackConnector: Connector {
                         from: match, term: term, selfUserID: selfUserID,
                         teamID: teamID, notBefore: cutoff)
                 else { continue }
+                // Muting wins over watching: the whole point is "this term,
+                // everywhere except here".
+                if Self.isMuted(
+                    channelName: match["channel"]["name"].nonEmptyString,
+                    channelID: hit.channel, muted: mutedChannels)
+                {
+                    continue
+                }
                 let key = "\(hit.channel):\(hit.ts)"
                 guard !seenWatchHits.contains(key) else { continue }
                 // A channel you're in already produces a real mention item via
@@ -476,6 +498,47 @@ actor SlackConnector: Connector {
         default:
             return "Slack rejected the keyword search (\(code)). Re-check the user token."
         }
+    }
+
+    /// Splits the settings string into muted channel names.
+    ///
+    /// Accepts what a person actually types or pastes: `#random`, `random`,
+    /// commas or newlines between them, any casing. A raw channel id
+    /// (`C0123ABCD`) is accepted too — it is what you get from Slack's
+    /// "Copy link", and the search API hands us ids for free even when it
+    /// hands us no name.
+    ///
+    /// Uncapped, unlike watch terms: this costs no API calls, it is a set
+    /// membership test.
+    nonisolated static func parseMutedChannels(_ raw: String) -> Set<String> {
+        var muted = Set<String>()
+        for piece in raw.split(whereSeparator: { $0 == "," || $0.isNewline }) {
+            var name = piece.trimmingCharacters(in: .whitespaces)
+            while name.hasPrefix("#") { name.removeFirst() }
+            name = name.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            muted.insert(name.lowercased())
+        }
+        return muted
+    }
+
+    /// True when a channel is muted, by either name or id.
+    ///
+    /// Pure so the rule is testable without a workspace, and deliberately
+    /// tolerant: a name is matched case-insensitively with any leading `#`
+    /// stripped, because "#Deploys" and "deploys" are the same channel to
+    /// everyone except a string comparison.
+    nonisolated static func isMuted(
+        channelName: String?, channelID: String?, muted: Set<String>
+    ) -> Bool {
+        guard !muted.isEmpty else { return false }
+        for candidate in [channelName, channelID] {
+            guard var value = candidate?.trimmingCharacters(in: .whitespaces), !value.isEmpty
+            else { continue }
+            while value.hasPrefix("#") { value.removeFirst() }
+            if muted.contains(value.lowercased()) { return true }
+        }
+        return false
     }
 
     /// Splits the settings string into watch terms.
@@ -832,6 +895,18 @@ actor SlackConnector: Connector {
         // user-group mentions are deliberately out — they're the noise this
         // app is supposed to spare you.
         guard author != selfUserID, let text, text.contains("<@\(selfUserID)>") else { return }
+        // A muted channel is muted for real mentions too, not just keyword
+        // hits — otherwise "mute #random" would still deliver the noisiest
+        // thing #random can produce. The name lookup is cached: seed() warms
+        // it for every channel you're a member of, which is every channel an
+        // event can arrive from.
+        if !mutedChannels.isEmpty,
+            Self.isMuted(
+                channelName: await channelName(channel), channelID: channel,
+                muted: mutedChannels)
+        {
+            return
+        }
         let item = await makeMentionItem(channel: channel, ts: ts, text: text, event: event)
         mentions[channel, default: [:]][ts] = item
         emit(.upsert([item]))

@@ -105,6 +105,10 @@ enum ConnectorCatalog {
                     key: "searchTerms", label: "Keyword Watch", isSecret: false,
                     placeholder: "@you, your project, a customer name",
                     help: "Comma-separated. Polls Slack search every 5 minutes and queues matches from the last 24 hours — including public channels you're NOT in, which events can't see and Slack itself won't notify you about. Needs the search:read scope (re-install the app after adding it). Blank turns it off."),
+                .init(
+                    key: "mutedChannels", label: "Mute Channels", isSecret: false,
+                    placeholder: "#random, #deploys",
+                    help: "Comma-separated channel names. Nothing from these channels reaches the queue — keyword hits and @-mentions both — so you can watch a term everywhere except the places it means nothing. DMs and emoji saves are never muted."),
             ],
             setupSteps: [
                 "Go to api.slack.com/apps → **Create New App** → **From an app manifest**.",
