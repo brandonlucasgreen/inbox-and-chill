@@ -32,6 +32,13 @@ settings:
       # runtime, and notarization rejects a Developer ID binary that carries
       # it. Scoped to Release so debugging a Debug build still works.
       CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+      # Xcode signs local builds with `--timestamp=none`. Notarization
+      # requires a secure timestamp, so a Release build without this is
+      # rejected — and the failure surfaces at `notarytool submit`, long
+      # after the build looked fine. The embedded `inchill` already asks for
+      # one in its post-build signing step; this is the app bundle catching
+      # up. Costs a round trip to Apple's timestamp server per Release build.
+      OTHER_CODE_SIGN_FLAGS: "--timestamp"
 targets:
   InboxAndChill:
     type: application
