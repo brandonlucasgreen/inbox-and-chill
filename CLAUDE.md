@@ -160,7 +160,29 @@ the connector 5s later. Two failures have come from this:
 | `slack` | Socket Mode + poll | markDone, remoteTruth, push | User token `xoxp-` required; app-level `xapp-` optional (adds channel mentions). Keyword Watch polls `search.messages` — the only way to see a channel you're not in. Mute Channels drops keyword hits *and* real mentions from named channels (never DMs or emoji saves). |
 | `ntfy` | WebSocket | push | No remote read-state; items die by explicit done. `since=<id>` is exclusive-after. |
 | `jsonPoller` | HTTP poll 120s | remoteTruth | Generic: any URL returning a JSON array or `{items: [...]}`, fields mapped via a user-supplied `id=id,title=title,...` string. Optional bearer auth header from the Keychain. |
-| `local` | HTTP listener | push | `inchill` CLI + Claude Code hooks. Push-only: it sees only what a hook POSTs. |
+| `local` | HTTP listener | push | `inchill` CLI + Claude Code hooks. Push-only: it sees only what a hook POSTs. A Claude Code item opens the **session**, not its folder — see below. |
+
+### Opening a Claude Code item lands in the session
+
+The hook records *where the session runs* (`sessionOrigin()` in
+`Sources/CLI/main.swift`), and `ClaudeSessionTarget` turns that into a jump.
+Three facts that cost a while to establish:
+
+- **Claude desktop sessions** export `CLAUDE_CODE_HOST_SESSION_ID`
+  (`local_<uuid>`) and the app registers `claude://local_sessions/<id>`, which
+  navigates to the live session.
+- **Never `claude://resume?session=<cli id>`.** That route *imports the
+  transcript as a new desktop session* — verified 2026-08-19 by firing it:
+  it logged "importing CLI session", warmed a fresh `local_…` session and
+  started a shell. For a live session that is a duplicate, not a jump.
+- **Terminal sessions** are found by tty, and getting the tty right is the
+  whole trick: the hook's stdin is a pipe, and both `ttyname()` and
+  `devname()` on a `/dev/tty` descriptor answer `/dev/tty` (a cloning device
+  reporting itself), which matches no tab while looking perfectly fine in the
+  payload. Read the kernel's per-process `e_tdev` via `sysctl` instead.
+
+The tty is interpolated into AppleScript, so `isValidTTY` is an allowlist, not
+an escape — `/notify` is an HTTP endpoint, not just a hook.
 
 ## Already exists — do not rebuild
 

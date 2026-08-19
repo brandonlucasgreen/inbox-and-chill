@@ -55,6 +55,7 @@ struct PanelView: View {
                 queueList(queue)
             }
             Divider()
+            openProblemNotice
             footer(queue.index)
         }
         .frame(width: 420, height: 560)
@@ -224,6 +225,43 @@ struct PanelView: View {
     }
 
     // MARK: Footer
+
+    /// Why the last ⏎ didn't land where the row pointed.
+    ///
+    /// The panel is where the user pressed the key, so it is where the answer
+    /// belongs — Settings is too far away to connect to a keypress. Shown
+    /// only for problems the user can act on; a session whose window has
+    /// simply closed falls back to the folder and says nothing.
+    @ViewBuilder
+    private var openProblemNotice: some View {
+        if let problem = appState.openProblem {
+            HStack(alignment: .top, spacing: 8) {
+                Text(problem)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("Open Settings") {
+                    NSWorkspace.shared.open(ClaudeSessionTarget.systemSettingsAutomationURL)
+                    appState.openProblem = nil
+                }
+                .font(.system(size: 11))
+                Button {
+                    appState.openProblem = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Dismiss")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.red.opacity(0.08))
+            Divider()
+        }
+    }
 
     private func footer(_ index: SourceIndex) -> some View {
         HStack(spacing: 8) {

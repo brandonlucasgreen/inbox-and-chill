@@ -53,6 +53,24 @@ actor LocalListener {
         var body: String?
         var url: String?
         var highSignal: Bool?
+        /// Where the posting session is running, so the item can open *it*
+        /// rather than its folder. Optional: any producer may omit it, and
+        /// the Claude Code hook omits fields it cannot determine.
+        var origin: SessionOrigin?
+    }
+
+    /// The `origin` object of `POST /notify` — written by
+    /// `inchill claude-hook`, read by `ClaudeSessionTarget`.
+    struct SessionOrigin: Codable, Sendable, Equatable {
+        /// `CLAUDE_CODE_HOST_SESSION_ID` — the Claude desktop app's own id
+        /// for the session (`local_<uuid>`).
+        var host: String?
+        /// `CLAUDE_CODE_ENTRYPOINT` (`claude-desktop`, `cli`, …).
+        var entrypoint: String?
+        var termProgram: String?
+        var bundleID: String?
+        /// The session's controlling terminal (`/dev/ttys004`).
+        var tty: String?
     }
 
     /// Decoded body of `POST /clear`.

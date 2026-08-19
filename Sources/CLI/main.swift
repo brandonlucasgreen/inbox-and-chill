@@ -179,13 +179,71 @@ private struct ClaudeHookPayload: Decodable {
 
 /// A `file://` URL for the session's working directory.
 ///
-/// Claude Code publishes no way to deep-link to a specific session — there is
-/// no documented URL scheme and no resume-by-id URI — so the project folder is
-/// the closest addressable thing, and it at least makes ⏎ on the item land you
-/// in the right project rather than nowhere.
+/// The last resort, and the item's `url` either way: it is what ⏎ falls back
+/// to when the session it came from can no longer be found (its window
+/// closed, its terminal quit). `sessionOrigin()` is what makes ⏎ land in the
+/// session itself.
 private func projectURL(for cwd: String?) -> String? {
     guard let cwd, !cwd.isEmpty else { return nil }
     return URL(fileURLWithPath: cwd).absoluteString
+}
+
+/// Where the session that fired this hook is actually running, captured from
+/// the environment the hook inherits.
+///
+/// Opening the project folder was never what anyone wanted from a "Claude
+/// needs you" item — you want the session. Two live cases, both answerable
+/// here and nowhere else, because this process is the only part of the app
+/// that runs *inside* the session:
+///
+/// - **Claude desktop app.** It exports `CLAUDE_CODE_HOST_SESSION_ID`
+///   (`local_<uuid>`), which is the id its own UI addresses a session by.
+/// - **A terminal.** The hook inherits the session's controlling terminal
+///   even though its stdin is a pipe — a controlling terminal belongs to the
+///   session, not to a file descriptor — so `/dev/tty` names the exact tab.
+///
+/// Everything here is best-effort and every field is optional: a hook that
+/// can't tell where it is must still post the item.
+private func sessionOrigin() -> [String: Any] {
+    var origin: [String: Any] = [:]
+    let env = ProcessInfo.processInfo.environment
+    func put(_ key: String, _ value: String?) {
+        guard let value, !value.isEmpty else { return }
+        origin[key] = value
+    }
+    put("host", env["CLAUDE_CODE_HOST_SESSION_ID"])
+    put("entrypoint", env["CLAUDE_CODE_ENTRYPOINT"])
+    put("termProgram", env["TERM_PROGRAM"])
+    // Set by launchd for anything started as an app bundle and inherited all
+    // the way down, so it names the terminal even when TERM_PROGRAM doesn't.
+    put("bundleID", env["__CFBundleIdentifier"])
+    put("tty", controllingTTY())
+    return origin
+}
+
+/// The path of this process's controlling terminal, or nil when it has none
+/// (a session run by the desktop app, a daemon, a CI job).
+///
+/// Two dead ends worth not re-walking, both of which *look* like they work:
+/// `ttyname()` on the `/dev/tty` descriptor answers `/dev/tty`, and so does
+/// `devname()` on that descriptor's device number — `/dev/tty` is a cloning
+/// device, so its own identity is what you get back. `/dev/tty` matches no
+/// terminal tab anywhere, so either would have made the jump silently
+/// useless while looking correct in the payload.
+///
+/// The kernel's per-process controlling-terminal device (`e_tdev`) is the
+/// real answer, and `devname()` turns that into `ttys004`. Reading fd 0/1/2
+/// is no help either: the hook is fed JSON on stdin and its output is
+/// captured, so none of them is a terminal.
+private func controllingTTY() -> String? {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0 else { return nil }
+    let device = info.kp_eproc.e_tdev
+    guard device != -1, let name = devname(device, S_IFCHR) else { return nil }
+    let path = "/dev/" + String(cString: name)
+    return path == "/dev/tty" ? nil : path
 }
 
 /// First non-empty line, trimmed to something that fits a queue row.
@@ -222,6 +280,8 @@ private func runClaudeHook(_ kind: String) {
             "highSignal": true,
         ]
         if let url = projectURL(for: payload.cwd) { json["url"] = url }
+        let origin = sessionOrigin()
+        if !origin.isEmpty { json["origin"] = origin }
         post(path: "/notify", json: json)
 
     case "stop":
@@ -245,6 +305,8 @@ private func runClaudeHook(_ kind: String) {
             json["body"] = summary
         }
         if let url = projectURL(for: payload.cwd) { json["url"] = url }
+        let origin = sessionOrigin()
+        if !origin.isEmpty { json["origin"] = origin }
         post(path: "/notify", json: json)
 
     default:

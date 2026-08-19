@@ -31,7 +31,8 @@ actor LocalConnector: Connector {
                         snippet: payload.body,
                         url: payload.url,
                         occurredAt: .now,
-                        highSignal: payload.highSignal ?? true)
+                        highSignal: payload.highSignal ?? true,
+                        payload: payload.origin.flatMap { try? JSONEncoder().encode($0) })
                     emit(.upsert([item]))
                 },
                 onClear: { payload in

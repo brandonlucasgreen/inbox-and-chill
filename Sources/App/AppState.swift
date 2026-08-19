@@ -29,6 +29,13 @@ final class AppState {
     var undoStack: [String] = []
     var launchAtLoginError: String?
 
+    /// Why the last ⏎ landed somewhere other than where the item pointed.
+    /// nil in the ordinary case, including the ordinary *fallbacks* — a
+    /// session whose window has closed is not a problem to nag about. Set
+    /// only when the user could do something about it (see
+    /// `ClaudeSessionTarget.explain`).
+    var openProblem: String?
+
     /// Why banners are or aren't reaching the user; `nil` until something has
     /// looked. Surfaced in Settings — a banner the user asked for and didn't
     /// get must never fail silently (PLAN §2).
@@ -460,6 +467,19 @@ final class AppState {
     // MARK: Triage actions (called from UI)
 
     func open(_ item: Item) {
+        // A Claude Code item wants to land in the session that posted it, not
+        // in the folder that session happens to be working in. `reveal`
+        // returns `.fallBack` whenever it can't get there — including when it
+        // has nothing to say about why — so the URL below stays the floor.
+        if item.sourceKind == "local", item.kind.hasPrefix("claude") {
+            switch ClaudeSessionOpener.reveal(ClaudeSessionTarget.target(payload: item.payload)) {
+            case .reached:
+                openProblem = nil
+                return
+            case .fallBack(let problem):
+                openProblem = problem
+            }
+        }
         guard let url = item.url else { return }
         NSWorkspace.shared.open(Self.openable(url, payload: item.payload))
         // Open ≠ done (decision §2.1.2).

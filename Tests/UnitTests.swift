@@ -644,6 +644,104 @@ struct PanelQueueTests {
     }
 }
 
+// MARK: - Claude Code session jump (Sources/App/Connectors/Local/ClaudeSessionTarget.swift)
+
+/// A "Claude needs your input" item used to open the project folder — the one
+/// place the session isn't. These pin the rules that decide where it goes
+/// instead, all of which have to hold without a terminal, a desktop app, or
+/// an AppleEvent in sight.
+struct ClaudeSessionTargetTests {
+    private func origin(
+        host: String? = nil, tty: String? = nil, bundleID: String? = nil
+    ) -> LocalListener.SessionOrigin {
+        LocalListener.SessionOrigin(
+            host: host, entrypoint: nil, termProgram: nil, bundleID: bundleID, tty: tty)
+    }
+
+    /// A desktop session runs its own shell, so it can offer both. The
+    /// session lives in the app, not in that shell.
+    @Test("The desktop session id wins over a tty")
+    func desktopIDBeatsTTY() {
+        let target = ClaudeSessionTarget.target(
+            origin: origin(host: "local_79769598-7df4-47d5-af05-a28cb12ff1c0", tty: "/dev/ttys004"))
+        #expect(target == .desktopSession(id: "local_79769598-7df4-47d5-af05-a28cb12ff1c0"))
+    }
+
+    @Test("A terminal session is addressed by its tty")
+    func terminalSessionUsesTTY() {
+        let target = ClaudeSessionTarget.target(
+            origin: origin(tty: "/dev/ttys004", bundleID: "com.apple.Terminal"))
+        #expect(target == .terminalTab(bundleID: "com.apple.Terminal", tty: "/dev/ttys004"))
+    }
+
+    /// Every other connector puts its own thing in `payload`; none of it
+    /// decodes to an origin, and none of it may send ⏎ somewhere strange.
+    @Test("An empty, absent or foreign payload falls back to the folder")
+    func unknownPayloadsFallBackToTheFolder() {
+        #expect(ClaudeSessionTarget.target(payload: nil) == .folder)
+        #expect(ClaudeSessionTarget.target(payload: Data("{\"permalink\":\"x\"}".utf8)) == .folder)
+        #expect(ClaudeSessionTarget.target(origin: LocalListener.SessionOrigin()) == .folder)
+    }
+
+    @Test("Session ids are validated before they reach a URL")
+    func sessionIDsAreValidated() {
+        #expect(
+            ClaudeSessionTarget.isValidSessionID("local_79769598-7df4-47d5-af05-a28cb12ff1c0"))
+        #expect(ClaudeSessionTarget.isValidSessionID("79769598-7df4-47d5-af05-a28cb12ff1c0"))
+        #expect(!ClaudeSessionTarget.isValidSessionID("local_../../etc"))
+        #expect(!ClaudeSessionTarget.isValidSessionID(""))
+        #expect(
+            ClaudeSessionTarget.desktopURL(sessionID: "local_79769598-7df4-47d5-af05-a28cb12ff1c0")?
+                .absoluteString
+                == "claude://local_sessions/local_79769598-7df4-47d5-af05-a28cb12ff1c0")
+        #expect(ClaudeSessionTarget.desktopURL(sessionID: "nonsense") == nil)
+    }
+
+    /// The tty is interpolated into an AppleScript string literal, so the
+    /// allowlist is the only thing between a posted `origin` and arbitrary
+    /// script. A hook is local, but `/notify` is an HTTP endpoint.
+    @Test("A tty that could break out of the script is refused outright")
+    func ttyValidationBlocksScriptInjection() {
+        #expect(ClaudeSessionTarget.isValidTTY("/dev/ttys004"))
+        #expect(!ClaudeSessionTarget.isValidTTY("/dev/ttys004\" & (do shell script \"id\") & \""))
+        #expect(!ClaudeSessionTarget.isValidTTY("/etc/passwd"))
+        // The generic controlling-terminal device: every process has one and
+        // it matches no tab, so treating it as an address is worse than
+        // having none.
+        #expect(!ClaudeSessionTarget.isValidTTY("/dev/tty"))
+        #expect(!ClaudeSessionTarget.isValidTTY(""))
+        #expect(
+            ClaudeSessionTarget.focusScript(
+                bundleID: "com.apple.Terminal", tty: "/dev/ttys004\"; beep") == nil)
+    }
+
+    @Test("Only terminals with a scriptable tab model get a script")
+    func onlyScriptableTerminalsGetAScript() {
+        let terminal = ClaudeSessionTarget.focusScript(
+            bundleID: "com.apple.Terminal", tty: "/dev/ttys004")
+        #expect(terminal?.contains("tty of t is \"/dev/ttys004\"") == true)
+        let iterm = ClaudeSessionTarget.focusScript(
+            bundleID: "com.googlecode.iterm2", tty: "/dev/ttys004")
+        #expect(iterm?.contains("iTerm2") == true)
+        // Ghostty, WezTerm, kitty…: fronted, never scripted.
+        #expect(
+            ClaudeSessionTarget.focusScript(bundleID: "com.mitchellh.ghostty", tty: "/dev/ttys004")
+                == nil)
+        #expect(ClaudeSessionTarget.focusScript(bundleID: nil, tty: "/dev/ttys004") == nil)
+    }
+
+    /// A denied AppleEvent looks exactly like a session that closed, which is
+    /// this project's recurring bug class. It has to name the fix.
+    @Test("A refused AppleEvent explains itself and names the fix")
+    func aRefusedAppleEventNamesTheFix() {
+        let denied = ClaudeSessionTarget.explain(appleScriptError: -1743, terminal: "Terminal")
+        #expect(denied.contains("Automation"))
+        #expect(denied.contains("Terminal"))
+        let odd = ClaudeSessionTarget.explain(appleScriptError: -42, terminal: "Terminal")
+        #expect(odd.contains("-42"))
+    }
+}
+
 // MARK: - Keychain write failures (Sources/App/Support/Keychain.swift)
 
 /// A credential that fails to save is indistinguishable from one that saved
