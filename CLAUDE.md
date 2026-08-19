@@ -206,6 +206,29 @@ submittable without any credentials at all.
 `spctl -a` reporting "rejected — Unnotarized Developer ID" is expected until
 then and is harmless locally, since Gatekeeper only evaluates quarantined apps.
 
+**That last point cuts both ways: `spctl` on a copy you built is not a test.**
+Gatekeeper skips unquarantined apps entirely, so a local "accepted" says
+nothing about what a downloader sees. Test the artifact the way it will
+arrive — extract the dist zip and mark it quarantined first:
+
+```bash
+ditto -x -k dist/InboxAndChill-<version>.zip /tmp/gk && \
+  xattr -w com.apple.quarantine "0083;00000000;Safari;" "/tmp/gk/Inbox & Chill.app" && \
+  spctl -a -vvv --type execute "/tmp/gk/Inbox & Chill.app"
+```
+
+Expect `accepted` with `source=Notarized Developer ID`.
+
+**Stapling is separate from being notarized.** `notarize.sh` staples the build
+product, not `/Applications`. An unstapled copy still passes *while the machine
+can reach Apple* — `stapler validate` is the only thing that catches it, and the
+failure only shows up offline:
+
+```bash
+xcrun stapler validate "/Applications/Inbox & Chill.app"
+xcrun stapler staple   "/Applications/Inbox & Chill.app"   # ticket already exists for that signature
+```
+
 ## Working in a git worktree
 
 Bash `cd` lands in the primary checkout and stays there, so edits intended for a
