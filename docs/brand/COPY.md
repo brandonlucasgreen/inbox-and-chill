@@ -14,7 +14,7 @@ not so you can use them all.
 
 Taglines, in order of preference:
 
-1. Everything waiting on you, in one queue — and a way to empty it.
+1. Everything waiting on you, in one queue, nice & chilled.
 2. A triage queue for everything that pings you.
 3. One queue for Linear, GitHub, Slack, and your terminal. Then zero.
 
@@ -25,7 +25,7 @@ so keep the landing page matching it.
 
 ## Hero
 
-> ### Everything waiting on you, in one queue — and a way to empty it.
+> ### Everything waiting on you, in one queue, nice & chilled.
 >
 > Inbox & Chill is a macOS menu bar app that pulls the things that actually need
 > you out of Linear, GitHub, Slack, ntfy, your terminal, and anything else that
@@ -167,16 +167,12 @@ Alternate, matching bgreen.lol/support more closely:
 
 ## In-app About pane
 
-Shipped copy, for reference — keep the landing page consistent with it.
+Shipped copy, for reference — keep the landing page consistent with it. The pane is
+deliberately short: icon, name, version, byline, then straight to the links. The longer
+"what it is" explanation lives on the landing page, not in the app.
 
 > **Inbox & Chill** · Version 0.1.0
-> Everything waiting on you, in one queue — and a way to empty it.
->
-> Inbox & Chill pulls the things that actually need you out of Linear, GitHub,
-> Slack, ntfy, your terminal, and anything else that speaks JSON. It's a triage
-> queue, not another client — items come in, you act on them, the queue goes to
-> zero. The moment something needs real work, it hands you off to the app that
-> owns it.
+> Everything waiting on you, in one queue, nice & chilled.
 >
 > **Made by** Brandon Lucas Green · bgreen.lol · unstream.stream · hi@bgreen.lol
 >

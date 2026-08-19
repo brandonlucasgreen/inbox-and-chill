@@ -11,7 +11,11 @@ struct AboutPane: View {
         Form {
             Section {
                 HStack(alignment: .top, spacing: 16) {
-                    Image(nsImage: NSApp.applicationIconImage)
+                    // Read the icon straight out of the asset catalogue.
+                    // `NSApp.applicationIconImage` answers from the LaunchServices
+                    // icon cache, which keeps serving the previous artwork when the
+                    // bundle path and identifier stay put and only the art changes.
+                    Image(nsImage: NSImage(named: "AppIcon") ?? NSApp.applicationIconImage)
                         .resizable()
                         .frame(width: 72, height: 72)
                         .accessibilityHidden(true)
@@ -23,7 +27,7 @@ struct AboutPane: View {
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
-                        Text("Everything waiting on you, in one queue — and a way to empty it.")
+                        Text("Everything waiting on you, in one queue, nice & chilled.")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -32,14 +36,6 @@ struct AboutPane: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.vertical, 6)
-            }
-
-            Section {
-                Text(
-                    "Inbox & Chill pulls the things that actually need you out of Linear, GitHub, Slack, ntfy, your terminal, and anything else that speaks JSON. It's a triage queue, not another client — items come in, you act on them, the queue goes to zero. The moment something needs real work, it hands you off to the app that owns it."
-                )
-                .font(.system(size: 13))
-                .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Made by") {
