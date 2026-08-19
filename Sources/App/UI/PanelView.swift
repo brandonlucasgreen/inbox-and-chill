@@ -412,6 +412,10 @@ struct PanelView: View {
             "S" where filterText.isEmpty && !isFiltering:
             if selectedItem != nil { snoozeTargetUID = selectedUID }
             return true
+        case "u" where filterText.isEmpty && !isFiltering,
+            "U" where filterText.isEmpty && !isFiltering:
+            unreadSelected()
+            return true
         default:
             guard character.isLetter || character.isNumber
                 || character.isPunctuation || character == " "
@@ -442,6 +446,12 @@ struct PanelView: View {
         let next = min(max(current + delta, 0), options.count - 1)
         guard next != current else { return }
         appState.selectedSourceFilter = options[next]
+    }
+
+    /// Flips the selected row between read and unread (`U`).
+    private func unreadSelected() {
+        guard let item = selectedItem else { return }
+        appState.toggleSeen(item)
     }
 
     private func markSelectedSeen() {

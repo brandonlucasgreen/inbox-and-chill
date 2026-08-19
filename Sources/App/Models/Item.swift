@@ -49,6 +49,12 @@ final class Item {
     /// Optional so existing rows migrate in as unseen rather than silently
     /// counting as read.
     var seenAt: Date?
+    /// When the user explicitly marked the item unread (`U`).
+    ///
+    /// Focus alone marks a row seen, so without this an explicit "unread"
+    /// would survive exactly until you arrowed past the row again — which is
+    /// to say, never. While this is set, auto-seen leaves the item alone.
+    var unreadHeldAt: Date?
     /// Source-specific extras (e.g. Slack channel id, Linear notification id).
     var payload: Data?
 
@@ -84,6 +90,8 @@ extension Item {
     var isActive: Bool { doneAt == nil && !isSnoozed }
     /// Whether the user has ever focused this row. Drives the dot.
     var isSeen: Bool { seenAt != nil }
+    /// Whether the user has pinned this item to unread by hand.
+    var isHeldUnread: Bool { unreadHeldAt != nil }
     var url: URL? { urlString.flatMap(URL.init(string:)) }
 }
 

@@ -89,6 +89,37 @@ struct TriageTests {
         #expect(try await store.seenAt(uid: "test:a") == nil)
     }
 
+    @Test("U flips an item both ways, and the unread choice outranks focus")
+    func toggleUnreadHoldsAgainstFocus() async throws {
+        let store = try makeStore()
+        _ = try await store.reconcile(
+            snapshot: [
+                RemoteItem(
+                    externalID: "a", kind: "mention", title: "A",
+                    occurredAt: .now, highSignal: true)
+            ], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        let uid = "test:a"
+
+        // Focus marks it read.
+        #expect(try await store.markSeen(uid: uid) == true)
+        #expect(try await store.seenAt(uid: uid) != nil)
+
+        // U marks it unread again.
+        #expect(try await store.toggleSeen(uid: uid) == false)
+        #expect(try await store.seenAt(uid: uid) == nil)
+
+        // The whole point: arrowing back onto the row must NOT silently
+        // re-read it, or "mark unread" would survive about one keystroke.
+        #expect(try await store.markSeen(uid: uid) == false)
+        #expect(try await store.seenAt(uid: uid) == nil)
+
+        // U again marks it read and releases the hold, so focus works anew.
+        #expect(try await store.toggleSeen(uid: uid) == true)
+        #expect(try await store.seenAt(uid: uid) != nil)
+        #expect(try await store.toggleSeen(uid: uid) == false)
+        #expect(try await store.markSeen(uid: uid) == false)
+    }
+
     @Test func doneUndoAndPurge() async throws {
         let store = try makeStore()
         let a = RemoteItem(

@@ -542,6 +542,15 @@ final class AppState {
         }
     }
 
+    /// Flips the selected item between read and unread (`U`).
+    func toggleSeen(_ item: Item) {
+        let uid = item.uid
+        Task {
+            _ = try? await store.toggleSeen(uid: uid)
+            await MainActor.run { queueVersion += 1 }
+        }
+    }
+
     func togglePin(_ item: Item) {
         // Read before the store flips it: this is the action we're about to
         // take, not the state we're leaving.

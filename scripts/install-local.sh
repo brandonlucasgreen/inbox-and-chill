@@ -98,6 +98,16 @@ ditto "$BUILT" "$DEST"
 # Locally built apps aren't quarantined, but strip it if anything set one.
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
+# `ditto` copies the SOURCE directory's mtime onto the installed bundle, so the
+# top-level .app timestamp can sit days behind its own contents. LaunchServices
+# keys its icon cache on that mtime, which is how a new app icon can be sitting
+# correctly inside Contents/Resources and still never appear in Finder, the
+# Dock, or Spotlight — for days, across many installs. Touch it and re-register
+# so the icon that was just built is the icon macOS shows.
+touch "$DEST"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$DEST"
+
 echo "==> Installed"
 codesign --verify --deep --strict "$DEST" && echo "    signature valid at the install location"
 

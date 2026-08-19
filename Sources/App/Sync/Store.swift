@@ -156,7 +156,11 @@ actor Store {
     /// so callers can skip a redundant badge refresh.
     @discardableResult
     func markSeen(uid: String, at date: Date = .now) throws -> Bool {
-        guard let item = try item(uid: uid), item.seenAt == nil else {
+        guard let item = try item(uid: uid), item.seenAt == nil,
+            // An explicit "mark unread" outranks merely focusing the row,
+            // otherwise the next arrow press would undo it.
+            item.unreadHeldAt == nil
+        else {
             return false
         }
         item.seenAt = date
@@ -164,6 +168,24 @@ actor Store {
         // notification itself, and seeing one is not a change to it.
         try modelContext.save()
         return true
+    }
+
+    /// Flips an item between read and unread, and reports the state it landed in.
+    ///
+    /// Marking unread also sets `unreadHeldAt`, which is what makes the choice
+    /// stick against `markSeen`; marking read clears the hold again.
+    @discardableResult
+    func toggleSeen(uid: String, at date: Date = .now) throws -> Bool {
+        guard let item = try item(uid: uid) else { return false }
+        if item.seenAt == nil {
+            item.seenAt = date
+            item.unreadHeldAt = nil
+        } else {
+            item.seenAt = nil
+            item.unreadHeldAt = date
+        }
+        try modelContext.save()
+        return item.seenAt != nil
     }
 
     /// The persisted first-seen stamp, or `nil` if the item is still unseen.

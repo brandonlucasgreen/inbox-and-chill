@@ -44,6 +44,11 @@ struct ItemRowView: View {
             .accessibilityAction(named: item.isPinned ? "Unpin" : "Pin") {
                 appState.togglePin(item)
             }
+            .accessibilityAction(
+                named: item.isSeen ? "Mark unread" : "Mark read"
+            ) {
+                appState.toggleSeen(item)
+            }
     }
 
     // MARK: Layout
@@ -107,6 +112,12 @@ struct ItemRowView: View {
                 SnoozeMenu(
                     apply: { appState.snooze(item, until: $0) },
                     pickDate: { snoozeTargetUID = item.uid })
+                actionButton(
+                    item.isSeen ? "envelope.badge" : "envelope.open",
+                    key: "U",
+                    item.isSeen ? "Mark unread (U)" : "Mark read (U)",
+                    item.isSeen ? "Mark unread" : "Mark read"
+                ) { appState.toggleSeen(item) }
                 actionButton(
                     item.isPinned ? "pin.slash" : "pin", key: "⌘P",
                     item.isPinned ? "Unpin (⌘P)" : "Pin (⌘P)",
@@ -172,6 +183,9 @@ struct ItemRowView: View {
             }
             Divider()
             Button("Pick Date…") { snoozeTargetUID = item.uid }
+        }
+        Button(item.isSeen ? "Mark as Unread" : "Mark as Read") {
+            appState.toggleSeen(item)
         }
         Button(item.isPinned ? "Unpin" : "Pin") { appState.togglePin(item) }
         Divider()

@@ -94,7 +94,7 @@ Keep these to a sentence each. No bullets-within-bullets.
 
 **Keyboard-first**
 > `↑↓` to move, `⏎` to open, `⌘⏎` to open and clear, `E` for done, `S` to
-> snooze, `⌘Z` to undo. Type anything to filter the list.
+> snooze, `U` to flip read/unread, `⌘Z` to undo. Type anything to filter the list.
 
 ---
 
