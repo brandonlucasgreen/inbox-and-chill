@@ -71,12 +71,28 @@ struct LinearDescribeTests {
                 == "Added to view: CORE-6872: Google Drive upload takes a long time")
     }
 
-    @Test func commentBodyBecomesTheSnippetFirstLineOnly() {
+    /// The row opens to a paragraph while selected, so the snippet is the
+    /// whole comment flattened — not just its opening line, which is what
+    /// this asserted while a row was one line tall.
+    @Test func commentBodyBecomesTheSnippetAsOneParagraph() {
         let (_, snippet, _) = LinearConnector.describe(
             node(
                 type: "issueCommentMention", issue: coreIssue,
-                comment: .init(body: "  first line  \nsecond line")))
-        #expect(snippet == "first line")
+                comment: .init(body: "  first line  \n\nsecond line")))
+        #expect(snippet == "first line second line")
+    }
+
+    @Test func aLongCommentIsCappedRatherThanCarriedWhole() {
+        let body = String(repeating: "word ", count: 200)
+        let snippet = LinearConnector.snippetText(body)
+        #expect((snippet?.count ?? 0) <= LinearConnector.snippetLimit)
+        #expect(snippet?.hasSuffix("…") == true)
+    }
+
+    @Test func emptyAndWhitespaceOnlyBodiesProduceNoSnippet() {
+        #expect(LinearConnector.snippetText(nil) == nil)
+        #expect(LinearConnector.snippetText("") == nil)
+        #expect(LinearConnector.snippetText("  \n\n  ") == nil)
     }
 
     // MARK: Document notifications

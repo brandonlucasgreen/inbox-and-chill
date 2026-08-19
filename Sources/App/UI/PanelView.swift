@@ -121,6 +121,13 @@ struct PanelView: View {
                     .animation(
                         PanelMotion.queue(reduceMotion: reduceMotion),
                         value: visibleUIDs)
+                    // Selection opens the focused row and closes the one it
+                    // left (`ExpandingText`). Animating it at the list level
+                    // too is what makes every row below the pair slide with
+                    // them, in the same transaction as the scroll below.
+                    .animation(
+                        PanelMotion.queue(reduceMotion: reduceMotion),
+                        value: selectedUID)
                 }
                 .onChange(of: selectedUID) { _, new in
                     guard let new else { return }

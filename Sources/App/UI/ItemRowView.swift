@@ -5,6 +5,7 @@ import SwiftUI
 struct ItemRowView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let item: Item
     let display: SourceDisplay
     let isSelected: Bool
@@ -74,18 +75,21 @@ struct ItemRowView: View {
                 .frame(width: 20)
                 .padding(.top, 1)
                 .accessibilityHidden(true)
+            // Selection is what opens a row: one line is enough to tell
+            // items apart, never enough to act on one, and opening every row
+            // at once would just be a wall of text.
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(
-                        .system(
-                            size: 13,
-                            weight: item.highSignal ? .semibold : .regular))
-                    .lineLimit(1)
+                ExpandingText(
+                    text: item.title, size: 13,
+                    weight: item.highSignal ? .semibold : .regular,
+                    expandedLines: RowExpansion.titleLines,
+                    isExpanded: isSelected, animation: expansion)
                 if let secondary {
-                    Text(secondary)
-                        .font(.system(size: 12))
+                    ExpandingText(
+                        text: secondary, size: 12,
+                        expandedLines: RowExpansion.bodyLines,
+                        isExpanded: isSelected, animation: expansion)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
@@ -214,6 +218,13 @@ struct ItemRowView: View {
                     Color.primary.opacity(focus.border), lineWidth: 1)
             }
         }
+    }
+
+    /// The same curve the rest of the queue moves on. When a dismissal
+    /// moves the selection, the row leaving, the rows closing the gap, the
+    /// scroll and this opening all run as one gesture — see `PanelMotion`.
+    private var expansion: Animation? {
+        PanelMotion.queue(reduceMotion: reduceMotion)
     }
 
     private var secondary: String? {

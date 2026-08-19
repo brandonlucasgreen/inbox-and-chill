@@ -332,16 +332,40 @@ actor LinearConnector: Connector {
     ) {
         // Linear's `subtitle` is the notification's body text, so it backs
         // the snippet for the types that expose no `comment` relation.
-        let body = node.comment?.body ?? node.subtitle
-        let snippet = body.flatMap { text -> String? in
-            text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
-                .first.map { String($0).trimmingCharacters(in: .whitespaces) }
-        }
         return (
             headline(type: node.type, entity: entityName(node)),
-            snippet?.nonEmptyOrNil,
+            snippetText(node.comment?.body ?? node.subtitle),
             deepLink(node)
         )
+    }
+
+    /// How much comment body a row carries. Matched to `SlackConnector`'s
+    /// cap so an opened row is the same size whatever it came from.
+    static let snippetLimit = 320
+
+    /// The row's body text, flattened into a paragraph.
+    ///
+    /// This kept only the first line while the row was one line tall, which
+    /// was the right call then — a Linear comment's opening line is usually
+    /// its point. Now that the selected row opens to a paragraph, the rest
+    /// of the comment is what decides whether it needs answering, so the
+    /// whole body comes through: newlines collapsed (markdown hard-wraps and
+    /// blank lines would otherwise read as holes in the middle of a
+    /// sentence) and capped, so one essay-length comment can't be the only
+    /// thing in the panel.
+    nonisolated static func snippetText(_ body: String?) -> String? {
+        guard let body else { return nil }
+        let flattened =
+            body
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard flattened.count > snippetLimit else {
+            return flattened.nonEmptyOrNil
+        }
+        return flattened.prefix(snippetLimit - 1)
+            .trimmingCharacters(in: .whitespaces) + "…"
     }
 
     /// The best human name for whatever the notification is about.

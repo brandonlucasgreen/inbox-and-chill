@@ -18,6 +18,9 @@ Inbox & Chill is a **triage queue, not a status mirror**. It doesn't try to be a
 **Two surfaces**
 The menu bar panel is the default: click the icon (or hit a global hotkey) and it drops down over everything waiting for you, grouped by source. `⌘0` (or the window icon in the footer) opens the same queue as a regular window instead, with every triage action mirrored as a real menu item under **Queue** — useful for keeping it around on a second display.
 
+**The selected row opens**
+Every row is one line until you move onto it, and then it opens to a paragraph — two lines of title, four of message — and closes again as you arrow past. One line is enough to tell items apart and rarely enough to act on one, so the row you are actually looking at is the one that shows its text.
+
 **Automation**
 Siri Shortcuts / App Intents expose the queue outside the app: get items, get a count, snooze, or mark done from Shortcuts.app, Spotlight, or a voice command.
 

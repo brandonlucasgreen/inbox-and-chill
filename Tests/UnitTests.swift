@@ -479,6 +479,78 @@ struct PanelKeyInputTests {
     }
 }
 
+// MARK: - Row expansion (Sources/App/UI/ExpandingText.swift)
+
+/// The selected row opens to a paragraph and every other row stays on one
+/// line. The clamp is what decides that, and it runs before either ruler has
+/// measured anything — a row scrolling into a `LazyVStack` renders at least
+/// one frame with no measurement at all, so the unmeasured cases are the
+/// ones that would show as a flicker.
+struct ExpandingTextClampTests {
+    private let estimate: CGFloat = 15
+
+    @Test("An unmeasured closed row falls back to the estimate, not to zero")
+    func unmeasuredClosedUsesEstimate() {
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: false, collapsed: nil, expanded: nil,
+                estimate: estimate) == estimate)
+    }
+
+    @Test("An unmeasured open row takes its natural height instead")
+    func unmeasuredOpenIsUnclamped() {
+        // Clamping it to the one-line estimate is what made a freshly
+        // rendered row paint one line tall and then jump to four with no
+        // animation to explain it.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, collapsed: nil, expanded: nil,
+                estimate: estimate) == nil)
+    }
+
+    @Test("Selection opens the row to the full measured height")
+    func selectedOpens() {
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, collapsed: 15, expanded: 62,
+                estimate: estimate) == 62)
+    }
+
+    @Test("Losing selection closes it back to one line")
+    func deselectedCloses() {
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: false, collapsed: 15, expanded: 62,
+                estimate: estimate) == 15)
+    }
+
+    @Test("Text that already fits never opens onto empty space")
+    func shortTextDoesNotGrow() {
+        // A one-line snippet measures the same both ways; the row must not
+        // gain a gap under it just because it holds the selection.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, collapsed: 15, expanded: 15,
+                estimate: estimate) == 15)
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: false, collapsed: 15, expanded: 15,
+                estimate: estimate) == 15)
+    }
+
+    @Test("A single line is never cropped by a stale estimate")
+    func closedHeightNeverCropsTheMeasuredLine() {
+        // Estimate too tall: the measured line wins, so no gap.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: false, collapsed: 15, expanded: 15, estimate: 40)
+                == 15)
+        // Nothing measured yet and one real line: the estimate is what
+        // keeps the descenders on screen.
+        #expect(ExpandingText.estimatedLineHeight(size: 12) >= 12)
+    }
+}
+
 // MARK: - Row focus weights (Sources/App/UI/PanelSupport.swift)
 
 /// The row's selection background is tuned by eye, but the *relationships*

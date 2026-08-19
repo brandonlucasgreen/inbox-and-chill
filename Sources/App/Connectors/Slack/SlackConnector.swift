@@ -540,7 +540,7 @@ actor SlackConnector: Connector {
                 externalID: "watch-\(channel)-\(ts)",
                 kind: "keyword_watch",
                 title: "“\(term)” in #\(channelLabel)",
-                snippet: truncate(match["text"].nonEmptyString, 100),
+                snippet: truncate(match["text"].nonEmptyString, snippetLimit),
                 url: match["permalink"].nonEmptyString,
                 actorName: who,
                 occurredAt: occurredAt,
@@ -922,7 +922,7 @@ actor SlackConnector: Connector {
             externalID: "dm-\(channelID)",
             kind: "dm",
             title: "DM: \(name)",
-            snippet: Self.truncate(renderText(text), 100),
+            snippet: Self.truncate(renderText(text), Self.snippetLimit),
             url: deepLink(channel: channelID),
             actorName: isMPIM ? nil : name,
             occurredAt: SlackTS.date(ts) ?? .now,
@@ -946,7 +946,7 @@ actor SlackConnector: Connector {
             externalID: "mention-\(channel)-\(ts)",
             kind: "mention",
             title: "\(who) mentioned you in #\(channelLabel)",
-            snippet: Self.truncate(renderText(text), 100),
+            snippet: Self.truncate(renderText(text), Self.snippetLimit),
             url: deepLink(channel: channel, message: ts),
             actorName: who,
             occurredAt: SlackTS.date(ts) ?? .now,
@@ -1100,6 +1100,14 @@ actor SlackConnector: Connector {
         // Bare link: the label if there is one, else the URL itself.
         return label ?? reference
     }
+
+    /// How much message text a row carries.
+    ///
+    /// This used to be 100 — one panel line, with nothing behind it. The row
+    /// now opens to a paragraph while it holds the selection, so the snippet
+    /// has to be long enough to fill one; a cap that stops at the visible
+    /// line makes the expansion reveal nothing but whitespace.
+    static let snippetLimit = 320
 
     private static func truncate(_ text: String?, _ limit: Int) -> String? {
         guard let text, !text.isEmpty else { return nil }

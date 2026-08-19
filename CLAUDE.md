@@ -168,6 +168,15 @@ the connector 5s later. Two failures have come from this:
 - **Per-source badge toggles** (`SourcesPane`, honoured in `AppState`) — the
   badge *style* picker in General is a separate control.
 - **Keyboard nav** ↑/↓/⏎/E/S/⌘P and ←/→ source cycling in the panel.
+- **Rows that open on selection** (`UI/ExpandingText.swift`) — the selected
+  row grows to `RowExpansion.titleLines`/`bodyLines` and every other row
+  stays on one line. Both clamps are laid out at once and cross-faded behind
+  a clipped frame; animating `lineLimit` directly re-wraps the glyphs every
+  frame and pops the ellipsis, and clipping the open copy alone loses the
+  "…" that says there is more. Connector snippet caps
+  (`SlackConnector.snippetLimit`, `LinearConnector.snippetLimit`) exist to
+  keep something behind that ellipsis — a cap at the visible line makes the
+  expansion reveal whitespace.
 - **Journaling to Obsidian** (`Journal/JournalWriter.swift`) — an output, not a
   source; needs Full Disk Access for iCloud vault paths.
 - Saving a source in the editor already calls `bootstrapConnectors()`, so
