@@ -115,16 +115,33 @@ enum LinearOAuth {
 
     // MARK: - Keychain persistence
 
-    static func store(_ tokens: Tokens, sourceID: String) {
-        Keychain.set(tokens.accessToken, for: "\(sourceID).oauthAccessToken")
-        if let refresh = tokens.refreshToken {
-            Keychain.set(refresh, for: "\(sourceID).oauthRefreshToken")
+    /// Returns `nil` on success, or the first failure's explanation.
+    ///
+    /// A half-written token set is worse than none — the access token
+    /// without its refresh token works until it expires and then fails
+    /// silently — so the caller has to be told, whether that caller is the
+    /// settings sheet or the connector's own refresh path.
+    static func store(_ tokens: Tokens, sourceID: String) -> String? {
+        var problems: [String] = []
+        if let problem = Keychain.set(
+            tokens.accessToken, for: "\(sourceID).oauthAccessToken")
+        {
+            problems.append(problem)
         }
-        if let expiresAt = tokens.expiresAt {
-            Keychain.set(
+        if let refresh = tokens.refreshToken,
+            let problem = Keychain.set(
+                refresh, for: "\(sourceID).oauthRefreshToken")
+        {
+            problems.append(problem)
+        }
+        if let expiresAt = tokens.expiresAt,
+            let problem = Keychain.set(
                 String(expiresAt.timeIntervalSince1970),
                 for: "\(sourceID).oauthExpiresAt")
+        {
+            problems.append(problem)
         }
+        return problems.first
     }
 
     static func clear(sourceID: String) {

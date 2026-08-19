@@ -69,7 +69,16 @@ enum Keychain {
     /// amount of re-entering the credential clears the prompts. Deleting
     /// first guarantees the replacement item's ACL is authored by — and
     /// trusts — whichever build is running now.
-    static func set(_ value: String, for key: String) {
+    ///
+    /// Returns `nil` on success, or a sentence explaining what failed and
+    /// what to do about it.
+    ///
+    /// Deliberately **not** `@discardableResult`. A credential that fails to
+    /// save looks exactly like one that saved — the sheet closes, the field
+    /// still shows the token, and the source then fails to authenticate for
+    /// a reason nothing on screen accounts for. Every caller has to decide
+    /// what to show.
+    static func set(_ value: String, for key: String) -> String? {
         delete(key)
         let add: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -79,8 +88,34 @@ enum Keychain {
             kSecAttrAccessible as String:
                 kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
-        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return }
+        let status = SecItemAdd(add as CFDictionary, nil)
+        guard status == errSecSuccess else { return explain(status, key: key) }
         cache.store(value, for: key)
+        return nil
+    }
+
+    /// What a failed write means, in words, and what to do about it.
+    ///
+    /// Pure and static so every branch is testable: these strings are the
+    /// only account anyone ever gets of why a token didn't save.
+    nonisolated static func explain(_ status: OSStatus, key: String) -> String {
+        let field = key.split(separator: ".").last.map(String.init) ?? key
+        switch status {
+        case errSecDuplicateItem:
+            return "Couldn't save \(field): an item for it already exists and "
+                + "couldn't be replaced. Delete the \"\(service)\" entry for "
+                + "\(key) in Keychain Access, then save again."
+        case errSecAuthFailed, errSecInteractionNotAllowed:
+            return "Couldn't save \(field): the Keychain refused the write. "
+                + "Unlock your login keychain in Keychain Access and try again."
+        case errSecUserCanceled:
+            return "Couldn't save \(field): the Keychain prompt was cancelled."
+        default:
+            let reason =
+                SecCopyErrorMessageString(status, nil) as String?
+                ?? "OSStatus \(status)"
+            return "Couldn't save \(field) to the Keychain — \(reason)."
+        }
     }
 
     static func get(_ key: String) -> String? {

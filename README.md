@@ -89,6 +89,14 @@ This builds signed, installs to `/Applications`, and launches. A stable path plu
 
 **Signing:** builds use a Developer ID Application identity, configured via `DEVELOPMENT_TEAM` in `project.yml`. Building from your own clone means changing that to your Team ID, or passing `CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=NO` for an unsigned build.
 
+**If you build unsigned, macOS will ask permission for every credential, on every rebuild.** This is not a bug in the app and there is nothing it can do about it. Secrets live in the login keychain, and a keychain item's access control records the *code identity* of whichever build created it. A signed build gets an identity-based requirement — bundle ID plus team — which every later build satisfies, so permission is granted once and never asked again. An ad-hoc build has no certificate to form that requirement from, so macOS pins the item to the binary's hash instead, and the next build is a different binary. Check what a given app records with:
+
+```bash
+codesign -d -r- "/Applications/Inbox & Chill.app"
+```
+
+Three ways out, in order of how much you'll like them: sign with your own Developer ID (`DEVELOPMENT_TEAM=<your team>`) and the problem never appears; click **Always Allow** rather than *Allow*, which grants the current binary standing access until you rebuild; or accept a prompt per credential per rebuild. Items created by an unsigned build stay poisoned after you switch to signing — re-enter the credential in Settings, which rewrites the item under the new identity (writes are delete-then-add for exactly this reason).
+
 The build also compiles and embeds the `inchill` CLI inside the app bundle (`Contents/MacOS/inchill`), signed with the same identity — see [docs/shell-integration.md](docs/shell-integration.md).
 
 ## Status

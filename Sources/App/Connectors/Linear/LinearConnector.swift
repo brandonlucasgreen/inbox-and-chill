@@ -105,7 +105,15 @@ actor LinearConnector: Connector {
         do {
             let tokens = try await LinearOAuth.refresh(
                 clientID: clientID, refreshToken: refreshToken)
-            LinearOAuth.store(tokens, sourceID: sourceID)
+            // A refresh that can't be written back succeeds exactly once and
+            // then fails forever — the connector would keep renewing against
+            // a refresh token it never stored. Surface it as a connector
+            // error so the source's status dot goes red and says why.
+            if let problem = LinearOAuth.store(tokens, sourceID: sourceID) {
+                throw LinearConnectorError.operationFailed(problem)
+            }
+        } catch let error as LinearConnectorError {
+            throw error
         } catch {
             throw LinearConnectorError.oauthExpired
         }

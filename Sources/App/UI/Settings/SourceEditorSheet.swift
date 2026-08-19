@@ -34,6 +34,8 @@ struct SourceEditorSheet: View {
     @State private var pendingOAuthTokens: LinearOAuth.Tokens?
     @State private var isSigningIn = false
     @State private var oauthErrorText: String?
+    /// Why the last Save didn't go through. Non-nil keeps the sheet open.
+    @State private var saveErrorText: String?
 
     init(existing: SourceConfig? = nil) {
         self.existing = existing
@@ -109,7 +111,13 @@ struct SourceEditorSheet: View {
             Divider()
 
             HStack {
-                Spacer()
+                if let saveErrorText {
+                    Label(saveErrorText, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(existing == nil ? "Add" : "Save") { save() }
@@ -259,51 +267,85 @@ struct SourceEditorSheet: View {
 
     // MARK: Save
 
+    /// Saving is allowed to fail, and when it does the sheet stays open.
+    ///
+    /// A secret that didn't reach the Keychain leaves a source that looks
+    /// configured and can't authenticate — the failure the app exists to
+    /// stop. Dismissing on a failed write would hide the one moment the
+    /// user could still fix it.
     private func save() {
+        let target: SourceConfig
         if let existing {
             existing.displayName = name
-            applyFields(to: existing, descriptor: descriptor)
+            target = existing
         } else {
-            let config = SourceConfig(
+            target = SourceConfig(
                 kind: descriptor.id, displayName: name,
                 bannersEnabled: descriptor.bannersDefaultOn)
-            modelContext.insert(config)
-            applyFields(to: config, descriptor: descriptor)
         }
-        try? modelContext.save()
+        if let problem = applyFields(to: target, descriptor: descriptor) {
+            saveErrorText = problem
+            return
+        }
+        saveErrorText = nil
+        if existing == nil { modelContext.insert(target) }
+        do {
+            try modelContext.save()
+        } catch {
+            saveErrorText =
+                "Couldn't save this source — \(error.localizedDescription)"
+            return
+        }
         Task { await appState.bootstrapConnectors() }
         dismiss()
     }
 
-    private func applyFields(to config: SourceConfig, descriptor: ConnectorKindDescriptor) {
+    /// Returns `nil` when every field landed, or the first problem.
+    ///
+    /// Secrets are written before the config is inserted, so a Keychain
+    /// failure can't leave a half-configured source behind in SwiftData.
+    private func applyFields(
+        to config: SourceConfig, descriptor: ConnectorKindDescriptor
+    ) -> String? {
         for field in descriptor.fields {
             let value = fieldValues[field.key] ?? ""
             if field.isSecret {
                 guard !value.isEmpty else { continue }
-                Keychain.set(value, for: "\(config.id).\(field.key)")
+                if let problem = Keychain.set(
+                    value, for: "\(config.id).\(field.key)")
+                {
+                    return problem
+                }
             } else {
                 config.settings[field.key] = value
             }
         }
         if descriptor.id == "linear" {
-            applyLinearAuth(to: config)
+            return applyLinearAuth(to: config)
         }
+        return nil
     }
 
     /// The two Linear auth methods are exclusive: committing to one clears
     /// the other's Keychain material so the connector's "OAuth token present
     /// → use OAuth" check can't pick up stale credentials.
-    private func applyLinearAuth(to config: SourceConfig) {
+    private func applyLinearAuth(to config: SourceConfig) -> String? {
         config.settings["authMethod"] = linearAuthMethod.rawValue
         config.settings["oauthClientID"] = trimmedClientID
         switch linearAuthMethod {
         case .apiKey:
             LinearOAuth.clear(sourceID: config.id)
         case .oauth:
-            if let tokens = pendingOAuthTokens {
-                LinearOAuth.store(tokens, sourceID: config.id)
+            if let tokens = pendingOAuthTokens,
+                let problem = LinearOAuth.store(tokens, sourceID: config.id)
+            {
+                // Deliberately before the apiKey delete: leaving the key in
+                // place is what keeps the source working when the tokens
+                // didn't store.
+                return problem
             }
             Keychain.delete("\(config.id).apiKey")
         }
+        return nil
     }
 }

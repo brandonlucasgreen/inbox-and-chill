@@ -479,6 +479,51 @@ struct PanelKeyInputTests {
     }
 }
 
+// MARK: - Keychain write failures (Sources/App/Support/Keychain.swift)
+
+/// A credential that fails to save is indistinguishable from one that saved
+/// — the sheet closes, the field still shows the token, and the source then
+/// fails to authenticate for a reason nothing on screen accounts for. These
+/// strings are the only account anyone gets, so each one has to name the
+/// field and say what to do next rather than printing a bare OSStatus.
+struct KeychainExplainTests {
+    @Test("The failing field is named, not the internal key")
+    func namesTheField() {
+        let message = Keychain.explain(errSecAuthFailed, key: "\(UUID()).pat")
+        #expect(message.contains("pat"))
+        #expect(!message.contains("OSStatus"))
+    }
+
+    @Test("A locked keychain says how to unlock it")
+    func lockedSaysWhatToDo() {
+        for status in [errSecAuthFailed, errSecInteractionNotAllowed] {
+            let message = Keychain.explain(status, key: "src.userToken")
+            #expect(message.contains("Keychain Access"))
+        }
+    }
+
+    @Test("A leftover item points at the item to remove")
+    func duplicateNamesTheItem() {
+        let message = Keychain.explain(errSecDuplicateItem, key: "src.apiKey")
+        #expect(message.contains("lol.bgreen.inboxandchill"))
+        #expect(message.contains("src.apiKey"))
+    }
+
+    @Test("A cancelled prompt reads as cancelled, not as a fault")
+    func cancellationIsNotAnError() {
+        let message = Keychain.explain(errSecUserCanceled, key: "src.password")
+        #expect(message.contains("cancelled"))
+    }
+
+    @Test("An unexpected status still explains itself")
+    func unknownStatusStillReads() {
+        // Never a bare number: -25260 tells the user nothing on its own.
+        let message = Keychain.explain(-25260, key: "src.token")
+        #expect(message.hasPrefix("Couldn't save token"))
+        #expect(message.count > "Couldn't save token".count + 8)
+    }
+}
+
 // MARK: - Row expansion (Sources/App/UI/ExpandingText.swift)
 
 /// The selected row opens to a paragraph and every other row stays on one
