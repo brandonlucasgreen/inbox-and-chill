@@ -1335,6 +1335,82 @@ struct JournalPermissionMessageTests {
 
 // MARK: - Toggle-style connector fields (participating, etc.)
 
+/// Setup instructions live in the catalog so the app can show them; nobody
+/// reads a docs file while staring at an empty token field. These pin the
+/// two properties that decay quietly: a new connector shipping with no
+/// instructions at all, and steps growing into paragraphs.
+struct ConnectorSetupStepsTests {
+    private var withSecrets: [ConnectorKindDescriptor] {
+        ConnectorCatalog.all.filter { $0.fields.contains(where: \.isSecret) }
+    }
+
+    @Test("Every source that asks for a credential says how to get one")
+    func credentialSourcesExplainThemselves() {
+        for descriptor in withSecrets {
+            #expect(
+                !descriptor.setupSteps.isEmpty,
+                "\(descriptor.displayName) asks for a secret with no setup steps")
+        }
+    }
+
+    @Test("Steps stay short enough to read at a glance")
+    func stepsAreBrief() {
+        // The brief is literally "quite brief and clear". A step that has
+        // grown past a couple of lines belongs in authNote or the docs.
+        for descriptor in ConnectorCatalog.all {
+            for step in descriptor.setupSteps {
+                #expect(
+                    step.count <= 200,
+                    "\(descriptor.displayName): step is \(step.count) chars")
+            }
+            #expect(descriptor.setupSteps.count <= 6)
+        }
+    }
+
+    @Test("A setup link is a real https URL to the provider")
+    func setupLinksResolve() {
+        for descriptor in ConnectorCatalog.all where !descriptor.setupURL.isEmpty {
+            let url = URL(string: descriptor.setupURL)
+            #expect(url?.scheme == "https", "\(descriptor.displayName)")
+            #expect(url?.host()?.isEmpty == false, "\(descriptor.displayName)")
+        }
+    }
+
+    @Test("The Slack manifest still grants what the connector depends on")
+    func slackManifestCoversTheFeatures() {
+        let manifest = ConnectorCatalog.slackAppManifest
+        // Each of these is load-bearing; the comment is what breaks without it.
+        let required = [
+            "im:history",       // DM unreads
+            "channels:history", // channel mentions
+            "reactions:read",   // emoji-save gesture
+            "reactions:write",  // un-save removes the reaction
+            "users:read",       // display names instead of raw ids
+            "search:read",      // Keyword Watch — the only path into a
+                                // channel you are not in
+        ]
+        for scope in required {
+            #expect(manifest.contains(scope), "manifest is missing \(scope)")
+        }
+        #expect(manifest.contains("socket_mode_enabled: true"))
+        // RTM-era event types Slack's validator rejects outright.
+        for rejected in ["im_marked", "channel_marked", "mpim_marked"] {
+            #expect(!manifest.contains(rejected))
+        }
+    }
+
+    @Test("Slack offers the manifest to copy; nothing else needs a payload")
+    func onlySlackCarriesAPayload() {
+        for descriptor in ConnectorCatalog.all {
+            if descriptor.id == "slack" {
+                #expect(descriptor.setupPayload?.text.isEmpty == false)
+            } else {
+                #expect(descriptor.setupPayload == nil)
+            }
+        }
+    }
+}
+
 struct ConnectorToggleFieldTests {
     private var participating: ConnectorKindDescriptor.Field {
         ConnectorCatalog.descriptor(for: "github")!

@@ -71,15 +71,12 @@ read from it would prompt on every hook fire. Instead:
 - The listener binds `127.0.0.1` only; every request without the exact
   bearer token gets a 401.
 
-## OAuth (Linear) specifics
+## OAuth: none, anywhere
 
-- PKCE public client: no client secret exists anywhere.
-- The loopback callback server answers exactly one request on
-  `127.0.0.1:52180`, validates `state`, and shuts down; the authorization
-  code is useless without the in-memory PKCE verifier.
-- Access tokens auto-refresh ~2 minutes before expiry; a failed refresh
-  surfaces as a source error telling the user to re-connect — the app never
-  silently retries with dead credentials.
+Every source is paste-a-token. Linear had a PKCE loopback flow until
+2026-08-19 (removed — see PLAN §6.9), and with it went the only listener the
+app ever opened for authentication. The only socket it binds now is the
+local push API described above.
 
 ## Known accepted risks
 
@@ -87,4 +84,6 @@ read from it would prompt on every hook fire. Instead:
   session. Accepted: it only authorizes inserting/clearing items in the
   local queue on the same machine, and rotation bounds its life.
 - Personal API keys/PATs are long-lived by nature; the Keychain is the
-  mitigation. Prefer the Linear OAuth path where token lifetime matters.
+  mitigation, and every provider's own console can revoke one. There is no
+  shorter-lived alternative for any of the six sources — the paths that
+  offered one were removed or never existed (PLAN §6.9).

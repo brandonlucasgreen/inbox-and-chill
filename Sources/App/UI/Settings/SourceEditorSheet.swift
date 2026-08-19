@@ -24,6 +24,9 @@ struct SourceEditorSheet: View {
     /// (non-secrets only — secrets are never read back from Keychain).
     @State private var fieldValues: [String: String]
 
+    /// Latches once the setup payload has been copied, so the button can
+    /// say so — copying a manifest gives no other feedback that it worked.
+    @State private var copiedPayload = false
     /// Why the last Save didn't go through. Non-nil keeps the sheet open.
     @State private var saveErrorText: String?
 
@@ -63,6 +66,7 @@ struct SourceEditorSheet: View {
                             name = ConnectorCatalog.descriptor(for: newValue)?
                                 .displayName ?? ""
                             fieldValues = [:]
+                            copiedPayload = false
                         }
                     } else {
                         LabeledContent("Kind") {
@@ -72,6 +76,10 @@ struct SourceEditorSheet: View {
                     }
 
                     TextField("Name", text: $name)
+                }
+
+                if !descriptor.setupSteps.isEmpty {
+                    Section("How to get set up") { setupSteps }
                 }
 
                 if !descriptor.fields.isEmpty {
@@ -112,6 +120,75 @@ struct SourceEditorSheet: View {
             .padding(16)
         }
         .frame(width: 560, height: 560)
+    }
+
+    // MARK: Setup steps
+
+    /// Numbered instructions, the provider's page, and anything its console
+    /// asks you to paste.
+    ///
+    /// Above the fields on purpose: you read these *before* you have a token
+    /// to paste, and the reasoning (`authNote`) stays underneath for anyone
+    /// who wants it.
+    @ViewBuilder private var setupSteps: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(descriptor.setupSteps.enumerated()), id: \.offset) {
+                index, step in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(index + 1).")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Text(Self.formatted(step))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if !descriptor.setupURL.isEmpty || descriptor.setupPayload != nil {
+                HStack(spacing: 8) {
+                    if let url = URL(string: descriptor.setupURL) {
+                        Link(destination: url) {
+                            Label(
+                                Self.hostLabel(descriptor.setupURL),
+                                systemImage: "arrow.up.forward.square")
+                        }
+                    }
+                    if let payload = descriptor.setupPayload {
+                        Button {
+                            PanelPasteboard.copy(
+                                title: payload.text, url: nil)
+                            copiedPayload = true
+                        } label: {
+                            Label(
+                                copiedPayload
+                                    ? "Copied" : "Copy \(payload.label)",
+                                systemImage: copiedPayload
+                                    ? "checkmark" : "doc.on.doc")
+                        }
+                        .disabled(copiedPayload)
+                    }
+                }
+                .font(.callout)
+                .padding(.top, 2)
+            }
+        }
+        .font(.callout)
+        .padding(.vertical, 2)
+    }
+
+    /// Inline markdown — bold for the things to click, code for the things
+    /// to type. Falls back to the raw text rather than dropping a step.
+    private static func formatted(_ step: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: step,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(step)
+    }
+
+    /// "api.slack.com" rather than the whole URL: the button is already the
+    /// link, and the host is the part that says where you're going.
+    private static func hostLabel(_ urlString: String) -> String {
+        URL(string: urlString)?.host() ?? urlString
     }
 
     // MARK: Generic fields

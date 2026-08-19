@@ -4,23 +4,13 @@ Each source is added from Settings → Sources → Add. This walks through the e
 
 ## Linear
 
-Linear offers two auth methods — pick one in the source editor's **Authentication** control.
-
-### Option A: Personal API Key (fewest steps)
+**Field:** Personal API Key
 
 1. In Linear, go to **Settings → API**.
 2. Under **Personal API keys**, create a new key (`lin_api_…`).
 3. Paste it into the source's **Personal API Key** field.
 
-### Option B: Sign in with Linear (OAuth)
-
-No pasted long-lived key; short-lived tokens that refresh automatically. One-time setup:
-
-1. In Linear, go to **Settings → API → OAuth applications** and create an application.
-2. Add the **callback URL** shown in the source editor (`http://localhost:52180/callback`) to the application's redirect URIs.
-3. Paste the application's **client ID** into the source editor (no client secret is needed — the app uses PKCE), then click **Sign in with Linear…** and approve in the browser.
-
-Tokens land in your Keychain and refresh on their own; if the refresh token is ever revoked, the source's status dot will say so — re-connect from the source editor.
+A "Sign in with Linear" OAuth option existed until 2026-08-19 and was removed: it still required registering your own Linear application and pasting its client ID, so it traded one paste for a longer setup and a token that expires. See PLAN §6.9.
 
 That's the whole setup. Linear is polled every 30–60 seconds and is a true 1:1 mirror of your Linear inbox — mentions, assignments, comments — with full write-through: marking an item done in Inbox & Chill marks it read in Linear, and snoozing is a real remote snooze, not a local approximation.
 
