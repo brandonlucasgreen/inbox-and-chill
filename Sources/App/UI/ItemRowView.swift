@@ -59,7 +59,7 @@ struct ItemRowView: View {
     private var row: some View {
         HStack(alignment: .top, spacing: 8) {
             Circle()
-                .fill(item.highSignal ? Color.accentColor : .clear)
+                .fill(item.isSeen ? .clear : Color.accentColor)
                 .frame(width: 6, height: 6)
                 .padding(.top, 6)
                 .accessibilityHidden(true)
@@ -221,6 +221,7 @@ struct ItemRowView: View {
         if let secondary { text += ", \(secondary)" }
         text += ", \(PanelFormat.relative(item.occurredAt)) ago"
         if item.isPinned { text += ", pinned" }
+        if !item.isSeen { text += ", unseen" }
         if item.highSignal { text += ", high signal" }
         return text
     }
@@ -245,6 +246,11 @@ struct KeyCap: View {
         Text(key)
             .font(.system(size: 10, weight: .semibold, design: .rounded))
             .monospacedDigit()
+            // Every other cap is a single glyph; "⌘P" is two, and the trailing
+            // action stack was squeezing it down to a lone ellipsis. A cap is
+            // useless if it can't show its key.
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(.secondary)
             .padding(.horizontal, 3)
             .padding(.vertical, 1)

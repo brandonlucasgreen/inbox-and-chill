@@ -333,6 +333,48 @@ struct SourceStatusDotTests {
     }
 }
 
+// MARK: - Menu bar badge (Sources/App/Models/MenuBarBadge.swift)
+
+/// Two independent counters, rendered as `total • high-signal`.
+///
+/// High signal is a subset of the total, which is what makes dropping a zero
+/// counter safe: a zero total implies a zero high signal, so there is no state
+/// where trimming hides a non-empty queue.
+struct MenuBarBadgeTests {
+    @Test("Both counters on read as total then high-signal")
+    func bothCounters() {
+        #expect(MenuBarBadge.default.text(total: 6, highSignal: 2) == "6 • 2")
+    }
+
+    @Test("A zero high-signal count is dropped rather than printed")
+    func zeroHighSignalIsTrimmed() {
+        // "6 • 0" is noise; the six are still right there in the panel.
+        #expect(MenuBarBadge.default.text(total: 6, highSignal: 0) == "6")
+    }
+
+    @Test("Each counter can be switched off independently")
+    func eitherCounterAlone() {
+        let totalOnly = MenuBarBadge(showsTotal: true, showsHighSignal: false)
+        let signalOnly = MenuBarBadge(showsTotal: false, showsHighSignal: true)
+        #expect(totalOnly.text(total: 6, highSignal: 2) == "6")
+        #expect(signalOnly.text(total: 6, highSignal: 2) == "2")
+    }
+
+    @Test("An empty queue leaves the icon bare, whatever is switched on")
+    func emptyQueueShowsNothing() {
+        #expect(MenuBarBadge.default.text(total: 0, highSignal: 0) == nil)
+        #expect(
+            MenuBarBadge(showsTotal: true, showsHighSignal: false)
+                .text(total: 0, highSignal: 0) == nil)
+    }
+
+    @Test("Both switched off shows nothing even with a full queue")
+    func bothOffShowsNothing() {
+        let off = MenuBarBadge(showsTotal: false, showsHighSignal: false)
+        #expect(off.text(total: 6, highSignal: 2) == nil)
+    }
+}
+
 // MARK: - Panel keyboard navigation (Sources/App/UI/PanelKeyInput.swift)
 
 /// The ↑/↓ arithmetic, and the key mapping that feeds it.

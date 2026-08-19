@@ -149,6 +149,28 @@ actor Store {
         try modelContext.save()
     }
 
+    /// Stamps `seenAt` the first time an item holds the panel's selection.
+    ///
+    /// Idempotent: the stamp records when the user *first* laid eyes on it, so
+    /// re-selecting a row must not move it. Returns whether anything changed,
+    /// so callers can skip a redundant badge refresh.
+    @discardableResult
+    func markSeen(uid: String, at date: Date = .now) throws -> Bool {
+        guard let item = try item(uid: uid), item.seenAt == nil else {
+            return false
+        }
+        item.seenAt = date
+        // Deliberately not touching `updatedAt`: that tracks changes to the
+        // notification itself, and seeing one is not a change to it.
+        try modelContext.save()
+        return true
+    }
+
+    /// The persisted first-seen stamp, or `nil` if the item is still unseen.
+    func seenAt(uid: String) throws -> Date? {
+        try item(uid: uid)?.seenAt
+    }
+
     // MARK: Maintenance
 
     /// Snoozes past their wake time that haven't fired a banner yet.

@@ -63,6 +63,12 @@ struct PanelView: View {
         .onChange(of: visibleUIDs) { old, new in
             reconcileSelection(old: old, new: new)
         }
+        .onChange(of: selectedUID, initial: true) { _, _ in
+            // Focus is what marks an item read — arrowing onto a row counts,
+            // and so does the auto-selection when the panel opens, because
+            // that row is the one you are looking at.
+            markSelectedSeen()
+        }
         .onChange(of: filterText) { _, new in
             if new.isEmpty && focus != .filter { isFiltering = false }
         }
@@ -436,6 +442,11 @@ struct PanelView: View {
         let next = min(max(current + delta, 0), options.count - 1)
         guard next != current else { return }
         appState.selectedSourceFilter = options[next]
+    }
+
+    private func markSelectedSeen() {
+        guard let item = selectedItem, !item.isSeen else { return }
+        appState.markSeen(item)
     }
 
     private func moveSelection(_ delta: Int) {

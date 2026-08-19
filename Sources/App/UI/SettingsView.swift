@@ -9,19 +9,17 @@ struct SettingsView: View {
         @Bindable var state = appState
         TabView {
             Form {
-                Picker("Menu bar badge", selection: $state.badgeStyle) {
-                    Text("High-signal count").tag(BadgeStyle.highSignalCount)
-                    Text("Total count").tag(BadgeStyle.totalCount)
-                    Text("Dot").tag(BadgeStyle.dot)
-                    Text("None").tag(BadgeStyle.none)
-                }
+                Toggle("Badge: total waiting", isOn: $state.badgeShowsTotal)
+                Toggle(
+                    "Badge: high-signal only",
+                    isOn: $state.badgeShowsHighSignal)
                 // Two things are invisible from here: what "high signal"
                 // actually means (each connector decides — an ntfy message at
-                // the default priority 3 is not high signal, so it never moves
-                // the badge in this mode), and that the per-source opt-out
-                // lives one tab over.
+                // the default priority 3 is not high signal, and a Slack
+                // keyword hit never is), and that the per-source opt-out lives
+                // one tab over.
                 Text(
-                    "High-signal count shows only what each source treats as high signal — mentions, review requests, DMs, and ntfy messages sent at priority 4 or 5. Total count shows everything. Choose which sources count at all in the Sources tab."
+                    "Both on reads as total • high-signal, e.g. 6 • 2. High signal is what each source treats as someone specifically wanting you — mentions, review requests, DMs, and ntfy messages sent at priority 4 or 5. A counter showing zero is left off, and with both switched off the icon stays bare. Choose which sources count at all in the Sources tab."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

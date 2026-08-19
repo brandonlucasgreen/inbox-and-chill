@@ -34,10 +34,3 @@ final class SourceConfig {
         self.bannersEnabled = bannersEnabled
     }
 }
-
-enum BadgeStyle: String, CaseIterable, Codable, Sendable {
-    case highSignalCount  // default
-    case totalCount
-    case dot
-    case none
-}

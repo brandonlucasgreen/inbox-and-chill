@@ -56,6 +56,39 @@ struct TriageTests {
         #expect(purged == 0)
     }
 
+    @Test("Seeing an item stamps it once and never moves the stamp")
+    func seenStampIsIdempotent() async throws {
+        let store = try makeStore()
+        _ = try await store.reconcile(
+            snapshot: [
+                RemoteItem(
+                    externalID: "a", kind: "mention", title: "A",
+                    occurredAt: .now, highSignal: true)
+            ], sourceID: "s", sourceKind: "test", remoteTruth: true)
+
+        let uid = "test:a"
+        let first = Date(timeIntervalSince1970: 1_000)
+        #expect(try await store.markSeen(uid: uid, at: first) == true)
+
+        // Re-focusing a row must not re-date it: the stamp records when it was
+        // FIRST seen, and a later write would corrupt that.
+        #expect(try await store.markSeen(uid: uid, at: .now) == false)
+        #expect(try await store.seenAt(uid: uid) == first)
+    }
+
+    @Test("Arriving items start unseen, so nothing is silently pre-read")
+    func newItemsArriveUnseen() async throws {
+        let store = try makeStore()
+        let result = try await store.reconcile(
+            snapshot: [
+                RemoteItem(
+                    externalID: "a", kind: "mention", title: "A",
+                    occurredAt: .now, highSignal: true)
+            ], sourceID: "s", sourceKind: "test", remoteTruth: true)
+        #expect(result.inserted.count == 1)
+        #expect(try await store.seenAt(uid: "test:a") == nil)
+    }
+
     @Test func doneUndoAndPurge() async throws {
         let store = try makeStore()
         let a = RemoteItem(

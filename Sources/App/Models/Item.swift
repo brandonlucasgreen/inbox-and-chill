@@ -39,7 +39,16 @@ final class Item {
     var pinnedAt: Date?
 
     /// Counts toward the high-signal badge mode.
+    ///
+    /// A property of the notification's *type* — "someone specifically wants
+    /// you" — decided by each connector's own allowlist and fixed for the
+    /// item's life. Deliberately NOT a read/unread state; that's `seenAt`.
     var highSignal: Bool
+    /// When the item first held the panel's selection.
+    ///
+    /// Optional so existing rows migrate in as unseen rather than silently
+    /// counting as read.
+    var seenAt: Date?
     /// Source-specific extras (e.g. Slack channel id, Linear notification id).
     var payload: Data?
 
@@ -73,6 +82,8 @@ extension Item {
         return until > .now && doneAt == nil
     }
     var isActive: Bool { doneAt == nil && !isSnoozed }
+    /// Whether the user has ever focused this row. Drives the dot.
+    var isSeen: Bool { seenAt != nil }
     var url: URL? { urlString.flatMap(URL.init(string:)) }
 }
 

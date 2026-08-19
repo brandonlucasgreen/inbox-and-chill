@@ -69,19 +69,63 @@ final class AppState {
         }
     }
 
-    var badgeStyle: BadgeStyle {
+    var badgeShowsTotal: Bool {
         get {
-            access(keyPath: \.badgeStyle)
-            return BadgeStyle(
-                rawValue: UserDefaults.standard.string(forKey: "badgeStyle")
-                    ?? "") ?? .highSignalCount
+            access(keyPath: \.badgeShowsTotal)
+            return Self.badgeDefault(forKey: "badge.showsTotal") { $0.showsTotal }
         }
         set {
-            withMutation(keyPath: \.badgeStyle) {
-                UserDefaults.standard.set(
-                    newValue.rawValue, forKey: "badgeStyle")
+            withMutation(keyPath: \.badgeShowsTotal) {
+                UserDefaults.standard.set(newValue, forKey: "badge.showsTotal")
             }
             Task { await refreshBadge() }
+        }
+    }
+
+    var badgeShowsHighSignal: Bool {
+        get {
+            access(keyPath: \.badgeShowsHighSignal)
+            return Self.badgeDefault(forKey: "badge.showsHighSignal") {
+                $0.showsHighSignal
+            }
+        }
+        set {
+            withMutation(keyPath: \.badgeShowsHighSignal) {
+                UserDefaults.standard.set(
+                    newValue, forKey: "badge.showsHighSignal")
+            }
+            Task { await refreshBadge() }
+        }
+    }
+
+    var badge: MenuBarBadge {
+        MenuBarBadge(
+            showsTotal: badgeShowsTotal, showsHighSignal: badgeShowsHighSignal)
+    }
+
+    /// Reads one of the two badge switches, falling back to whatever the old
+    /// single-choice `badgeStyle` setting meant.
+    ///
+    /// The badge used to be one picker (high-signal / total / dot / off); it is
+    /// now two independent toggles. Anyone upgrading has a `badgeStyle` string
+    /// and none of the new keys, and silently defaulting them to "both on"
+    /// would switch the badge back on for someone who had deliberately turned
+    /// it off.
+    private static func badgeDefault(
+        forKey key: String, _ field: (MenuBarBadge) -> Bool
+    ) -> Bool {
+        if let stored = UserDefaults.standard.object(forKey: key) as? Bool {
+            return stored
+        }
+        switch UserDefaults.standard.string(forKey: "badgeStyle") {
+        case "totalCount":
+            return field(MenuBarBadge(showsTotal: true, showsHighSignal: false))
+        case "highSignalCount", "dot":
+            return field(MenuBarBadge(showsTotal: false, showsHighSignal: true))
+        case "none":
+            return field(MenuBarBadge(showsTotal: false, showsHighSignal: false))
+        default:
+            return field(.default)
         }
     }
 
@@ -306,8 +350,8 @@ final class AppState {
     }
 
     func refreshBadge() async {
-        let style = badgeStyle
-        guard style != .none else {
+        let badge = badge
+        guard badge.showsTotal || badge.showsHighSignal else {
             badgeText = nil
             return
         }
@@ -315,12 +359,7 @@ final class AppState {
         let counts =
             (try? await store.badgeCounts(countedSourceIDs: counted))
             ?? (0, 0)
-        let n = style == .totalCount ? counts.0 : counts.1
-        switch style {
-        case .dot: badgeText = n > 0 ? "●" : nil
-        case .none: badgeText = nil
-        default: badgeText = n > 0 ? "\(n)" : nil
-        }
+        badgeText = badge.text(total: counts.0, highSignal: counts.1)
     }
 
     /// Resolves banner permission, recording whatever blocks it in
@@ -487,6 +526,19 @@ final class AppState {
             await engine.snooze(
                 uid: uid, sourceID: sourceID, externalID: ext, until: until,
                 payload: payload)
+        }
+    }
+
+    /// Records that the user has focused a row, clearing its unseen dot.
+    ///
+    /// Fire-and-forget and cheap to over-call: the store ignores an item that
+    /// already carries a stamp, so selection changes can call this freely.
+    func markSeen(_ item: Item) {
+        guard !item.isSeen else { return }
+        let uid = item.uid
+        Task {
+            guard (try? await store.markSeen(uid: uid)) == true else { return }
+            await MainActor.run { queueVersion += 1 }
         }
     }
 
