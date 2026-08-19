@@ -702,9 +702,7 @@ enum ConnectorFactory {
         case "fake":
             return FakeConnector(sourceID: config.id)
         case "linear":
-            return LinearConnector(
-                sourceID: config.id,
-                oauthClientID: settings["oauthClientID"])
+            return LinearConnector(sourceID: config.id)
         case "github":
             let field = ConnectorCatalog.descriptor(for: "github")?
                 .fields.first { $0.key == "participating" }

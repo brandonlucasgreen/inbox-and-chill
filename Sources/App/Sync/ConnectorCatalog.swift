@@ -38,7 +38,8 @@ enum ConnectorCatalog {
                     key: "apiKey", label: "Personal API Key", isSecret: true,
                     placeholder: "lin_api_…",
                     help: "Linear → Settings → API → Personal API keys")
-            ]),
+            ],
+            authNote: "Why no “Sign in with Linear”? It existed and was removed: OAuth still required registering your own Linear application and pasting its client ID, so it traded one paste for a longer setup and a token that expires. The personal API key is Linear's own sanctioned path for personal use. The key is stored in your Keychain and never leaves this Mac."),
         .init(
             id: "github", displayName: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right",
             fields: [

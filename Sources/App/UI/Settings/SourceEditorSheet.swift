@@ -7,9 +7,9 @@ import SwiftUI
 /// Keychain value, typing replaces it.
 ///
 /// Layout note: the fields live in a grouped, scrolling Form inside a fixed
-/// frame — content can never clip, it scrolls. Linear gets a custom
-/// authentication section (API key or OAuth sign-in, PLAN §6.9); GitHub and
-/// Slack render an explanation of why paste-a-token is their only path.
+/// frame — content can never clip, it scrolls. Every source is now
+/// paste-a-token, and each one's `authNote` explains why that is the only
+/// path it has (PLAN §6.9).
 struct SourceEditorSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppState.self) private var appState
@@ -24,16 +24,6 @@ struct SourceEditorSheet: View {
     /// (non-secrets only — secrets are never read back from Keychain).
     @State private var fieldValues: [String: String]
 
-    // Linear authentication state.
-    private enum LinearAuthMethod: String {
-        case apiKey, oauth
-    }
-    @State private var linearAuthMethod: LinearAuthMethod
-    /// Tokens from a completed sign-in, held here until Save writes them to
-    /// the Keychain under the (possibly not-yet-created) source's id.
-    @State private var pendingOAuthTokens: LinearOAuth.Tokens?
-    @State private var isSigningIn = false
-    @State private var oauthErrorText: String?
     /// Why the last Save didn't go through. Non-nil keeps the sheet open.
     @State private var saveErrorText: String?
 
@@ -46,8 +36,6 @@ struct SourceEditorSheet: View {
                 ?? ConnectorCatalog.descriptor(for: initialKind)?.displayName ?? "")
         let settings = existing?.settings ?? [:]
         _fieldValues = State(initialValue: settings)
-        _linearAuthMethod = State(
-            initialValue: settings["authMethod"] == "oauth" ? .oauth : .apiKey)
     }
 
     private var descriptor: ConnectorKindDescriptor {
@@ -75,8 +63,6 @@ struct SourceEditorSheet: View {
                             name = ConnectorCatalog.descriptor(for: newValue)?
                                 .displayName ?? ""
                             fieldValues = [:]
-                            pendingOAuthTokens = nil
-                            oauthErrorText = nil
                         }
                     } else {
                         LabeledContent("Kind") {
@@ -88,9 +74,7 @@ struct SourceEditorSheet: View {
                     TextField("Name", text: $name)
                 }
 
-                if descriptor.id == "linear" {
-                    linearAuthSection
-                } else if !descriptor.fields.isEmpty {
+                if !descriptor.fields.isEmpty {
                     Section {
                         ForEach(descriptor.fields) { field in
                             fieldRow(for: field)
@@ -170,101 +154,6 @@ struct SourceEditorSheet: View {
         }
     }
 
-    // MARK: Linear authentication
-
-    private var linearAPIKeyField: ConnectorKindDescriptor.Field? {
-        descriptor.fields.first { $0.key == "apiKey" }
-    }
-
-    @ViewBuilder private var linearAuthSection: some View {
-        Section("Authentication") {
-            Picker("Method", selection: $linearAuthMethod) {
-                Text("Personal API Key").tag(LinearAuthMethod.apiKey)
-                Text("Sign in with Linear").tag(LinearAuthMethod.oauth)
-            }
-            .pickerStyle(.segmented)
-
-            if linearAuthMethod == .apiKey {
-                if let field = linearAPIKeyField {
-                    fieldRow(for: field)
-                }
-            } else {
-                TextField(
-                    "OAuth Client ID",
-                    text: Binding(
-                        get: { fieldValues["oauthClientID"] ?? "" },
-                        set: { fieldValues["oauthClientID"] = $0 }),
-                    prompt: Text("From your Linear OAuth application"))
-
-                LabeledContent("Callback URL") {
-                    Text(LinearOAuth.redirectURI)
-                        .textSelection(.enabled)
-                        .foregroundStyle(.secondary)
-                }
-                .help("Register this exact URL on your Linear OAuth application")
-
-                HStack(spacing: 10) {
-                    Button {
-                        signInWithLinear()
-                    } label: {
-                        if isSigningIn {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text(oauthConnected ? "Re-connect…" : "Sign in with Linear…")
-                        }
-                    }
-                    .disabled(isSigningIn || trimmedClientID.isEmpty)
-
-                    if oauthConnected {
-                        Label("Connected", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.callout)
-                    }
-                }
-
-                if let oauthErrorText {
-                    Text(oauthErrorText)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Text(
-                    "Create an OAuth application in Linear (Settings → API → OAuth applications), add the callback URL above, and paste its client ID — no client secret needed. Tokens are stored in your Keychain and refreshed automatically."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private var trimmedClientID: String {
-        (fieldValues["oauthClientID"] ?? "").trimmingCharacters(in: .whitespaces)
-    }
-
-    /// Connected = tokens from this sheet session, or (edit mode) tokens
-    /// already in the Keychain for this source.
-    private var oauthConnected: Bool {
-        if pendingOAuthTokens != nil { return true }
-        guard let existing else { return false }
-        return LinearOAuth.isConnected(sourceID: existing.id)
-    }
-
-    private func signInWithLinear() {
-        let clientID = trimmedClientID
-        isSigningIn = true
-        oauthErrorText = nil
-        Task {
-            do {
-                pendingOAuthTokens = try await LinearOAuth.signIn(clientID: clientID)
-            } catch {
-                oauthErrorText = String(describing: error)
-            }
-            isSigningIn = false
-        }
-    }
-
     // MARK: Save
 
     /// Saving is allowed to fail, and when it does the sheet stays open.
@@ -320,32 +209,23 @@ struct SourceEditorSheet: View {
                 config.settings[field.key] = value
             }
         }
-        if descriptor.id == "linear" {
-            return applyLinearAuth(to: config)
-        }
+        if descriptor.id == "linear" { clearLinearOAuthLeftovers(from: config) }
         return nil
     }
 
-    /// The two Linear auth methods are exclusive: committing to one clears
-    /// the other's Keychain material so the connector's "OAuth token present
-    /// → use OAuth" check can't pick up stale credentials.
-    private func applyLinearAuth(to config: SourceConfig) -> String? {
-        config.settings["authMethod"] = linearAuthMethod.rawValue
-        config.settings["oauthClientID"] = trimmedClientID
-        switch linearAuthMethod {
-        case .apiKey:
-            LinearOAuth.clear(sourceID: config.id)
-        case .oauth:
-            if let tokens = pendingOAuthTokens,
-                let problem = LinearOAuth.store(tokens, sourceID: config.id)
-            {
-                // Deliberately before the apiKey delete: leaving the key in
-                // place is what keeps the source working when the tokens
-                // didn't store.
-                return problem
-            }
-            Keychain.delete("\(config.id).apiKey")
+    /// Clears credentials left by the "Sign in with Linear" flow, removed
+    /// 2026-08-19.
+    ///
+    /// Saving a Linear source is the one moment the app can reach them: the
+    /// UI that wrote them is gone, and access tokens nobody can use are
+    /// still secrets sitting in the Keychain. Deleting the settings keys too
+    /// keeps a stale `authMethod` from meaning anything to a later build.
+    private func clearLinearOAuthLeftovers(from config: SourceConfig) {
+        for key in ["oauthAccessToken", "oauthRefreshToken", "oauthExpiresAt"] {
+            Keychain.delete("\(config.id).\(key)")
         }
-        return nil
+        config.settings["authMethod"] = nil
+        config.settings["oauthClientID"] = nil
     }
+
 }

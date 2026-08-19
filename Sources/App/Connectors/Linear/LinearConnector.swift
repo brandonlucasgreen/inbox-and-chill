@@ -25,18 +25,12 @@ actor LinearConnector: Connector {
         return formatter
     }()
 
-    /// OAuth client ID from the source's settings — only set when the source
-    /// was connected via "Sign in with Linear"; needed to refresh tokens.
-    private let oauthClientID: String?
-
-    init(sourceID: String, oauthClientID: String? = nil) {
+    init(sourceID: String) {
         self.sourceID = sourceID
-        self.oauthClientID = oauthClientID
     }
 
     enum LinearConnectorError: Error, LocalizedError, CustomStringConvertible, Sendable {
         case missingAPIKey(sourceID: String)
-        case oauthExpired
         case transport(String)
         case httpError(status: Int, body: String)
         case graphQLErrors([String])
@@ -47,9 +41,7 @@ actor LinearConnector: Connector {
         var errorDescription: String? {
             switch self {
             case .missingAPIKey(let sourceID):
-                return "No Linear credentials in Keychain for source \"\(sourceID)\". Add a Personal API Key or sign in with Linear under Settings → Sources."
-            case .oauthExpired:
-                return "Linear sign-in expired and couldn't be refreshed. Re-connect under Settings → Sources → Linear."
+                return "No Linear API key in Keychain for source \"\(sourceID)\". Add a Personal API Key under Settings → Sources (Linear → Settings → API → Personal API keys)."
             case .transport(let detail):
                 return "Linear request failed: \(detail)"
             case .httpError(let status, let body):
@@ -66,57 +58,20 @@ actor LinearConnector: Connector {
 
     // MARK: Auth
 
-    private var usesOAuth: Bool {
-        Keychain.get("\(sourceID).oauthAccessToken")?.isEmpty == false
-    }
-
-    /// The `Authorization` header value. Personal API keys are sent raw (no
-    /// `Bearer` prefix — Linear's documented shape for personal keys); OAuth
-    /// access tokens are `Bearer`-prefixed and refreshed ~2 minutes before
-    /// their recorded expiry. The actor serializes refreshes.
-    private func authorizationHeader(forceRefresh: Bool = false) async throws -> String {
-        guard usesOAuth else {
-            guard let key = Keychain.get("\(sourceID).apiKey"), !key.isEmpty else {
-                throw LinearConnectorError.missingAPIKey(sourceID: sourceID)
-            }
-            return key
+    /// The `Authorization` header value: a personal API key, sent raw. No
+    /// `Bearer` prefix — that is Linear's documented shape for personal keys.
+    ///
+    /// A PKCE "Sign in with Linear" flow lived here until 2026-08-19 and was
+    /// removed at Brandon's request. PLAN §6.9's original verdict was that
+    /// the personal key "remains Linear's sanctioned personal path and is
+    /// fewer steps", and it was right: OAuth still required registering your
+    /// own Linear app and pasting a client ID, so it traded one paste for a
+    /// longer setup and a token that expires.
+    private func authorizationHeader() throws -> String {
+        guard let key = Keychain.get("\(sourceID).apiKey"), !key.isEmpty else {
+            throw LinearConnectorError.missingAPIKey(sourceID: sourceID)
         }
-        let expiresAt = Keychain.get("\(sourceID).oauthExpiresAt")
-            .flatMap(Double.init)
-            .map(Date.init(timeIntervalSince1970:))
-        if forceRefresh || (expiresAt.map { $0.timeIntervalSinceNow < 120 } ?? false) {
-            try await refreshOAuthTokens()
-        }
-        guard let access = Keychain.get("\(sourceID).oauthAccessToken"),
-            !access.isEmpty
-        else {
-            throw LinearConnectorError.oauthExpired
-        }
-        return "Bearer \(access)"
-    }
-
-    private func refreshOAuthTokens() async throws {
-        guard let clientID = oauthClientID, !clientID.isEmpty,
-            let refreshToken = Keychain.get("\(sourceID).oauthRefreshToken"),
-            !refreshToken.isEmpty
-        else {
-            throw LinearConnectorError.oauthExpired
-        }
-        do {
-            let tokens = try await LinearOAuth.refresh(
-                clientID: clientID, refreshToken: refreshToken)
-            // A refresh that can't be written back succeeds exactly once and
-            // then fails forever — the connector would keep renewing against
-            // a refresh token it never stored. Surface it as a connector
-            // error so the source's status dot goes red and says why.
-            if let problem = LinearOAuth.store(tokens, sourceID: sourceID) {
-                throw LinearConnectorError.operationFailed(problem)
-            }
-        } catch let error as LinearConnectorError {
-            throw error
-        } catch {
-            throw LinearConnectorError.oauthExpired
-        }
+        return key
     }
 
     // MARK: Transport
@@ -125,13 +80,10 @@ actor LinearConnector: Connector {
     /// throwing a descriptive error for network failures, non-200 responses
     /// (including 429 — the engine's poll loop backs off naturally on the
     /// next interval), top-level GraphQL errors, or decode failures.
-    /// A 401 on an OAuth source gets one refresh-and-retry before giving up
-    /// (covers revoked-then-reissued tokens and clock skew on the expiry).
     private func execute<T: Decodable>(
-        _ document: String, variables: [String: String]? = nil,
-        isAuthRetry: Bool = false
+        _ document: String, variables: [String: String]? = nil
     ) async throws -> T {
-        let authorization = try await authorizationHeader(forceRefresh: isAuthRetry)
+        let authorization = try authorizationHeader()
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
@@ -148,9 +100,6 @@ actor LinearConnector: Connector {
         }
         guard let http = response as? HTTPURLResponse else {
             throw LinearConnectorError.transport("no HTTP response")
-        }
-        if http.statusCode == 401, usesOAuth, !isAuthRetry {
-            return try await execute(document, variables: variables, isAuthRetry: true)
         }
         guard http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? ""
