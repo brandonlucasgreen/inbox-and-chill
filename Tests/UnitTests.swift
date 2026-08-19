@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftData
 import Testing
@@ -329,6 +330,92 @@ struct SourceStatusDotTests {
         #expect(
             SourceStatusDot.describe(name: "ntfy", status: .error("HTTP 401"))
                 == "ntfy — error: HTTP 401")
+    }
+}
+
+// MARK: - Panel keyboard navigation (Sources/App/UI/PanelKeyInput.swift)
+
+/// The ↑/↓ arithmetic, and the key mapping that feeds it.
+///
+/// Both used to be private to `PanelView`, which is how "arrows don't move the
+/// selection" survived a round of fixes with nothing to catch it. The bug was
+/// never in this arithmetic — the keys weren't arriving — but the arithmetic
+/// was equally unprovable, so it is pinned here now.
+struct PanelSelectionTests {
+    private let uids = ["a", "b", "c"]
+
+    @Test("Down steps forward, up steps back")
+    func stepsOneRow() {
+        #expect(PanelSelection.next(from: "a", in: uids, by: 1) == "b")
+        #expect(PanelSelection.next(from: "b", in: uids, by: -1) == "a")
+    }
+
+    @Test("Both ends clamp rather than wrapping")
+    func clampsAtTheEnds() {
+        // Holding ↓ should park on the last row, not teleport to the top.
+        #expect(PanelSelection.next(from: "c", in: uids, by: 1) == "c")
+        #expect(PanelSelection.next(from: "a", in: uids, by: -1) == "a")
+    }
+
+    @Test("With nothing selected, each arrow enters from the end it travels towards")
+    func entersFromTheNearEnd() {
+        #expect(PanelSelection.next(from: nil, in: uids, by: 1) == "a")
+        #expect(PanelSelection.next(from: nil, in: uids, by: -1) == "c")
+    }
+
+    @Test("A selection that has been filtered away re-enters cleanly")
+    func staleSelectionRecovers() {
+        // "z" is gone from the visible list — stepping must not strand the user.
+        #expect(PanelSelection.next(from: "z", in: uids, by: 1) == "a")
+        #expect(PanelSelection.next(from: "z", in: uids, by: -1) == "c")
+    }
+
+    @Test("An empty queue yields nothing, leaving the selection untouched")
+    func emptyQueueYieldsNil() {
+        #expect(PanelSelection.next(from: nil, in: [], by: 1) == nil)
+        #expect(PanelSelection.next(from: "a", in: [], by: -1) == nil)
+    }
+}
+
+/// Key *codes*, not characters. `charactersIgnoringModifiers` reports arrows as
+/// private-use scalars that shift with keyboard layout, so the mapping is
+/// pinned to the virtual key codes instead.
+struct PanelKeyInputTests {
+    private func event(keyCode: UInt16, characters: String = "") -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false,
+            keyCode: keyCode)!
+    }
+
+    @Test("The four arrows map to the four directions")
+    func arrowsMap() {
+        #expect(PanelKeyInput(event(keyCode: 126)) == .up)
+        #expect(PanelKeyInput(event(keyCode: 125)) == .down)
+        #expect(PanelKeyInput(event(keyCode: 123)) == .left)
+        #expect(PanelKeyInput(event(keyCode: 124)) == .right)
+    }
+
+    @Test("Return, keypad enter, escape and delete are named, not typed")
+    func namedKeysMap() {
+        #expect(PanelKeyInput(event(keyCode: 36)) == .enter)
+        #expect(PanelKeyInput(event(keyCode: 76)) == .enter)
+        #expect(PanelKeyInput(event(keyCode: 53)) == .escape)
+        #expect(PanelKeyInput(event(keyCode: 51)) == .backspace)
+    }
+
+    @Test("Anything else arrives as the character it is")
+    func charactersPassThrough() {
+        #expect(PanelKeyInput(event(keyCode: 14, characters: "e")) == .character("e"))
+        #expect(PanelKeyInput(event(keyCode: 1, characters: "s")) == .character("s"))
+    }
+
+    @Test("A press carrying no characters is not an input")
+    func emptyPressIsIgnored() {
+        // Modifier-only presses land here; treating them as input would let a
+        // bare ⌘ press extend the type-to-filter string.
+        #expect(PanelKeyInput(event(keyCode: 200)) == nil)
     }
 }
 

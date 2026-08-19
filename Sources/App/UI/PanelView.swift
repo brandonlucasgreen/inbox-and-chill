@@ -51,6 +51,7 @@ struct PanelView: View {
         .frame(width: 420, height: 560)
         .background { commandShortcuts }
         .background { PanelKeyboardFocus() }
+        .background { PanelKeyCapture(handle: handle) }
         .focusable()
         .focusEffectDisabled()
         .focused($focus, equals: .list)
@@ -325,13 +326,21 @@ struct PanelView: View {
     // MARK: Keyboard
 
     /// Plain keys only; ⌘-combos live in `commandShortcuts`.
-    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        guard press.modifiers.subtracting(.shift).isEmpty else {
-            return .ignored
-        }
-        let character = press.key.character
+    ///
+    /// Reached from two directions — the `PanelKeyCapture` monitor (the path
+    /// that actually works when the panel opens cold) and SwiftUI's
+    /// `onKeyPress` (a fallback for when no monitor is installed). Both funnel
+    /// through here so they can never disagree.
+    ///
+    /// Returns `true` when the press was consumed.
+    private func handle(
+        _ input: PanelKeyInput, modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard modifiers.subtracting([.shift, .capsLock, .function, .numericPad])
+            .isEmpty
+        else { return false }
 
-        if character == KeyEquivalent.escape.character {
+        if input == .escape {
             if snoozeTargetUID != nil {
                 snoozeTargetUID = nil
             } else if isFiltering || !filterText.isEmpty {
@@ -341,43 +350,48 @@ struct PanelView: View {
             } else {
                 dismiss()
             }
-            return .handled
+            return true
         }
         // Archive mode has no visible queue selection; only Esc (handled
         // above) should reach past it.
-        if showArchive { return .ignored }
-        if character == KeyEquivalent.upArrow.character {
+        if showArchive { return false }
+
+        switch input {
+        case .up:
             moveSelection(-1)
-            return .handled
-        }
-        if character == KeyEquivalent.downArrow.character {
+            return true
+        case .down:
             moveSelection(1)
-            return .handled
-        }
+            return true
         // ←/→ step through the source filter chips. "All" is part of the
         // cycle rather than a separate mode, so repeated presses always get
-        // you back to an unfiltered queue.
-        if character == KeyEquivalent.leftArrow.character {
+        // you back to an unfiltered queue. While the filter field has focus
+        // they belong to the text cursor instead.
+        case .left where focus != .filter:
             moveFilter(-1)
-            return .handled
-        }
-        if character == KeyEquivalent.rightArrow.character {
+            return true
+        case .right where focus != .filter:
             moveFilter(1)
-            return .handled
-        }
-        if character == KeyEquivalent.return.character {
+            return true
+        case .enter:
             openSelected(andDone: false)
-            return .handled
+            return true
+        default:
+            break
         }
-        // While the filter field owns focus it handles its own typing.
-        guard focus != .filter else { return .ignored }
 
-        if character == KeyEquivalent.delete.character {
-            guard !filterText.isEmpty else { return .ignored }
+        // While the filter field owns focus it handles its own typing.
+        guard focus != .filter else { return false }
+
+        if input == .backspace {
+            guard !filterText.isEmpty else { return false }
             filterText.removeLast()
             if filterText.isEmpty { isFiltering = false }
-            return .handled
+            return true
         }
+
+        guard case .character(let character) = input else { return false }
+
         // Bare E/S are commands only before a filter has begun; once typing
         // has started, every printable character — including e/s — extends
         // the filter instead (so e.g. "slack" can be typed).
@@ -387,19 +401,28 @@ struct PanelView: View {
         case "e" where filterText.isEmpty && !isFiltering,
             "E" where filterText.isEmpty && !isFiltering:
             doneSelected()
-            return .handled
+            return true
         case "s" where filterText.isEmpty && !isFiltering,
             "S" where filterText.isEmpty && !isFiltering:
             if selectedItem != nil { snoozeTargetUID = selectedUID }
-            return .handled
+            return true
         default:
             guard character.isLetter || character.isNumber
                 || character.isPunctuation || character == " "
-            else { return .ignored }
+            else { return false }
             isFiltering = true
             filterText.append(character)
-            return .handled
+            return true
         }
+    }
+
+    /// SwiftUI's path into `handle`, kept as a fallback for the case where no
+    /// event monitor is installed.
+    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        guard let input = PanelKeyInput(press) else { return .ignored }
+        let modifiers: NSEvent.ModifierFlags =
+            press.modifiers.contains(.shift) ? .shift : []
+        return handle(input, modifiers: modifiers) ? .handled : .ignored
     }
 
     /// Cycles `selectedSourceFilter` across `nil` (All) plus every chip.
@@ -416,16 +439,12 @@ struct PanelView: View {
     }
 
     private func moveSelection(_ delta: Int) {
-        let uids = visibleUIDs
-        guard !uids.isEmpty else { return }
-        guard let current = selectedUID,
-            let position = uids.firstIndex(of: current)
-        else {
-            selectedUID = delta > 0 ? uids.first : uids.last
-            return
-        }
-        let next = min(max(position + delta, 0), uids.count - 1)
-        selectedUID = uids[next]
+        guard
+            let next = PanelSelection.next(
+                from: selectedUID, in: visibleUIDs, by: delta)
+        else { return }
+        selectedUID = next
+        focus = .list
     }
 
     /// Keeps the selection meaningful when a row leaves the queue (done,
