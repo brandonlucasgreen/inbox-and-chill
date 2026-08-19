@@ -111,6 +111,15 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Framewo
 echo "==> Installed"
 codesign --verify --deep --strict "$DEST" && echo "    signature valid at the install location"
 
+# Attach the notarization ticket if this signature has one. Notarized-but-not-
+# stapled is the trap: Gatekeeper accepts it while the Mac can reach Apple and
+# refuses it offline, so the local install silently differs from what ships.
+# Non-fatal — an un-notarized dev build simply has no ticket to fetch, which is
+# the normal case between releases.
+if xcrun stapler staple "$DEST" >/dev/null 2>&1; then
+  echo "    notarization ticket stapled"
+fi
+
 if [ "$LAUNCH" = "1" ]; then
   echo "==> Launching"
   open "$DEST"

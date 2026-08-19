@@ -226,8 +226,16 @@ failure only shows up offline:
 
 ```bash
 xcrun stapler validate "/Applications/Inbox & Chill.app"
-xcrun stapler staple   "/Applications/Inbox & Chill.app"   # ticket already exists for that signature
 ```
+
+`install-local.sh` now staples automatically when a ticket exists, so a fresh
+install matches what ships. **But any rebuild re-signs, and the ticket belongs
+to the old signature** — so a locally rebuilt dev build cannot be stapled and
+reports `Unnotarized Developer ID` until it is notarized again. That is normal
+between releases. The only sequence that produces a stapled install is
+`notarize.sh` followed by `install-local.sh` with no source change in between.
+Symptom of getting it wrong: `stapler staple` fails with
+"Could not find base64 encoded ticket in response".
 
 ## Working in a git worktree
 
