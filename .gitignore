@@ -4,3 +4,6 @@ build/
 DerivedData/
 .build/
 *.xcresult
+
+# Notarized release artifacts from scripts/notarize.sh
+dist/
