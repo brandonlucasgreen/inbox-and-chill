@@ -198,7 +198,11 @@ codesign -d --entitlements - "/Applications/Inbox & Chill.app"   # expect none
 codesign --verify --deep --strict "/Applications/Inbox & Chill.app"
 ```
 
-Remaining for a real release: `notarytool submit --wait` then `stapler staple`.
+`scripts/notarize.sh` does the rest: preflights the four things above, submits,
+staples, and writes `dist/InboxAndChill-<version>.zip`. It needs credentials
+stored once via `notarytool store-credentials` — a person has to do that, it is
+not scriptable. `scripts/notarize.sh --preflight-only` checks a build is
+submittable without any credentials at all.
 `spctl -a` reporting "rejected — Unnotarized Developer ID" is expected until
 then and is harmless locally, since Gatekeeper only evaluates quarantined apps.
 
