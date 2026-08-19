@@ -160,7 +160,7 @@ struct MainWindowView: View {
         .onKeyPress(phases: .down) { handleKey($0) }
         .overlay { if rows.isEmpty { emptyState } }
         .animation(
-            reduceMotion ? nil : .snappy(duration: 0.2), value: rowIDs)
+            PanelMotion.queue(reduceMotion: reduceMotion), value: rowIDs)
         .popover(
             isPresented: snoozePopoverBinding, attachmentAnchor: .rect(.bounds),
             arrowEdge: .top

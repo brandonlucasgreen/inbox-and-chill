@@ -63,11 +63,20 @@ struct PanelView: View {
         .onChange(of: visibleUIDs) { old, new in
             reconcileSelection(old: old, new: new)
         }
-        .onChange(of: selectedUID, initial: true) { _, _ in
+        .task(id: selectedUID) {
             // Focus is what marks an item read — arrowing onto a row counts,
             // and so does the auto-selection when the panel opens, because
             // that row is the one you are looking at.
-            markSelectedSeen()
+            //
+            // Deliberately delayed. Marking seen writes to the store, and when
+            // a dismissal moves the selection that write used to land in the
+            // middle of the row-removal animation and stutter it. Waiting also
+            // means arrowing straight past a row no longer counts as reading
+            // it, which is the better reading of "seen" anyway.
+            guard let item = selectedItem, !item.isSeen else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            appState.markSeen(item)
         }
         .onChange(of: filterText) { _, new in
             if new.isEmpty && focus != .filter { isFiltering = false }
@@ -110,17 +119,18 @@ struct PanelView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 4)
                     .animation(
-                        reduceMotion ? nil : .snappy(duration: 0.22),
+                        PanelMotion.queue(reduceMotion: reduceMotion),
                         value: visibleUIDs)
                 }
                 .onChange(of: selectedUID) { _, new in
                     guard let new else { return }
-                    if reduceMotion {
+                    // Same curve and duration as the row collapse above: when
+                    // a dismissal moves the selection, both happen at once,
+                    // and they have to be one gesture rather than two.
+                    withAnimation(
+                        PanelMotion.queue(reduceMotion: reduceMotion)
+                    ) {
                         proxy.scrollTo(new, anchor: .center)
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            proxy.scrollTo(new, anchor: .center)
-                        }
                     }
                 }
             }
@@ -138,8 +148,7 @@ struct PanelView: View {
                     focus = .list
                 })
                 .id(item.uid)
-                .transition(
-                    .opacity.combined(with: .move(edge: .leading)))
+                .transition(PanelMotion.row)
         }
     }
 
@@ -452,11 +461,6 @@ struct PanelView: View {
     private func unreadSelected() {
         guard let item = selectedItem else { return }
         appState.toggleSeen(item)
-    }
-
-    private func markSelectedSeen() {
-        guard let item = selectedItem, !item.isSeen else { return }
-        appState.markSeen(item)
     }
 
     private func moveSelection(_ delta: Int) {

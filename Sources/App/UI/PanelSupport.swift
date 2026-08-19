@@ -249,3 +249,31 @@ struct RowFocus: Equatable {
         return isKey ? .selected : .selectedInactive
     }
 }
+
+/// The queue's motion, in one place.
+///
+/// Rows leaving the list and the scroll that follows them used to run on
+/// different curves *at the same time* — a 0.22s snappy collapse against a
+/// 0.15s easeInOut scroll — and two curves driving the same pixels is what
+/// reads as jagged. Everything that moves the queue now shares one animation,
+/// so a dismissal is a single coordinated gesture.
+enum PanelMotion {
+    static let duration: TimeInterval = 0.22
+
+    /// `nil` when the user has asked the system for less motion, so callers can
+    /// pass this straight to `withAnimation` and `.animation(_:value:)`.
+    static func queue(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .snappy(duration: duration)
+    }
+
+    /// Rows fade rather than slide.
+    ///
+    /// Removal used to combine opacity with `.move(edge: .leading)`, so a
+    /// dismissed row travelled sideways while every row beneath it jumped
+    /// upward to close the gap — two directions at once, in a `LazyVStack`
+    /// that realises rows on demand. Letting the height collapse carry the
+    /// motion on its own is both smoother and honest about what happened.
+    /// Computed rather than stored: `AnyTransition` isn't `Sendable`, so a
+    /// static constant would be shared mutable state under strict concurrency.
+    static var row: AnyTransition { .opacity }
+}

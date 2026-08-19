@@ -333,6 +333,24 @@ struct SourceStatusDotTests {
     }
 }
 
+// MARK: - Queue motion (Sources/App/UI/PanelSupport.swift)
+
+/// The queue's motion is shared between the panel list, the scroll that
+/// follows the selection, and the main window's table. The reduce-motion
+/// contract is the part worth pinning: it is easy to add a new animated
+/// surface and forget that some people have asked the system for stillness.
+struct PanelMotionTests {
+    @Test("Reduce Motion yields no animation at all, not a faster one")
+    func reduceMotionIsNil() {
+        #expect(PanelMotion.queue(reduceMotion: true) == nil)
+    }
+
+    @Test("Otherwise the queue animates")
+    func motionOtherwisePresent() {
+        #expect(PanelMotion.queue(reduceMotion: false) != nil)
+    }
+}
+
 // MARK: - Menu bar badge (Sources/App/Models/MenuBarBadge.swift)
 
 /// Two independent counters, rendered as `total • high-signal`.
