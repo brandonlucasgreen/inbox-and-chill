@@ -96,33 +96,64 @@ struct BannerPermissionNotice: View {
 /// One-click Claude Code hooks install (decision §2.1: local sources are a
 /// first-class feature; hooks make Claude-waiting items appear automatically).
 struct ClaudeCodeIntegrationRow: View {
-    @State private var installed = ClaudeCodeIntegration.isInstalled
+    @State private var state = ClaudeCodeIntegration.installState
     @State private var errorText: String?
 
     var body: some View {
         LabeledContent("Claude Code") {
-            Button(installed ? "Remove Integration" : "Set Up Integration") {
-                do {
-                    if installed {
-                        try ClaudeCodeIntegration.uninstallHooks()
-                    } else {
-                        try ClaudeCodeIntegration.installHooks()
-                    }
-                    errorText = nil
-                } catch {
-                    errorText = String(describing: error)
+            HStack(spacing: 8) {
+                Button(actionTitle) {
+                    perform(removing: false)
                 }
-                installed = ClaudeCodeIntegration.isInstalled
+                .help(actionHelp)
+
+                if state != .notInstalled {
+                    Button("Remove") { perform(removing: true) }
+                        .help("Remove the inchill hooks from ~/.claude/settings.json")
+                }
             }
-            .help(
-                installed
-                    ? "Remove the inchill hooks from ~/.claude/settings.json"
-                    : "Add Notification/Stop hooks to ~/.claude/settings.json (a backup is made first)"
+        }
+        if state == .outdated {
+            Text(
+                "Hooks from an older version are installed. Update them to get one queue row per session instead of one per turn."
             )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         if let errorText {
             Text(errorText).font(.caption).foregroundStyle(.red)
         }
+    }
+
+    private var actionTitle: String {
+        switch state {
+        case .notInstalled: "Set Up Integration"
+        case .outdated: "Update Integration"
+        case .installed: "Reinstall"
+        }
+    }
+
+    private var actionHelp: String {
+        switch state {
+        case .installed:
+            "Rewrite the hooks in ~/.claude/settings.json (a backup is made first)"
+        default:
+            "Add Notification/Stop/UserPromptSubmit/SessionEnd hooks to ~/.claude/settings.json (a backup is made first)"
+        }
+    }
+
+    private func perform(removing: Bool) {
+        do {
+            if removing {
+                try ClaudeCodeIntegration.uninstallHooks()
+            } else {
+                try ClaudeCodeIntegration.installHooks()
+            }
+            errorText = nil
+        } catch {
+            errorText = String(describing: error)
+        }
+        state = ClaudeCodeIntegration.installState
     }
 }
 

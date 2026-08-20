@@ -123,7 +123,13 @@ targets:
   InboxAndChillTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [Tests]
+    # ClaudeHook.swift is compiled in directly rather than reached through a
+    # target dependency: `inchill` is a command-line tool, so its module
+    # can't be imported, and main.swift's top-level code can't be linked into
+    # a test bundle. Compiling the one pure, Foundation-only file keeps the
+    # hook payload mapping testable (CLAUDE.md rule 6) without giving the CLI
+    # a dependency on the app.
+    sources: [Tests, Sources/CLI/ClaudeHook.swift]
     dependencies:
       - target: InboxAndChill
     settings:

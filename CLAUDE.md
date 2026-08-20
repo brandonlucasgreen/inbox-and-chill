@@ -205,6 +205,49 @@ the connector 5s later. Two failures have come from this:
 | `sentry` | REST poll 60s | markDone (opt-in), remoteTruth | `?query=is:unresolved is:for_review&sort=inbox` — Sentry's For Review tab *is* the queue. Resolving is **off by default**: it's team-visible, so a local done just means "seen" and the item returns via `resurrectIfNeeded` when `lastSeen` moves. Cursor pagination via `Link` → needs `snapshotWasComplete()`. |
 | `appleMail` | AppleScript poll 60s | markDone, remoteTruth | **Covers Gmail** — it reads every account Mail has, which is why there is no Gmail connector (PLAN §6.13). Flagged-only by default. See below. |
 
+### One queue row per Claude Code session, not per turn
+
+The `Stop` hook used to post `claude-done-<session>-<epoch>`, so **every turn
+ending created a brand-new item** — a thirty-turn session left thirty
+near-identical rows and buried the only fact worth keeping. All four hooks now
+address the same id, `claude-<session_id>`, and the row updates in place:
+
+| Hook | Effect on the row | Signal |
+|---|---|---|
+| `Notification` | upsert — Claude wants you (permission, or 60s idle) | high |
+| `Stop` | upsert — turn ended, carries what Claude last said | low |
+| `UserPromptSubmit` | **clear** — you replied | — |
+| `SessionEnd` | clear — the session is gone | — |
+
+Three things that look like oversights and are not:
+
+- **`Stop` stays low-signal.** An ignored finish goes idle, `Notification`
+  re-fires ~60s later, and the same row turns high-signal. Urgency rises with
+  neglect without anything having to track neglect.
+- **`UserPromptSubmit` is load-bearing, not a nicety.** It is the only thing
+  that makes the queue mean *sessions awaiting my reply* rather than *sessions
+  I have ever run*; without it a live session's row never leaves.
+- **The hooks exit 0 even when the app is closed** (`post(bestEffort:)`), which
+  is a deliberate exception to rule 5. `UserPromptSubmit` runs on every prompt
+  the user sends, so a non-zero exit with the app shut would put an error in
+  front of them every time they typed. The reason still goes to stderr (visible
+  in ctrl-R) and the Settings row is the better place to say hooks aren't
+  landing. A human-typed `inchill notify` still fails loudly.
+
+Two knock-on changes in `Store`, both needed because a row now *lives*:
+
+- **`resurrectIfNeeded` returns whether it revived, and a revival is reported
+  in `ReconcileResult.inserted`.** Banners and journal arrivals key off
+  `inserted`, so before this the second and later finishes of a session came
+  back silently — only the first one ever reached the user.
+- **`update()` refreshes `kind`.** It was frozen at insert, so a row born
+  `claude_done` still claimed to be one after becoming `claude_waiting`.
+
+Adding hooks to an existing install is why `ClaudeCodeIntegration` reports
+three states rather than a Bool: `.outdated` (our hooks are there but not the
+ones we would write today) is what an upgrade looks like, and Settings offers
+"Update Integration" for it.
+
 ### Opening a Claude Code item lands in the session
 
 The hook records *where the session runs* (`sessionOrigin()` in

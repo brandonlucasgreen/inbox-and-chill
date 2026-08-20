@@ -1605,6 +1605,111 @@ struct JSONPollerTimestampTests {
 }
 
 
+// MARK: - Claude Code session consolidation (Sources/CLI/ClaudeHook.swift)
+//
+// Regression coverage for the pile-up this replaced: the `Stop` hook used to
+// post `claude-done-<session>-<epoch>`, so every turn ending left a brand-new
+// row. A thirty-turn session produced thirty near-identical items and buried
+// the only fact that mattered — this session is waiting on you.
+
+struct ClaudeHookConsolidationTests {
+    private let session = "3f6c1a2e-0000-4d5e-9f01-abcdefabcdef"
+
+    @Test("Every hook addresses the same session-stable id")
+    func oneRowPerSession() {
+        let ids = ClaudeHook.Event.allCases.map {
+            ClaudeHook.request(for: $0, sessionID: session, cwd: "/tmp/repo").itemID
+        }
+        #expect(Set(ids).count == 1)
+        #expect(ids.first == "claude-\(session)")
+    }
+
+    @Test("No hook id carries a timestamp or turn counter")
+    func idsAreNotPerTurn() {
+        // The bug in one assertion: two invocations of the same hook, at any
+        // remove in time, must collide rather than accumulate.
+        let first = ClaudeHook.request(for: .stop, sessionID: session, cwd: "/tmp/repo")
+        let second = ClaudeHook.request(for: .stop, sessionID: session, cwd: "/tmp/repo")
+        #expect(first == second)
+        #expect(!first.itemID.contains("done"))
+    }
+
+    @Test("Different sessions still get different rows")
+    func sessionsStaySeparate() {
+        let a = ClaudeHook.request(for: .stop, sessionID: "a", cwd: "/tmp/one").itemID
+        let b = ClaudeHook.request(for: .stop, sessionID: "b", cwd: "/tmp/two").itemID
+        #expect(a != b)
+    }
+
+    @Test("Replying and ending the session both clear the row")
+    func repliesClearTheRow() {
+        for event in [ClaudeHook.Event.userPromptSubmit, .sessionEnd] {
+            let request = ClaudeHook.request(for: event, sessionID: session)
+            #expect(request.path == "/clear")
+            #expect(request.itemID == "claude-\(session)")
+            #expect(request.title == nil)
+        }
+    }
+
+    @Test("Waiting is high-signal, finishing is not")
+    func signalEscalatesWithNeglect() {
+        let waiting = ClaudeHook.request(
+            for: .notification, sessionID: session, cwd: "/tmp/repo",
+            message: "Claude needs your permission to run Bash")
+        let finished = ClaudeHook.request(
+            for: .stop, sessionID: session, cwd: "/tmp/repo",
+            lastAssistantMessage: "Done — the tests pass.")
+
+        #expect(waiting.path == "/notify")
+        #expect(waiting.highSignal == true)
+        #expect(waiting.kind == "claude_waiting")
+        #expect(waiting.title == "Claude needs your permission to run Bash")
+
+        #expect(finished.highSignal == false)
+        #expect(finished.kind == "claude_done")
+        #expect(finished.title == "Claude finished in repo")
+        #expect(finished.body == "Done — the tests pass.")
+    }
+
+    @Test("A hook that can't tell where it is still produces an item")
+    func missingDirectoryStillPosts() {
+        let request = ClaudeHook.request(for: .stop, sessionID: session, cwd: nil)
+        #expect(request.title == "Claude finished in unknown")
+        #expect(ClaudeHook.projectURL(for: nil) == nil)
+        #expect(ClaudeHook.projectURL(for: "/tmp/repo") == "file:///tmp/repo")
+    }
+
+    @Test("A notification with no message falls back to a usable title")
+    func notificationFallbackTitle() {
+        for message in [nil, ""] {
+            let request = ClaudeHook.request(
+                for: .notification, sessionID: session, cwd: "/tmp/repo", message: message)
+            #expect(request.title == "Claude Code needs your input")
+        }
+    }
+
+    @Test("The snippet is the first non-empty line, capped")
+    func snippetIsFirstLine() {
+        #expect(ClaudeHook.firstLine(of: "\n\n  hello  \nworld") == "hello")
+        #expect(ClaudeHook.firstLine(of: nil) == nil)
+        #expect(ClaudeHook.firstLine(of: "\n \n") == nil)
+        let long = String(repeating: "x", count: 250)
+        let clipped = ClaudeHook.firstLine(of: long)
+        #expect(clipped?.count == 201)
+        #expect(clipped?.hasSuffix("…") == true)
+    }
+
+    @Test("Hook arguments installed by earlier versions keep their spelling")
+    func legacyArgumentsUnchanged() {
+        // Existing ~/.claude/settings.json entries say `claude-hook
+        // notification` and `claude-hook stop`. Renaming either would strand
+        // every install made before this version.
+        #expect(ClaudeHook.Event.notification.rawValue == "notification")
+        #expect(ClaudeHook.Event.stop.rawValue == "stop")
+    }
+}
+
+
 // MARK: - Claude Code hook command quoting
 // (Sources/App/Connectors/Local/ClaudeCodeIntegration.swift)
 //

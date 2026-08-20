@@ -31,11 +31,14 @@ struct TriageTests {
             snapshot: [a], sourceID: "s", sourceKind: "test", remoteTruth: true)
         #expect(r2.clearedRemotely == 1)
 
-        // b reappears → resurrects.
+        // b reappears → resurrects, and is reported as an arrival so it
+        // banners and journals. An item that had left the queue and is now
+        // back is an arrival from where the user sits; reporting nothing
+        // meant it slid back in silently.
         let r3 = try await store.reconcile(
             snapshot: [a, b], sourceID: "s", sourceKind: "test",
             remoteTruth: true)
-        #expect(r3.inserted.isEmpty)
+        #expect(r3.inserted.map(\.id) == ["test:b"])
         let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
         #expect(counts.total == 2 && counts.highSignal == 1)
     }
@@ -170,6 +173,72 @@ struct TriageTests {
             remoteTruth: true)
         counts = try await store.badgeCounts(countedSourceIDs: ["s"])
         #expect(counts.total == 1)
+    }
+
+    @Test("A resurrection is reported once, not on every later poll")
+    func resurrectionReportsOnce() async throws {
+        // The Claude Code case that motivated this: one row per session means
+        // the second and later "Claude finished" events for a session revive
+        // an existing row instead of inserting a new one. Banners key off
+        // `inserted`, so without this the very first finish was the only one
+        // that ever reached the user.
+        let store = try makeStore()
+        var session = RemoteItem(
+            externalID: "claude-abc", kind: "claude_done",
+            title: "Claude finished in repo",
+            occurredAt: .now.addingTimeInterval(-100))
+        _ = try await store.apply(
+            event: .upsert([session]), sourceID: "s", sourceKind: "local",
+            remoteTruth: false)
+
+        // The user replied: UserPromptSubmit clears the row.
+        _ = try await store.apply(
+            event: .clear(["claude-abc"]), sourceID: "s", sourceKind: "local",
+            remoteTruth: false)
+
+        // Claude finishes again → the row comes back, and says so.
+        session.occurredAt = .now
+        session.title = "Claude finished in repo"
+        let revived = try await store.apply(
+            event: .upsert([session]), sourceID: "s", sourceKind: "local",
+            remoteTruth: false)
+        #expect(revived.inserted.map(\.id) == ["local:claude-abc"])
+
+        // Still finished, nothing new: an already-live row is not an arrival.
+        let again = try await store.apply(
+            event: .upsert([session]), sourceID: "s", sourceKind: "local",
+            remoteTruth: false)
+        #expect(again.inserted.isEmpty)
+    }
+
+    @Test("A source that changes an item's kind is believed")
+    func kindIsRefreshed() async throws {
+        // A Claude Code row outlives the state it was born in: it appears as
+        // claude_done and becomes claude_waiting when the idle session starts
+        // asking. Freezing `kind` at insert left the Kind column lying.
+        let container = try ModelContainer(
+            for: Item.self, SourceConfig.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let store = Store(modelContainer: container)
+
+        var item = RemoteItem(
+            externalID: "claude-abc", kind: "claude_done", title: "Finished",
+            occurredAt: .now.addingTimeInterval(-10))
+        _ = try await store.apply(
+            event: .upsert([item]), sourceID: "s", sourceKind: "local",
+            remoteTruth: false)
+
+        item.kind = "claude_waiting"
+        item.title = "Claude needs your input"
+        item.occurredAt = .now
+        _ = try await store.apply(
+            event: .upsert([item]), sourceID: "s", sourceKind: "local",
+            remoteTruth: false)
+
+        let stored = try ModelContext(container).fetch(FetchDescriptor<Item>())
+        #expect(stored.count == 1)
+        #expect(stored.first?.kind == "claude_waiting")
+        #expect(stored.first?.title == "Claude needs your input")
     }
 
     @Test func snoozeWakeFiresOnce() async throws {

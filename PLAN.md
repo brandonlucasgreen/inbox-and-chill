@@ -215,6 +215,7 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 
 **Claude Code specifically** — first-class hook support, zero hacks:
 - `~/.claude/settings.json` hooks: the **`Notification`** hook fires exactly when Claude Code wants the user (permission requests, idle-waiting-for-input) and the **`Stop`** hook fires when a response completes. Both run any command with a JSON payload on stdin (session id, cwd, message). Pipe to `inchill`.
+- **One row per session, not per turn** (0.3.2). `Notification`/`Stop` upsert `claude-<session_id>`; **`UserPromptSubmit`** and **`SessionEnd`** clear it. The queue therefore means "sessions awaiting my reply", and a long session occupies one row instead of one per turn. See CLAUDE.md for why `Stop` stays low-signal and why the hooks exit 0 when the app is closed.
 - The app ships a one-click "Set up Claude Code integration" that writes these hook entries.
 - Items carry the session's cwd + terminal app; "Open" focuses the right terminal window (NSWorkspace + recorded tty/bundle id). Auto-clear the item when the same session sends its next event (the wait is over).
 

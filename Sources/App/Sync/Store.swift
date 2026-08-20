@@ -37,8 +37,9 @@ actor Store {
             let uid = remote.uid(sourceKind: sourceKind)
             seen.insert(uid)
             if let item = existing.first(where: { $0.uid == uid }) {
-                resurrectIfNeeded(item, from: remote)
+                let revived = resurrectIfNeeded(item, from: remote)
                 update(item, from: remote)
+                if revived { result.inserted.append(summary(item)) }
             } else {
                 let item = Item(
                     uid: uid, sourceID: sourceID, sourceKind: sourceKind,
@@ -81,8 +82,9 @@ actor Store {
             for remote in remotes {
                 let uid = remote.uid(sourceKind: sourceKind)
                 if let item = existing.first(where: { $0.uid == uid }) {
-                    resurrectIfNeeded(item, from: remote)
+                    let revived = resurrectIfNeeded(item, from: remote)
                     update(item, from: remote)
+                    if revived { result.inserted.append(summary(item)) }
                 } else {
                     let item = Item(
                         uid: uid, sourceID: sourceID, sourceKind: sourceKind,
@@ -253,16 +255,37 @@ actor Store {
     /// reappeared, or (b) NEW activity arrived after the user did it away —
     /// external ids like Slack "dm-<channel>" are reused per conversation,
     /// so a fresh message must resurrect an explicitly-done item.
-    private func resurrectIfNeeded(_ item: Item, from remote: RemoteItem) {
-        guard let doneAt = item.doneAt else { return }
-        if item.doneReason == "remote" || remote.occurredAt > doneAt {
-            item.doneAt = nil
-            item.doneReason = nil
-            item.updatedAt = .now
+    /// Revives a done item the source has spoken about again, and reports
+    /// whether it actually did.
+    ///
+    /// The Bool is what makes a revival *visible*. Banners and journal
+    /// arrivals both key off `ReconcileResult.inserted`, so before this a
+    /// resurrected item slid back into the queue with no banner and no
+    /// journal line — silent, which is this project's recurring bug class
+    /// (CLAUDE.md rule 5). From the user's side an item that had left the
+    /// queue and is now back *is* an arrival, so it is reported as one.
+    ///
+    /// It fires at most once per revival: the first call clears `doneAt`, so
+    /// subsequent polls take the `guard` and report nothing.
+    @discardableResult
+    private func resurrectIfNeeded(_ item: Item, from remote: RemoteItem) -> Bool {
+        guard let doneAt = item.doneAt else { return false }
+        guard item.doneReason == "remote" || remote.occurredAt > doneAt else {
+            return false
         }
+        item.doneAt = nil
+        item.doneReason = nil
+        item.updatedAt = .now
+        return true
     }
 
     private func update(_ item: Item, from remote: RemoteItem) {
+        // `kind` is refreshed like every other field: the source is
+        // authoritative about what an item *is*, and a Claude Code row now
+        // lives long enough to change (claude_done → claude_waiting when an
+        // idle session starts asking). Freezing it at insert left the main
+        // window's Kind column showing whatever the row happened to be born as.
+        item.kind = remote.kind
         item.title = remote.title
         item.snippet = remote.snippet
         item.urlString = remote.url

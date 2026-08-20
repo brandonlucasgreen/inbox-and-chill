@@ -10,7 +10,7 @@
 //   inchill notify [--id X] [--source S] [--kind K] --title T [--body B] [--url U] [--low]
 //   inchill done <id>
 //   inchill clear <id>
-//   inchill claude-hook <notification|stop>
+//   inchill claude-hook <notification|stop|user-prompt-submit|session-end>
 
 import Foundation
 
@@ -55,13 +55,32 @@ private final class RequestOutcome: @unchecked Sendable {
     }
 }
 
+/// Posts to the app's listener.
+///
+/// `bestEffort` is for the Claude Code hooks, and it is a deliberate
+/// exception to this project's "never fail silently" rule (CLAUDE.md rule
+/// 5) rather than an oversight. A hook whose only job is to tidy a queue
+/// must not interrupt the work it is observing: `UserPromptSubmit` in
+/// particular runs on every prompt the user sends, so a non-zero exit while
+/// the app happens to be closed would put an error in front of them every
+/// single time they typed. The failure still goes to stderr — visible in
+/// Claude Code's ctrl-R transcript — and the app has its own, better place
+/// to say it is not receiving hooks: the Settings integration row.
 @discardableResult
-private func post(path: String, json: [String: Any]) -> Bool {
+private func post(path: String, json: [String: Any], bestEffort: Bool = false) -> Bool {
+    func giveUp(_ message: String) -> Bool {
+        if bestEffort {
+            FileHandle.standardError.write(Data((message + "\n").utf8))
+            return false
+        }
+        fail(message)
+    }
+
     guard let info = loadLocalAPIInfo() else {
-        fail("Inbox & Chill isn't running (or local sources are off).")
+        return giveUp("Inbox & Chill isn't running (or local sources are off).")
     }
     guard let url = URL(string: "http://127.0.0.1:\(info.port)\(path)") else {
-        fail("inchill: could not construct request URL for \(path).")
+        return giveUp("inchill: could not construct request URL for \(path).")
     }
 
     var request = URLRequest(url: url)
@@ -92,10 +111,10 @@ private func post(path: String, json: [String: Any]) -> Bool {
     task.resume()
 
     if semaphore.wait(timeout: .now() + 5) == .timedOut {
-        fail("inchill: timed out waiting for Inbox & Chill to respond.")
+        return giveUp("inchill: timed out waiting for Inbox & Chill to respond.")
     }
     if let failureMessage = outcome.failureMessage {
-        fail(failureMessage)
+        return giveUp(failureMessage)
     }
     return outcome.succeeded
 }
@@ -177,17 +196,6 @@ private struct ClaudeHookPayload: Decodable {
     var last_assistant_message: String?
 }
 
-/// A `file://` URL for the session's working directory.
-///
-/// The last resort, and the item's `url` either way: it is what ⏎ falls back
-/// to when the session it came from can no longer be found (its window
-/// closed, its terminal quit). `sessionOrigin()` is what makes ⏎ land in the
-/// session itself.
-private func projectURL(for cwd: String?) -> String? {
-    guard let cwd, !cwd.isEmpty else { return nil }
-    return URL(fileURLWithPath: cwd).absoluteString
-}
-
 /// Where the session that fired this hook is actually running, captured from
 /// the environment the hook inherits.
 ///
@@ -246,18 +254,11 @@ private func controllingTTY() -> String? {
     return path == "/dev/tty" ? nil : path
 }
 
-/// First non-empty line, trimmed to something that fits a queue row.
-private func firstLine(of text: String?, limit: Int = 200) -> String? {
-    guard let text else { return nil }
-    guard
-        let line = text.split(separator: "\n")
-            .map({ $0.trimmingCharacters(in: .whitespaces) })
-            .first(where: { !$0.isEmpty })
-    else { return nil }
-    return line.count > limit ? String(line.prefix(limit)) + "…" : line
-}
-
-private func runClaudeHook(_ kind: String) {
+private func runClaudeHook(_ rawEvent: String) {
+    guard let event = ClaudeHook.Event(rawValue: rawEvent) else {
+        let known = ClaudeHook.Event.allCases.map(\.rawValue).joined(separator: "|")
+        fail("inchill claude-hook: unknown hook kind '\(rawEvent)' (expected \(known)).")
+    }
     guard let stdinData = try? FileHandle.standardInput.readToEnd(), !stdinData.isEmpty else {
         fail("inchill claude-hook: expected a JSON hook payload on stdin.")
     }
@@ -265,53 +266,27 @@ private func runClaudeHook(_ kind: String) {
         fail("inchill claude-hook: could not parse hook JSON from stdin.")
     }
 
-    switch kind {
-    case "notification":
-        // A session wants the user: permission prompt or idle-waiting.
-        // Always high-signal, auto-clears when the wait ends (see "stop").
-        let title = (payload.message?.isEmpty == false) ? payload.message! : "Claude Code needs your input"
-        let cwdBase = payload.cwd.map { ($0 as NSString).lastPathComponent } ?? "unknown"
-        var json: [String: Any] = [
-            "id": "claude-\(payload.session_id)",
-            "source": "claude-code",
-            "kind": "claude_waiting",
-            "title": title,
-            "body": "in \(cwdBase)",
-            "highSignal": true,
-        ]
-        if let url = projectURL(for: payload.cwd) { json["url"] = url }
+    let request = ClaudeHook.request(
+        for: event, sessionID: payload.session_id, cwd: payload.cwd,
+        message: payload.message,
+        lastAssistantMessage: payload.last_assistant_message)
+
+    var json: [String: Any] = [
+        "id": request.itemID, "source": ClaudeHook.sourceName,
+    ]
+    if let title = request.title { json["title"] = title }
+    if let kind = request.kind { json["kind"] = kind }
+    if let body = request.body { json["body"] = body }
+    if let highSignal = request.highSignal { json["highSignal"] = highSignal }
+    if request.path == "/notify" {
+        if let url = ClaudeHook.projectURL(for: payload.cwd) { json["url"] = url }
         let origin = sessionOrigin()
         if !origin.isEmpty { json["origin"] = origin }
-        post(path: "/notify", json: json)
-
-    case "stop":
-        // The turn ended: clear the waiting item (if any) and leave a
-        // low-signal "done" breadcrumb so a finished-but-unattended session
-        // still surfaces in the queue.
-        runClear(id: "claude-\(payload.session_id)", source: "claude-code")
-
-        let cwdBase = payload.cwd.map { ($0 as NSString).lastPathComponent } ?? "unknown"
-        let timestamp = Int(Date().timeIntervalSince1970)
-        var json: [String: Any] = [
-            "id": "claude-done-\(payload.session_id)-\(timestamp)",
-            "source": "claude-code",
-            "kind": "claude_done",
-            "title": "Claude finished in \(cwdBase)",
-            "highSignal": false,
-        ]
-        // What it actually said beats a bare "finished" when you're scanning
-        // several sessions at once.
-        if let summary = firstLine(of: payload.last_assistant_message) {
-            json["body"] = summary
-        }
-        if let url = projectURL(for: payload.cwd) { json["url"] = url }
-        let origin = sessionOrigin()
-        if !origin.isEmpty { json["origin"] = origin }
-        post(path: "/notify", json: json)
-
-    default:
-        fail("inchill claude-hook: unknown hook kind '\(kind)' (expected 'notification' or 'stop').")
     }
+
+    // Best-effort: a queue that cannot be reached must not stall the session
+    // that was only trying to tell it something. See `post(...)`.
+    post(path: request.path, json: json, bestEffort: true)
 }
 
 // MARK: - Entry point
@@ -323,7 +298,11 @@ private let usage = """
       inchill notify [--id X] [--source S] [--kind K] --title T [--body B] [--url U] [--low]
       inchill done <id>
       inchill clear <id>
-      inchill claude-hook <notification|stop>
+      inchill claude-hook <notification|stop|user-prompt-submit|session-end>
+
+    The claude-hook sub-commands are driven by ~/.claude/settings.json (see
+    Settings \u{2192} Claude Code in the app); they read a hook payload on stdin
+    and keep exactly one queue row per Claude Code session.
     """
 
 let arguments = CommandLine.arguments
@@ -344,8 +323,10 @@ case "clear":
     guard let id = rest.first else { fail("inchill clear: missing <id>.") }
     runClear(id: id)
 case "claude-hook":
-    guard let kind = rest.first else { fail("inchill claude-hook: missing <notification|stop>.") }
-    runClaudeHook(kind)
+    guard let event = rest.first else {
+        fail("inchill claude-hook: missing <\(ClaudeHook.Event.allCases.map(\.rawValue).joined(separator: "|"))>.")
+    }
+    runClaudeHook(event)
 case "-h", "--help", "help":
     print(usage)
 default:
