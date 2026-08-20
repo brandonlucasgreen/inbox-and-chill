@@ -12,19 +12,6 @@ actor LinearConnector: Connector {
 
     private static let endpoint = URL(string: "https://api.linear.app/graphql")!
 
-    // ISO8601DateFormatter is documented thread-safe; it just lacks a
-    // Sendable annotation.
-    private nonisolated(unsafe) static let iso8601Fractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-    private nonisolated(unsafe) static let iso8601Whole: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
     init(sourceID: String) {
         self.sourceID = sourceID
     }
@@ -252,7 +239,7 @@ actor LinearConnector: Connector {
             mutation,
             variables: [
                 "id": externalID,
-                "snoozedUntilAt": Self.iso8601Fractional.string(from: until),
+                "snoozedUntilAt": ISO8601Timestamp.string(from: until),
             ])
         guard result.notificationUpdate.success else {
             throw LinearConnectorError.operationFailed(
@@ -524,7 +511,7 @@ actor LinearConnector: Connector {
     }
 
     private static func parseISO8601(_ string: String) -> Date? {
-        iso8601Fractional.date(from: string) ?? iso8601Whole.date(from: string)
+        ISO8601Timestamp.date(from: string)
     }
 }
 

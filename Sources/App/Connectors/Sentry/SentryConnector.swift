@@ -199,11 +199,9 @@ actor SentryConnector: Connector {
         return components.url!
     }
 
-    /// Sentry's timestamps carry fractional seconds (`…:56.789Z`) and
-    /// `ISO8601DateFormatter`'s two option sets are **mutually exclusive** —
-    /// the fractional formatter returns nil for a whole-second string and
-    /// vice versa. Verified 2026-08-19. Both are tried, in the order Sentry
-    /// actually sends.
+    /// Sentry's timestamps carry fractional seconds (`…:56.789Z`), which is
+    /// exactly the shape a single `ISO8601DateFormatter` misses — see
+    /// `ISO8601Timestamp` for why that needs two of them.
     ///
     /// Returning nil rather than `.now` is deliberate: `occurredAt` feeds
     /// `Store.resurrectIfNeeded`, and a `.now` fallback is always newer than
@@ -212,10 +210,7 @@ actor SentryConnector: Connector {
     /// "just now".
     static func parseTimestamp(_ raw: String?) -> Date? {
         guard let raw, !raw.isEmpty else { return nil }
-        for formatter in [fractionalISO8601, plainISO8601] {
-            if let date = formatter.date(from: raw) { return date }
-        }
-        return nil
+        return ISO8601Timestamp.date(from: raw)
     }
 
     /// Sentry pages with an opaque cursor in an RFC 5988 `Link` header:
@@ -302,16 +297,4 @@ actor SentryConnector: Connector {
             return "Sentry returned an unexpected status \(status).\(snippet)"
         }
     }
-
-    private nonisolated(unsafe) static let plainISO8601: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
-    private nonisolated(unsafe) static let fractionalISO8601: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
 }

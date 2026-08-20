@@ -13,27 +13,10 @@ actor JSONPollerConnector: Connector {
     private let url: URL?
     private let mapping: [String: String]
 
-    // Two formatters, because the option sets are mutually exclusive:
-    // the whole-second one returns nil for "2026-08-19T12:34:56.789Z" and
-    // the fractional one returns nil for "2026-08-19T12:34:56Z".
-    // ISO8601DateFormatter is documented thread-safe; it just lacks a
-    // Sendable annotation. Mirrors LinearConnector.parseISO8601.
-    private nonisolated(unsafe) static let iso8601Whole: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-    private nonisolated(unsafe) static let iso8601Fractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    /// Both ISO-8601 shapes a feed may send, whole seconds first (the more
-    /// common). `nil` means neither matched — callers must **not** substitute
-    /// `.now`; see the throw in `fetch()` for why.
+    /// Both ISO-8601 shapes a feed may send. `nil` means neither matched —
+    /// callers must **not** substitute `.now`; see the throw in `fetch()`.
     nonisolated static func timestamp(from string: String) -> Date? {
-        iso8601Whole.date(from: string) ?? iso8601Fractional.date(from: string)
+        ISO8601Timestamp.date(from: string)
     }
 
     init(sourceID: String, urlString: String, mapping: String) {

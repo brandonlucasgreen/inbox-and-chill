@@ -198,7 +198,7 @@ actor GitHubConnector: Connector {
 
     private func makeRemoteItem(from thread: Thread) -> RemoteItem {
         let title = "\(Self.humanize(reason: thread.reason)): \(thread.subject.title)"
-        let occurredAt = Self.iso8601.date(from: thread.updated_at) ?? .now
+        let occurredAt = ISO8601Timestamp.date(from: thread.updated_at) ?? .now
         let highSignal = Self.highSignalReasons.contains(thread.reason)
         return RemoteItem(
             externalID: thread.id,
@@ -255,6 +255,4 @@ actor GitHubConnector: Connector {
         htmlURL = htmlURL.replacingOccurrences(of: "/pulls/", with: "/pull/")
         return htmlURL
     }
-
-    private nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = ISO8601DateFormatter()
 }
