@@ -256,6 +256,11 @@ The app already ships three generic paths: **`jsonPoller`** (anything serving a 
 
 ## 6.11 Sentry — ✅ the best-shaped source added since Linear
 
+> **Verified against the real service 2026-08-20**: Brandon pasted a token and
+> org slug and the source returned issues. Still unexercised: the resolve
+> write-path (it is opt-in and defaults off) and cursor pagination (only past
+> 100 issues).
+
 - **Auth:** user auth token, `Authorization: Bearer …`, scope `event:read` (+ `event:write` to resolve). Nothing to register, no OAuth.
 - **The queue is one call:** `GET /api/0/organizations/{org}/issues/?query=is:unresolved is:for_review&sort=inbox`. Sentry's own "For Review" concept *is* this app's queue.
 - **Fields map directly:** `id`, `title`, `culprit`, `shortId`, `permalink`, `lastSeen`, `firstSeen`, `level`, `count`, `project`, `substatus`.
@@ -277,6 +282,11 @@ Sentry's issues endpoint returns a JSON array, so `jsonPoller` handles it with t
 The parse returned `nil`, `occurredAt` fell back to `.now`, and because `jsonPoller` has `.remoteTruth` but no `.markDone`, `resurrectIfNeeded` saw `occurredAt > doneAt` on **every poll** and revived the item. It could not be dismissed. With the timestamp parsed the same mechanism becomes the desired behaviour — the item returns when the error actually recurs.
 
 ## 6.12 Apple Mail — ✅ viable via AppleScript, and it is also the Gmail answer
+
+> **Verified against the real service 2026-08-20**: the Automation prompt was
+> approved and the source returned messages. Still unexercised: the
+> 100-message truncation path, and the -1743 refusal message (which only
+> renders for someone who declines the prompt).
 
 Verified on Brandon's Mac 2026-08-19: Automation permission already granted, Mail running, three IMAP accounts.
 
