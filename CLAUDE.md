@@ -381,8 +381,40 @@ codesign -d --entitlements - "/Applications/Inbox & Chill.app" 2>/dev/null | gre
 codesign --verify --deep --strict "/Applications/Inbox & Chill.app"
 ```
 
+**"No Keychain password item found for profile" does not mean the credentials
+were deleted.** `store-credentials` defaults to the iCloud **"Local Items"
+(data-protection) keychain**, and three facts follow that have now cost two
+separate investigations:
+
+- **`security` cannot enumerate that keychain at all.** A sweep of all ~400
+  generic passwords in `login.keychain-db` finding nothing is *not* evidence of
+  deletion — it is evidence you searched the wrong store.
+- **The attributes are not the obvious ones.** The item matches on `labl` =
+  `com.apple.gke.notary.tool` with `acct` =
+  `com.apple.gke.notary.tool.saved-creds.<profile>`. Searching service
+  `com.apple.gke.notary.tool` or account `<profile>` misses it even in the
+  right keychain.
+- **notarytool prints the same message when it merely cannot read the item**,
+  and Local Items unlocks independently of the login keychain, so the failure
+  is often transient.
+
+The only reliable check is notarytool itself:
+
+```bash
+xcrun notarytool history --keychain-profile inbox-and-chill --verbose
+```
+
+`Found Keychain password item` means they exist — re-run whatever failed.
+To see which keychain holds it, force the file one with
+`--keychain "$HOME/Library/Keychains/login.keychain-db"`: if that fails while
+the default succeeds, the item is in Local Items. Storing with `--keychain`
+pins it to the file keychain instead, where `security` can see it and Time
+Machine backs it up.
+
 `scripts/notarize.sh` does the rest: preflights the four things above, submits,
-staples, and writes `dist/InboxAndChill-<version>.zip`. It needs credentials
+staples, and writes `dist/InboxAndChill-<version>.zip`. Its credential check
+retries once and explains the above rather than asserting the credentials are
+gone. It needs credentials
 stored once via `notarytool store-credentials` — a person has to do that, it is
 not scriptable. `scripts/notarize.sh --preflight-only` checks a build is
 submittable without any credentials at all.

@@ -46,12 +46,52 @@ done
 # --- Credentials, checked before spending a build -------------------------
 # Skipped for --preflight-only so a build can be checked for submittability
 # without any credentials in play.
-if [ "$PREFLIGHT_ONLY" -eq 0 ] && ! xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
-  cat >&2 <<EOF
-No notarization credentials stored under the profile "$PROFILE".
+# "Couldn't read it" and "it isn't there" are the same message from notarytool
+# ("No Keychain password item found for profile"), and the difference matters:
+# store-credentials defaults to the iCloud "Local Items" keychain, which is
+# unlocked independently of the login keychain and answers itemNotFound while
+# it is unavailable. That message has twice been read as "the credentials were
+# deleted" when they were sitting there the whole time. So: retry once, and if
+# it still fails, say what is actually known rather than asserting deletion.
+CREDS_OK=0
+if [ "$PREFLIGHT_ONLY" -eq 0 ]; then
+  for attempt in 1 2; do
+    if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+      CREDS_OK=1; break
+    fi
+    [ "$attempt" -eq 1 ] && sleep 2
+  done
+fi
 
-Create them once (this needs your Apple ID and an app-specific password
-from appleid.apple.com → Sign-In and Security → App-Specific Passwords):
+if [ "$PREFLIGHT_ONLY" -eq 0 ] && [ "$CREDS_OK" -eq 0 ]; then
+  cat >&2 <<EOF
+Could not read notarization credentials for the profile "$PROFILE".
+
+This does NOT necessarily mean they are gone. notarytool says the same thing
+whether the item is missing or merely unreadable, and by default the item
+lives in the iCloud "Local Items" keychain, which:
+
+  - the \`security\` command cannot list at all, so "security find-generic-password
+    finds nothing" is NOT evidence of deletion, and
+  - can be transiently unavailable, answering "not found".
+
+Check what is really there before re-creating anything:
+
+  xcrun notarytool history --keychain-profile "$PROFILE" --verbose
+
+A line reading 'Found Keychain password item' means the credentials exist and
+this was a transient read failure — just run this script again.
+
+If it genuinely reports no item, re-create them. Consider pinning them to the
+file-based login keychain, which is visible to \`security\`, backed up by Time
+Machine, and not subject to Local Items locking:
+
+  xcrun notarytool store-credentials "$PROFILE" --team-id CV926C8KS8 \\
+    --keychain "\$HOME/Library/Keychains/login.keychain-db"
+
+
+Either way it needs your Apple ID and an app-specific password from
+appleid.apple.com → Sign-In and Security → App-Specific Passwords:
 
   xcrun notarytool store-credentials "$PROFILE" \\
     --apple-id "you@example.com" --team-id CV926C8KS8 \\
