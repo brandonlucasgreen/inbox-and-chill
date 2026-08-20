@@ -744,6 +744,476 @@ struct ClaudeSessionTargetTests {
 
 // MARK: - Keychain write failures (Sources/App/Support/Keychain.swift)
 
+
+// MARK: - Sentry
+
+@Suite("Sentry timestamp parsing")
+struct SentryTimestampTests {
+    /// The bug this connector exists to avoid: `ISO8601DateFormatter`'s two
+    /// option sets are mutually exclusive, so a single formatter silently
+    /// fails on half of all real timestamps.
+    @Test("Both fractional and whole-second timestamps parse")
+    func bothShapesParse() {
+        #expect(SentryConnector.parseTimestamp("2026-08-19T12:34:56.789Z") != nil)
+        #expect(SentryConnector.parseTimestamp("2026-08-19T12:34:56Z") != nil)
+        #expect(SentryConnector.parseTimestamp("2026-08-19T12:34:56.789000Z") != nil)
+    }
+
+    @Test("The two shapes agree on the instant, to the second")
+    func shapesAgree() throws {
+        let withFraction = try #require(
+            SentryConnector.parseTimestamp("2026-08-19T12:34:56.000Z"))
+        let without = try #require(
+            SentryConnector.parseTimestamp("2026-08-19T12:34:56Z"))
+        #expect(abs(withFraction.timeIntervalSince(without)) < 0.001)
+    }
+
+    /// Nil, not `.now`. A `.now` fallback is always newer than `doneAt`, so
+    /// `Store.resurrectIfNeeded` would revive the item on every single poll
+    /// and it could never be dismissed.
+    @Test("Unparseable input is nil rather than now")
+    func unparseableIsNil() {
+        #expect(SentryConnector.parseTimestamp(nil) == nil)
+        #expect(SentryConnector.parseTimestamp("") == nil)
+        #expect(SentryConnector.parseTimestamp("last tuesday") == nil)
+    }
+
+    @Test("An issue with no usable date sorts old, never new")
+    func undatedIssueSortsOld() throws {
+        let issue = try decodeIssue(#"{"id":"1","title":"Boom","lastSeen":"nonsense"}"#)
+        let item = SentryConnector.item(from: issue)
+        #expect(item.occurredAt == .distantPast)
+        #expect(item.occurredAt < .now)
+    }
+
+    func decodeIssue(_ json: String) throws -> SentryConnector.Issue {
+        try JSONDecoder().decode(SentryConnector.Issue.self, from: Data(json.utf8))
+    }
+}
+
+@Suite("Sentry issue mapping")
+struct SentryIssueMappingTests {
+    func issue(_ json: String) throws -> SentryConnector.Issue {
+        try JSONDecoder().decode(SentryConnector.Issue.self, from: Data(json.utf8))
+    }
+
+    @Test("A full issue maps onto a RemoteItem")
+    func fullIssue() throws {
+        let item = SentryConnector.item(
+            from: try issue(
+                """
+                {"id":"4507","title":"TypeError: undefined is not a function",
+                 "culprit":"app/checkout.js in submit","shortId":"WEB-4G",
+                 "permalink":"https://sentry.io/organizations/acme/issues/4507/",
+                 "lastSeen":"2026-08-19T12:34:56.789Z","level":"error",
+                 "count":"318","userCount":12,"isUnhandled":true,
+                 "project":{"slug":"web","name":"Web"}}
+                """))
+        #expect(item.externalID == "4507")
+        #expect(item.title == "TypeError: undefined is not a function")
+        #expect(item.kind == "error")
+        #expect(item.url == "https://sentry.io/organizations/acme/issues/4507/")
+        #expect(item.actorName == "web")
+        #expect(item.highSignal)
+        let snippet = try #require(item.snippet)
+        #expect(snippet.contains("app/checkout.js in submit"))
+        #expect(snippet.contains("318 events"))
+        #expect(snippet.contains("12 users"))
+        #expect(snippet.contains("WEB-4G"))
+    }
+
+    @Test("A sparse issue still maps, without inventing a snippet")
+    func sparseIssue() throws {
+        let item = SentryConnector.item(from: try issue(#"{"id":"9","title":"Bare"}"#))
+        #expect(item.externalID == "9")
+        #expect(item.snippet == nil)
+        #expect(item.url == nil)
+        #expect(item.actorName == nil)
+        #expect(!item.highSignal)
+    }
+
+    @Test("A single-event issue doesn't say “1 events”")
+    func singleEventCount() throws {
+        let item = SentryConnector.item(
+            from: try issue(#"{"id":"9","title":"Once","count":"1","culprit":"a.js"}"#))
+        #expect(item.snippet == "a.js")
+    }
+
+    @Test("Only fatal, error and unhandled are high-signal")
+    func highSignalLevels() {
+        #expect(SentryConnector.highSignal(level: "fatal", isUnhandled: false))
+        #expect(SentryConnector.highSignal(level: "error", isUnhandled: nil))
+        #expect(SentryConnector.highSignal(level: "info", isUnhandled: true))
+        #expect(!SentryConnector.highSignal(level: "warning", isUnhandled: false))
+        #expect(!SentryConnector.highSignal(level: "info", isUnhandled: nil))
+        #expect(!SentryConnector.highSignal(level: nil, isUnhandled: nil))
+    }
+}
+
+@Suite("Sentry request building and paging")
+struct SentryRequestTests {
+    @Test("The default query is Sentry's own For Review tab")
+    func defaultQueryIsForReview() {
+        #expect(SentryConnector.defaultQuery.contains("is:for_review"))
+        #expect(SentryConnector.defaultQuery.contains("is:unresolved"))
+    }
+
+    @Test("The issues URL carries query, inbox sort and page size")
+    func issuesURL() throws {
+        let url = SentryConnector.issuesURL(
+            org: "acme", query: "is:unresolved is:for_review", cursor: nil)
+        let items = try #require(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        let byName = Dictionary(
+            uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+        // Asserted on the string, not `url.path`: Foundation's `path` strips
+        // the trailing slash, and Sentry's endpoint needs it.
+        #expect(url.absoluteString.contains("/api/0/organizations/acme/issues/?"))
+        #expect(byName["query"] == "is:unresolved is:for_review")
+        #expect(byName["sort"] == "inbox")
+        #expect(byName["limit"] == String(SentryConnector.perPage))
+        #expect(byName["cursor"] == nil)
+    }
+
+    @Test("A cursor is carried through when paging")
+    func issuesURLWithCursor() throws {
+        let url = SentryConnector.issuesURL(org: "acme", query: "x", cursor: "0:100:0")
+        let items = try #require(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(items.contains { $0.name == "cursor" && $0.value == "0:100:0" })
+    }
+
+    @Test("A next link with results follows")
+    func cursorFollowsWhenResultsExist() {
+        let header = """
+            <https://sentry.io/api/0/organizations/acme/issues/?cursor=0:0:1>; rel="previous"; results="false"; cursor="0:0:1", \
+            <https://sentry.io/api/0/organizations/acme/issues/?cursor=0:100:0>; rel="next"; results="true"; cursor="0:100:0"
+            """
+        #expect(SentryConnector.nextCursor(inLinkHeader: header) == "0:100:0")
+    }
+
+    /// `results="false"` means the next page is empty. Following it costs a
+    /// round trip to learn nothing.
+    @Test("A next link with no results stops")
+    func cursorStopsWhenNoResults() {
+        let header =
+            #"<https://sentry.io/x>; rel="next"; results="false"; cursor="0:100:0""#
+        #expect(SentryConnector.nextCursor(inLinkHeader: header) == nil)
+    }
+
+    @Test("A missing or link-less header stops")
+    func cursorStopsWithoutHeader() {
+        #expect(SentryConnector.nextCursor(inLinkHeader: nil) == nil)
+        #expect(SentryConnector.nextCursor(inLinkHeader: "") == nil)
+        #expect(
+            SentryConnector.nextCursor(
+                inLinkHeader: #"<https://sentry.io/x>; rel="previous"; results="true""#) == nil)
+    }
+}
+
+@Suite("Sentry failure messages")
+struct SentryProblemTests {
+    /// Rule 4: every failure says what to do about it, not just what broke.
+    @Test("Each status names the fix")
+    func statusesNameTheFix() {
+        let unauthorized = SentryConnector.problem(
+            forHTTPStatus: 401, body: nil, retryAfter: nil, org: "acme")
+        #expect(unauthorized.contains("event:read"))
+
+        let forbidden = SentryConnector.problem(
+            forHTTPStatus: 403, body: nil, retryAfter: nil, org: "acme")
+        #expect(forbidden.contains("scope"))
+
+        let missing = SentryConnector.problem(
+            forHTTPStatus: 404, body: nil, retryAfter: nil, org: "acme")
+        #expect(missing.contains("acme"))
+        #expect(missing.contains("slug"))
+
+        let limited = SentryConnector.problem(
+            forHTTPStatus: 429, body: nil, retryAfter: "30", org: "acme")
+        #expect(limited.contains("30"))
+    }
+
+    @Test("An unknown status still reports the number and the body")
+    func unknownStatus() {
+        let message = SentryConnector.problem(
+            forHTTPStatus: 503, body: "upstream down", retryAfter: nil, org: "acme")
+        #expect(message.contains("503"))
+        #expect(message.contains("upstream down"))
+    }
+}
+
+// MARK: - Apple Mail
+
+@Suite("Apple Mail script building")
+struct AppleMailScriptTests {
+    @Test("Flagged-only asks Mail only about flags")
+    func flaggedOnly() {
+        let script = AppleMailConnector.fetchScript(
+            scope: .init(flagged: true, unread: false, mailbox: ""))
+        #expect(script.contains("flagged status is true"))
+        #expect(!script.contains("read status is false"))
+        #expect(script.contains("messages of inbox"))
+    }
+
+    /// A flagged *and* unread message must arrive once. Without the extra
+    /// clause it arrives twice, with two kinds and two contradictory done
+    /// gestures.
+    @Test("Both scopes exclude flagged from the unread clause")
+    func bothScopesDeduplicate() {
+        let script = AppleMailConnector.fetchScript(
+            scope: .init(flagged: true, unread: true, mailbox: ""))
+        #expect(script.contains("read status is false and flagged status is false"))
+    }
+
+    @Test("Unread-only doesn't filter on flags at all")
+    func unreadOnly() {
+        let script = AppleMailConnector.fetchScript(
+            scope: .init(flagged: false, unread: true, mailbox: ""))
+        #expect(script.contains("whose read status is false)"))
+        #expect(!script.contains("flagged status is false"))
+    }
+
+    @Test("A named mailbox is quoted, and quotes in the name are escaped")
+    func mailboxQuoting() {
+        let script = AppleMailConnector.fetchScript(
+            scope: .init(flagged: true, unread: false, mailbox: "Work"))
+        #expect(script.contains("mailbox \"Work\""))
+        #expect(AppleMailConnector.quoted("say \"hi\"") == "\"say \\\"hi\\\"\"")
+        #expect(AppleMailConnector.quoted("back\\slash") == "\"back\\\\slash\"")
+    }
+
+    @Test("The cap is applied in the script, newest first")
+    func capIsInScript() {
+        let script = AppleMailConnector.fetchScript(
+            scope: .init(flagged: true, unread: false, mailbox: ""))
+        #expect(script.contains("items 1 thru \(AppleMailConnector.maxMessages)"))
+    }
+
+    @Test("Marking done unflags a flagged message and reads an unread one")
+    func markDoneScripts() {
+        let unflag = AppleMailConnector.markDoneScript(
+            handle: .init(mailID: 42, messageID: nil, unflag: true))
+        #expect(unflag.contains("set flagged status of m to false"))
+        #expect(unflag.contains("whose id is 42"))
+
+        let read = AppleMailConnector.markDoneScript(
+            handle: .init(mailID: 42, messageID: nil, unflag: false))
+        #expect(read.contains("set read status of m to true"))
+        #expect(!read.contains("flagged status"))
+    }
+}
+
+@Suite("Apple Mail output parsing")
+struct AppleMailParsingTests {
+    let field = AppleMailConnector.fieldSeparator
+    let record = AppleMailConnector.recordSeparator
+
+    func output(truncated: String, records: [[String]]) -> String {
+        ([truncated] + records.map { $0.joined(separator: field) })
+            .joined(separator: record) + record
+    }
+
+    @Test("A flagged record becomes a high-signal item with a message link")
+    func flaggedRecord() throws {
+        let raw = output(
+            truncated: "0",
+            records: [
+                [
+                    "826216", "abc123@mail.example.com", "Contract for review",
+                    "\"Ada Lovelace\" <ada@example.com>", "2026-08-19 14:32:07",
+                    "true", "false",
+                ]
+            ])
+        let (items, truncated) = AppleMailConnector.items(fromScriptOutput: raw)
+        #expect(!truncated)
+        let item = try #require(items.first)
+        #expect(item.externalID == "abc123@mail.example.com")
+        #expect(item.kind == "flagged")
+        #expect(item.title == "Contract for review")
+        #expect(item.actorName == "Ada Lovelace")
+        #expect(item.highSignal)
+        #expect(item.url == "message://%3cabc123@mail.example.com%3e")
+        let handle = try #require(AppleMailConnector.MessageHandle(payload: item.payload))
+        #expect(handle.mailID == 826216)
+        #expect(handle.unflag)
+    }
+
+    @Test("An unread record marks read rather than unflagging")
+    func unreadRecord() throws {
+        let raw = output(
+            truncated: "0",
+            records: [
+                ["7", "x@y", "Standup notes", "bob@example.com", "2026-08-19 09:00:00", "false", "false"]
+            ])
+        let item = try #require(AppleMailConnector.items(fromScriptOutput: raw).items.first)
+        #expect(item.kind == "unread")
+        #expect(item.actorName == "bob@example.com")
+        #expect(!item.highSignal)
+        let handle = try #require(AppleMailConnector.MessageHandle(payload: item.payload))
+        #expect(!handle.unflag)
+    }
+
+    /// Mail's numeric id changes on a reindex, so the RFC Message-ID is the
+    /// external id when there is one — and the fallback must still be unique.
+    @Test("A message with no RFC id falls back to Mail's own id")
+    func missingMessageID() throws {
+        let raw = output(
+            truncated: "0",
+            records: [["99", "", "No id", "a@b", "2026-08-19 09:00:00", "false", "false"]])
+        let item = try #require(AppleMailConnector.items(fromScriptOutput: raw).items.first)
+        #expect(item.externalID == "mail-id:99")
+        #expect(item.url == nil)
+    }
+
+    /// `.remoteTruth` archives anything missing from a snapshot, so a capped
+    /// snapshot must report itself as incomplete.
+    @Test("The truncation flag survives parsing")
+    func truncationFlag() {
+        let raw = output(
+            truncated: "1",
+            records: [["1", "a@b", "S", "s@e", "2026-08-19 09:00:00", "false", "false"]])
+        #expect(AppleMailConnector.items(fromScriptOutput: raw).truncated)
+    }
+
+    @Test("Empty and malformed records are skipped, not crashed on")
+    func malformedRecords() {
+        #expect(AppleMailConnector.items(fromScriptOutput: "").items.isEmpty)
+        #expect(AppleMailConnector.items(fromScriptOutput: "0").items.isEmpty)
+        #expect(AppleMailConnector.item(fromRecord: "too\u{1F}few") == nil)
+        #expect(
+            AppleMailConnector.item(
+                fromRecord: "notanumber\u{1F}a\u{1F}b\u{1F}c\u{1F}d\u{1F}e\u{1F}f") == nil)
+    }
+
+    @Test("A subject Mail refused still produces a visible row")
+    func undescribedMessageIsVisible() throws {
+        let raw = output(
+            truncated: "0",
+            records: [
+                ["55", "", AppleMailConnector.undescribedTitle, "", "", "false", "false"]
+            ])
+        let item = try #require(AppleMailConnector.items(fromScriptOutput: raw).items.first)
+        #expect(item.title == AppleMailConnector.undescribedTitle)
+        #expect(item.occurredAt == .distantPast)
+    }
+
+    @Test("A separator-bearing subject survives, because separators are control codes")
+    func subjectWithPunctuation() throws {
+        let raw = output(
+            truncated: "0",
+            records: [
+                ["1", "a@b", "Re: pipe | tab\tand, comma", "s@e", "2026-08-19 09:00:00",
+                 "false", "false"]
+            ])
+        let item = try #require(AppleMailConnector.items(fromScriptOutput: raw).items.first)
+        #expect(item.title == "Re: pipe | tab\tand, comma")
+    }
+}
+
+@Suite("Apple Mail field helpers")
+struct AppleMailFieldTests {
+    @Test("Component dates parse in the Mac's own calendar")
+    func componentDates() throws {
+        let date = try #require(
+            AppleMailConnector.date(fromComponents: "2026-08-19 14:32:07"))
+        let parts = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: date)
+        #expect(parts.year == 2026)
+        #expect(parts.month == 8)
+        #expect(parts.day == 19)
+        #expect(parts.hour == 14)
+        #expect(parts.minute == 32)
+        #expect(parts.second == 7)
+    }
+
+    @Test("A date Mail didn't give is nil, not now")
+    func badDates() {
+        #expect(AppleMailConnector.date(fromComponents: "") == nil)
+        #expect(AppleMailConnector.date(fromComponents: "2026-08-19") == nil)
+        #expect(
+            AppleMailConnector.date(fromComponents: "Wednesday, 19 August 2026") == nil)
+    }
+
+    @Test("Sender display names are unwrapped, addresses kept as-is")
+    func senderNames() {
+        #expect(
+            AppleMailConnector.displayName(fromSender: "\"Ada Lovelace\" <ada@example.com>")
+                == "Ada Lovelace")
+        #expect(
+            AppleMailConnector.displayName(fromSender: "Ada Lovelace <ada@example.com>")
+                == "Ada Lovelace")
+        #expect(
+            AppleMailConnector.displayName(fromSender: "<ada@example.com>")
+                == "ada@example.com")
+        #expect(
+            AppleMailConnector.displayName(fromSender: "ada@example.com")
+                == "ada@example.com")
+        #expect(AppleMailConnector.displayName(fromSender: "  ") == nil)
+    }
+
+    /// Verified 2026-08-19 that `message://%3c…%3e` resolves to Mail.app.
+    @Test("Message links wrap the id in encoded angle brackets")
+    func messageLinks() throws {
+        let url = try #require(
+            AppleMailConnector.messageURL(messageID: "CAF=1234@mail.gmail.com"))
+        #expect(url.scheme == "message")
+        #expect(url.absoluteString.hasPrefix("message://%3c"))
+        #expect(url.absoluteString.hasSuffix("%3e"))
+        // Already-bracketed ids from Mail must not double up.
+        let bracketed = try #require(
+            AppleMailConnector.messageURL(messageID: "<abc@d.example>"))
+        #expect(!bracketed.absoluteString.contains("%3c%3c"))
+        #expect(AppleMailConnector.messageURL(messageID: "") == nil)
+        #expect(AppleMailConnector.messageURL(messageID: "<>") == nil)
+    }
+
+    /// The failure that matters: refusing the Apple event looks exactly like
+    /// an empty inbox, so it must name itself and the fix.
+    @Test("A refused Apple event explains itself")
+    func refusedAppleEvent() {
+        let denied = AppleMailConnector.explain(appleScriptError: -1743)
+        #expect(denied.contains("Automation"))
+        #expect(denied.lowercased().contains("empty"))
+
+        #expect(AppleMailConnector.explain(appleScriptError: -600).contains("running"))
+        #expect(AppleMailConnector.explain(appleScriptError: -1728).contains("-1728"))
+        #expect(AppleMailConnector.explain(appleScriptError: 42).contains("42"))
+    }
+}
+
+@Suite("New sources are configurable")
+struct NewSourceCatalogTests {
+    @Test("Sentry and Apple Mail are in the catalog with usable fields")
+    func catalogEntries() throws {
+        let sentry = try #require(ConnectorCatalog.descriptor(for: "sentry"))
+        #expect(sentry.fields.contains { $0.key == "token" && $0.isSecret })
+        #expect(sentry.fields.contains { $0.key == "org" && !$0.isSecret })
+        // Resolving in Sentry is team-visible, so it must be opt-in.
+        let resolve = try #require(sentry.fields.first { $0.key == "resolveOnDone" })
+        #expect(resolve.isToggle)
+        #expect(!resolve.defaultOn)
+
+        let mail = try #require(ConnectorCatalog.descriptor(for: "appleMail"))
+        // Nothing to paste: an entirely local source.
+        #expect(mail.fields.allSatisfy { !$0.isSecret })
+        let flagged = try #require(mail.fields.first { $0.key == "flagged" })
+        #expect(flagged.defaultOn)
+        // Unread-in-inbox would bury every other source.
+        let unread = try #require(mail.fields.first { $0.key == "unread" })
+        #expect(!unread.defaultOn)
+    }
+
+    @Test("Both explain themselves before asking for anything")
+    func bothExplainThemselves() throws {
+        for kind in ["sentry", "appleMail"] {
+            let descriptor = try #require(ConnectorCatalog.descriptor(for: kind))
+            #expect(!descriptor.setupSteps.isEmpty)
+            #expect(!descriptor.authNote.isEmpty)
+        }
+    }
+}
+
 /// A credential that fails to save is indistinguishable from one that saved
 /// — the sheet closes, the field still shows the token, and the source then
 /// fails to authenticate for a reason nothing on screen accounts for. These

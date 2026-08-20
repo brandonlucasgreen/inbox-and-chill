@@ -121,6 +121,56 @@ enum ConnectorCatalog {
             setupPayload: .init(label: "App Manifest", text: slackAppManifest),
             authNote: "Why paste tokens? Your workspace app's install page *is* Slack's OAuth flow — it ends by displaying the user token. A native app can't run Slack's OAuth itself: the token exchange requires your client secret (Slack has no PKCE public-client mode), and redirect URLs must be HTTPS, so there's no loopback to come back to. The app-level token never comes from OAuth at all.\n\nOnly the user token is required. Adding the app-level token turns on Socket Mode, which is the only supported way to receive channel mentions — Slack publishes no API for “messages that mention me”, so without it you get DM unreads, emoji saves and read-state auto-clear, but not mentions. Both tokens live in your Keychain and never leave this Mac."),
         .init(
+            id: "sentry", displayName: "Sentry", systemImage: "ladybug",
+            fields: [
+                .init(
+                    key: "org", label: "Organization Slug", isSecret: false,
+                    placeholder: "acme",
+                    help: "The `sentry.io/organizations/<slug>/` part of your URL — not the display name."),
+                .init(
+                    key: "token", label: "User Auth Token", isSecret: true,
+                    placeholder: "sntryu_…",
+                    help: "Needs the `event:read` scope, plus `event:write` only if you turn on resolving below."),
+                .init(
+                    key: "query", label: "Search", isSecret: false,
+                    placeholder: SentryConnector.defaultQuery,
+                    help: "Sentry search syntax, the same as the issues page. Blank uses `\(SentryConnector.defaultQuery)` — Sentry's own For Review tab, which is already a triage queue."),
+                .init(
+                    key: "resolveOnDone", label: "Resolve in Sentry when I mark done",
+                    isSecret: false,
+                    help: "Off by default, because resolving is team-visible — it closes the issue for everyone. Left off, marking done here just means “I've seen this”, and the issue comes back if the error happens again.",
+                    isToggle: true, defaultOn: false),
+            ],
+            setupSteps: [
+                "In Sentry, open **Settings → Account → User Auth Tokens**.",
+                "Create a token with the **`event:read`** scope (add `event:write` only if you want this app to resolve issues).",
+                "Paste it below, along with your organization slug.",
+            ],
+            setupURL: "https://sentry.io/settings/account/api/auth-tokens/",
+            authNote: "Why paste a token? Sentry's own user auth tokens are the sanctioned path for acting as yourself — there is no app to register and nothing to approve. The token is stored in your Keychain and never leaves this Mac.\n\nSentry's REST API is available on every plan including the free Developer tier; what the paid tiers buy is event quota and higher rate limits, not API access."),
+        .init(
+            id: "appleMail", displayName: "Apple Mail", systemImage: "envelope",
+            fields: [
+                .init(
+                    key: "flagged", label: "Flagged messages", isSecret: false,
+                    help: "A message you flagged yourself is the strongest signal an inbox has, so these arrive high-signal. Marking one done unflags it in Mail.",
+                    isToggle: true, defaultOn: true),
+                .init(
+                    key: "unread", label: "Unread messages", isSecret: false,
+                    help: "Off by default on purpose: unread-in-inbox is thousands of messages for most people and would bury every other source. Marking one done marks it read in Mail.",
+                    isToggle: true, defaultOn: false),
+                .init(
+                    key: "mailbox", label: "Mailbox", isSecret: false,
+                    placeholder: "INBOX",
+                    help: "Optional. Blank watches Mail's unified inbox across every account. Name one mailbox to narrow it."),
+            ],
+            setupSteps: [
+                "Nothing to paste — this source reads the Mail app that's already on this Mac.",
+                "macOS will ask once for permission to control Mail. **Allow it**, or the source stays permanently empty.",
+                "Flag a message in Mail and it appears here on the next refresh.",
+            ],
+            authNote: "No token, and nothing to sign in to: this reads the Mail app on this Mac over AppleScript, so it covers every account Mail has — **including Gmail**, which is why there is no separate Gmail source. Nothing is sent anywhere.\n\nmacOS gates this behind Privacy & Security → Automation. If you decline, Mail looks permanently empty rather than broken, so this source says so explicitly instead of showing you an empty queue.\n\nThe first refresh after Mail has been idle can take around ten seconds — that's Mail waking up, not a failure."),
+        .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [
                 .init(

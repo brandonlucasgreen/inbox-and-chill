@@ -37,6 +37,12 @@ Two traps in that check:
   universal binary.
 - **Presence proves presence; absence proves nothing.** Optimised-away symbols
   give false negatives. To prove a removal, use the test suite.
+- **Pick a literal with no non-ASCII characters.** `strings` only emits runs of
+  printable ASCII, so one curly apostrophe splits the literal in two and the
+  grep reports `0` for a string that is right there. `Mail wouldn’t describe
+  this message` returns nothing; `t describe this message` returns 2. Hit this
+  on 2026-08-19 — if a literal you are sure about reports `0`, check it for
+  typographic punctuation before believing the build is stale.
 
 mtime and size are not evidence. A behavioural test that "fails" is very often a
 stale binary.
@@ -161,6 +167,8 @@ the connector 5s later. Two failures have come from this:
 | `ntfy` | WebSocket | push | No remote read-state; items die by explicit done. `since=<id>` is exclusive-after. |
 | `jsonPoller` | HTTP poll 120s | remoteTruth | Generic: any URL returning a JSON array or `{items: [...]}`, fields mapped via a user-supplied `id=id,title=title,...` string. Optional bearer auth header from the Keychain. |
 | `local` | HTTP listener | push | `inchill` CLI + Claude Code hooks. Push-only: it sees only what a hook POSTs. A Claude Code item opens the **session**, not its folder — see below. |
+| `sentry` | REST poll 60s | markDone (opt-in), remoteTruth | `?query=is:unresolved is:for_review&sort=inbox` — Sentry's For Review tab *is* the queue. Resolving is **off by default**: it's team-visible, so a local done just means "seen" and the item returns via `resurrectIfNeeded` when `lastSeen` moves. Cursor pagination via `Link` → needs `snapshotWasComplete()`. |
+| `appleMail` | AppleScript poll 60s | markDone, remoteTruth | **Covers Gmail** — it reads every account Mail has, which is why there is no Gmail connector (PLAN §6.13). Flagged-only by default. See below. |
 
 ### Opening a Claude Code item lands in the session
 
@@ -183,6 +191,34 @@ Three facts that cost a while to establish:
 
 The tty is interpolated into AppleScript, so `isValidTTY` is an allowlist, not
 an escape — `/notify` is an HTTP endpoint, not just a hook.
+
+### Reading Mail costs 12 seconds, once
+
+Three measured facts drive `AppleMailConnector`, and each one was a wrong
+assumption first:
+
+- **A cold Mail is slow.** `messages of inbox whose read status is false` takes
+  **12s** on the first Apple Event after Mail idles and **0.15s** warm;
+  `unread count of inbox` is 0.12s either way. A slow first poll is normal —
+  never report it as a broken source, and don't wrap it in a timeout that
+  calls it one.
+- **The Envelope Index is off limits.** `~/Library/Mail` is TCC-protected
+  (`ls` → "Operation not permitted"), so the SQLite route needs Full Disk
+  Access on top of a private schema. Same rejection as the Notification Center
+  DB above.
+- **Mail returns messages newest-first** (verified: item 1 was two months
+  later than item n), which is why the 100-message cap slices
+  `items 1 thru 100`. If that ever changes the cap silently starts triaging
+  the *oldest* mail in the box.
+
+Two scripting traps: properties need explicit coercion (`subject of m as text`,
+not `subject of m`), and `date received as string` is locale-dependent — emit
+the components and rebuild the date in Swift. Field separators are ASCII 31/30
+because a subject can contain a tab or a pipe but not a control character.
+
+Authorization failure is `errAEEventNotPermitted` (**-1743**) and looks exactly
+like an empty inbox, which is the rule-4 case for this connector — see
+`AppleMailConnector.explain(appleScriptError:)`.
 
 ## Already exists — do not rebuild
 

@@ -93,7 +93,7 @@ targets:
         # AppleEvent to that terminal. Without this string macOS denies the
         # event outright instead of asking — and the denial looks exactly
         # like "nothing happened".
-        INFOPLIST_KEY_NSAppleEventsUsageDescription: Inbox & Chill asks your terminal to bring the window a Claude Code session is running in to the front.
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: Inbox & Chill asks your terminal to bring a Claude Code session's window to the front, and asks Mail for the messages you flagged or haven't read.
         ENABLE_HARDENED_RUNTIME: true
         ENABLE_USER_SCRIPT_SANDBOXING: false
   inchill:

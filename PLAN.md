@@ -118,6 +118,9 @@ Verified against current documentation, August 2026:
 | Notion | ⚠️ Approximation | Webhook (comments) + poll (assigned-to-me) | ❌ (local only) | No inbox API exists; needs relay for webhooks |
 | ~~Campsite~~ | **Removed 2026-08-19** | — | — | Was: poll v1 `notifications`; needed a Doorkeeper app on Buffer's instance. See §6.5. |
 | Custom | ✅ By design | Poll or relay push | local | §4.4 |
+| Sentry | ✅ Best-shaped since Linear | Poll (issues, `sort=inbox`) | ✅ (resolve/ignore) | Paste a user auth token; `is:for_review` *is* the queue. Cursor pagination → needs `snapshotWasComplete()`. §6.11 |
+| Apple Mail | ✅ AppleScript | Poll (cheap unread-count probe, then enumerate) | ✅ (read/flag) | Covers Gmail, which is already an IMAP account in Mail.app. 12s cold / 0.15s warm; `~/Library/Mail` is TCC-blocked. §6.12 |
+| Gmail | ❌ Not building | — | — | Restricted scopes → CASA; testing tokens die in 7 days; per-user Google Cloud project is worse than the OAuth §6.9 rejected. §6.13 |
 
 ### 6.1 Slack — ✅ Viable (mentions + unreads), ❌ Saved-for-Later
 
@@ -231,6 +234,105 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 
 **Decision (superseded 2026-08-17, reverted 2026-08-19): Linear PKCE is now implemented** — `LinearOAuth.swift`, loopback callback on fixed port 52180, bring-your-own client ID, tokens in Keychain with auto-refresh; the personal API key path remains the default/fewest-steps option. GitHub and Slack stay paste-a-token (verdicts above still hold), and the source editor now says why in-line.
 
+## 6.10 Adding a source — what it actually costs (measured 2026-08-19)
+
+Five touchpoints, in the order you write them:
+
+1. `ConnectorCatalog.all` — fields (`isSecret`/`isToggle`), `setupSteps`, `setupURL`, `authNote`.
+2. `ConnectorFactory.make` — one `case`.
+3. The actor. Sizes already in the tree: **GitHub 260 lines** (poll + `markDone` + pagination), ntfy 342 (WebSocket push), Linear 535 + 136, Slack 1,397. A well-behaved REST poller is **~200–300 lines**, and `GitHubConnector` is the template.
+4. Optionally `AppState.openable(_:payload:)` — one case if the source has a desktop app worth landing in.
+5. Tests against `nonisolated static` pure helpers (CLAUDE.md rule 5).
+
+Three invariants cause all the damage:
+
+- `.remoteTruth` **only** with a truthful `snapshotWasComplete()`. Cursor pagination with a page cap must answer `false` at the cap.
+- `occurredAt` must be the **real event time**. `Store.resurrectIfNeeded` revives a done item when `remote.occurredAt > doneAt`, so a `.now` fallback makes items immortal (§6.11).
+- Every failure gets a named reason (rule 4).
+
+### The three escape hatches — check these before writing a connector
+
+The app already ships three generic paths: **`jsonPoller`** (anything serving a JSON list), **`ntfy`** (anything that can POST a webhook — most SaaS alerting can target a topic), and **`inchill`** (anything on this Mac, including Mail rules and cron). Build a native connector only where all three fail: you need write-back read-state, a desktop deep link, or auth the poller can't express.
+
+## 6.11 Sentry — ✅ the best-shaped source added since Linear
+
+- **Auth:** user auth token, `Authorization: Bearer …`, scope `event:read` (+ `event:write` to resolve). Nothing to register, no OAuth.
+- **The queue is one call:** `GET /api/0/organizations/{org}/issues/?query=is:unresolved is:for_review&sort=inbox`. Sentry's own "For Review" concept *is* this app's queue.
+- **Fields map directly:** `id`, `title`, `culprit`, `shortId`, `permalink`, `lastSeen`, `firstSeen`, `level`, `count`, `project`, `substatus`.
+- **markDone is real:** `PUT …/issues/?id=…` with `{"status":"resolved"}` (or `"ignored"`), so `[.markDone, .remoteTruth]`.
+- **Gotcha:** cursor pagination via the `Link` header, `limit` max 100 — needs a real `snapshotWasComplete()`, exactly like GitHub's.
+- No desktop app (`sentry://` resolves to nothing — verified), so the web `permalink` is the right open.
+
+**Plan availability (Brandon's concern, 2026-08-19):** *"it sucks that their API is locked out of the free plan."* Checked — the REST API is **not** plan-gated; the free Developer plan includes API access, and what the tier limits is event quota and rate limits. Worth one curl against his own org before trusting this paragraph over his experience.
+
+### The jsonPoller timestamp bug — found here, fixed in this change
+
+Sentry's issues endpoint returns a JSON array, so `jsonPoller` handles it with the mapping `id=id,title=title,url=permalink,body=culprit,time=lastSeen`. Except `lastSeen` carries fractional seconds, and the two `ISO8601DateFormatter` option sets are **mutually exclusive** — verified:
+
+```
+2026-08-19T12:34:56.789Z | default: nil | fractional: OK
+2026-08-19T12:34:56Z     | default: OK  | fractional: nil
+```
+
+The parse returned `nil`, `occurredAt` fell back to `.now`, and because `jsonPoller` has `.remoteTruth` but no `.markDone`, `resurrectIfNeeded` saw `occurredAt > doneAt` on **every poll** and revived the item. It could not be dismissed. With the timestamp parsed the same mechanism becomes the desired behaviour — the item returns when the error actually recurs.
+
+## 6.12 Apple Mail — ✅ viable via AppleScript, and it is also the Gmail answer
+
+Verified on Brandon's Mac 2026-08-19: Automation permission already granted, Mail running, three IMAP accounts.
+
+- **Every field a connector needs exists** — numeric `id`, RFC `message id`, `subject`, `sender`, `date received`, `read status`, `flagged status`. Properties need explicit `as text` coercion, and references out of a `whose`-filtered list are finicky — re-resolve by `id`.
+- **`message://<Message-ID>` resolves to Mail.app (verified)** — an exact-message deep link, same shape as `slack://`, and local so it needs no https fallback.
+- **markDone is real** (`set read status`, `set flagged status`), so `[.markDone, .remoteTruth]`.
+- **Timing is the whole design constraint**, measured: `unread count of inbox` = **0.12s**, but `messages of … whose read status is false` = **12s cold, 0.15s warm**. The 12s is Mail waking on its first Apple Event after idle. A poll that reads a slow first call as failure will report a broken source after every quiet spell. **Probe the cheap count; enumerate only when it changes.**
+- **The Envelope Index SQLite route is dead:** `~/Library/Mail` is TCC-protected — `ls` returns "Operation not permitted" — so it needs Full Disk Access on top of a private schema that breaks every macOS release. Same rejection as the Notification Center DB in §6.8. AppleScript is the honest path.
+- **Silent-failure risk (rule 4):** Apple Events needs `NSAppleEventsUsageDescription` and a per-target Automation grant. Denied is `errAEEventNotPermitted` (**-1743**) and it looks exactly like an empty inbox. Surface it by name with the Privacy › Automation deep link.
+- **The scoping question:** "unread in INBOX" is thousands of items for most people and would drown the queue. The default is narrow — **flagged only** — with unread-in-a-named-mailbox as the opt-in.
+
+**Zero-code variant worth knowing:** a Mail rule can run an AppleScript, so a rule calling `inchill notify` makes email *push* through the existing local source with no connector at all. Kept as the fallback if the polled connector proves annoying.
+
+## 6.13 Gmail — ⚠️ the one source that cannot be paste-a-token
+
+**Decision (2026-08-19): not building it.** Build §6.12 instead — Gmail is already one of the three IMAP accounts in Mail.app.
+
+- Gmail API scopes are **restricted** → CASA Tier 2 assessment by a Google-approved lab, revalidated yearly, for public distribution.
+- **Testing mode is unusable:** refresh tokens expire after 7 days regardless of use.
+- An **Internal** Workspace app escapes both — fine on buffer.com, but every other user would have to create their own Google Cloud project. That is **strictly worse than the Linear PKCE flow §6.9 already rejected** for trading one paste for a longer setup. The argument to beat is still "fewer steps".
+- App-password IMAP is the only paste-a-token path — still supported in 2026, needs 2-Step Verification, and a Workspace admin can disable it org-wide. But **Foundation has no IMAP client**, so it means a second package dependency (the app has exactly one) or hand-writing IMAP IDLE. Highest cost of anything in this section.
+
+Revisit only for Gmail-specific selectors (`is:important`, labels, priority inbox) or an account deliberately kept out of Mail.app.
+
+## 6.14 Notion — ⚠️ §6.3's verdict stands, unchanged by the 2026 API
+
+Webhooks shipped with API version `2026-03-01` and are GA, but they cover page/database/comment events, require a **public HTTPS receiver** with `X-Notion-Signature` validation, and explicitly exclude user and permission changes. There is still **no notifications/inbox endpoint**, and comments remain per-page with no workspace-wide "mentions me" query.
+
+- **The comments half wants the deferred relay.** Don't fake it.
+- **The poll half needs nothing:** data source query + people filter `"me"` + status != Done = an honest "assigned to you" source. Half a Notion connector, clearly labelled, beats a comments connector that cannot see comments.
+- New fact: **`notion://` resolves to Notion.app (verified)**, so items can land in the desktop app via `AppState.openable`, with the https URL riding in the payload for Macs without Notion.
+
+Unchanged caveat: an integration sees only pages explicitly shared with it, so coverage is a setup step to state in-app.
+
+## 6.15 Other candidates — ranked, with Brandon's verdicts (2026-08-19)
+
+| Source | Verdict | Why |
+|---|---|---|
+| **PagerDuty** | ⏸ Wanted, **untestable** | Best-shaped of the lot: personal API token, `assigned_to_user` returns *only* triggered/acknowledged so the endpoint is the queue, status transitions are a real `markDone`. |
+| **Jira** | ⏸ Wanted, **untestable** | Email + API token basic auth, JQL `assignee = currentUser() AND resolution = Unresolved`. |
+| **Zendesk / Intercom** | ⏸ Wanted, **untestable** | "Assigned to me, not solved." Zendesk email/token basic auth; Intercom a bearer token. |
+| **Stripe** | 🔜 Interesting, Brandon's word | Restricted key; `/v1/disputes` plus `/v1/events` is a real event feed, and a dispute has a deadline. |
+| **Calendar (EventKit)** | ✅ Cheap, free push | Same story as Reminders §6.6 — `EKEventStoreChanged` means no polling. Covers Google Calendar because it is already in Calendar.app. |
+| **Things 3** | ✅ Local, no auth | AppleScript/URL scheme, used daily. The §6.6 "RemindersMenubar already covers it" argument does **not** apply — Things has no menu bar queue. `things3-cli` is not installed on this Mac. |
+| **Vercel / Cloudflare / Netlify** | ✅ but use `jsonPoller` | Deployments filtered to `state=ERROR` is a JSON list with a timestamp. Promote to native only for the deploy-log deep link. |
+| **Buffer** | ❌ Not yet | A failed post *is* a notification, but per Brandon: *"Buffer doesn't have a notification webhook offering yet."* Revisit if that ships. |
+| **Figma** | ⚠️ Notion-shaped | PAT pastes fine, but comments are per-file (`/v1/files/:key/comments`) with no inbox, and the `FILE_COMMENT` webhook needs the relay. Approximation only. |
+
+**⏸ "Untestable" is a real blocker, not a shrug.** Brandon: *"Pagerduty, zendesk, intercom, JIRA all feel good and necessary but I can't test them."* This repo's rule is that a connector never fed to the real service is unverified however carefully written (CLAUDE.md rule 3). Don't ship one of these off documentation alone — either get a trial account first, or leave it and let `jsonPoller` cover the case.
+
+**Explicit noes, so they don't get re-litigated:**
+
+- **Discord** — the user-token API violates ToS, and a bot token cannot see your DMs. Same shape as the `xoxc`/`xoxd` verdict in §6.1.
+- **Mixpanel / Amplitude alerts** — no personal notification API; they alert by email and Slack, so they already arrive through those sources.
+- **GitHub Actions** — already arrives as `ci_activity`, handled by `GitHubConnector.humanize`. Don't rebuild it.
+
 ## 7. Milestones
 
 - **Day 0 (before any code)**: create the Slack app from a manifest and attempt install on Buffer's workspace (approval latency is the schedule risk); ask the Campsite maintainer about a Doorkeeper OAuth app.
@@ -240,7 +342,8 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 - **M3 — Campsite**: v1 notifications + follow-ups connector (token from Day-0 ask).
 - **M4 — Local sources**: localhost listener + `inchill` CLI + one-click Claude Code hook setup (§6.8); generic JSON poller UI.
 - **M5 — Mac-arsed pass**: main triage window (sortable table, multi-select), drag-out & rich copy, App Intents/Shortcuts ("Get my queue", "Snooze item"), launch-at-login, state restoration audit, full Mac behaviour test plan (menus, VoiceOver, light/dark, multi-display); Developer ID signing + notarization pipeline for the eventual GitHub release.
-- **Backlog (build on demand)**: Notion connector (§6.3), Apple Reminders/EventKit (§6.6), Cloudflare relay + automation bridges (§4.4/§6.7), App Store fork investigation.
+- **M6 — Sentry + Apple Mail** (2026-08-19): the two sources Brandon prioritised after the §6.10–6.15 exploration. Sentry is the clean REST citizen; Apple Mail is the one that also answers Gmail.
+- **Backlog (build on demand)**: Notion poll-half (§6.14), Apple Reminders/EventKit and Calendar (§6.6/§6.15), Stripe (§6.15), Cloudflare relay + automation bridges (§4.4/§6.7), App Store fork investigation. **Blocked on an account to test against, not on code**: PagerDuty, Jira, Zendesk, Intercom (§6.15).
 
 ## 8. Risks & open questions
 

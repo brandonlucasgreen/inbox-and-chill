@@ -765,6 +765,24 @@ enum ConnectorFactory {
             return JSONPollerConnector(
                 sourceID: config.id, urlString: settings["url"] ?? "",
                 mapping: settings["mapping"] ?? "")
+        case "sentry":
+            let field = ConnectorCatalog.descriptor(for: "sentry")?
+                .fields.first { $0.key == "resolveOnDone" }
+            return SentryConnector(
+                sourceID: config.id,
+                org: settings["org"] ?? "",
+                query: settings["query"] ?? "",
+                resolveOnDone: field?.boolValue(in: settings) ?? false)
+        case "appleMail":
+            let fields = ConnectorCatalog.descriptor(for: "appleMail")?.fields ?? []
+            func toggle(_ key: String) -> Bool {
+                fields.first { $0.key == key }?.boolValue(in: settings) ?? false
+            }
+            return AppleMailConnector(
+                sourceID: config.id,
+                scope: .init(
+                    flagged: toggle("flagged"), unread: toggle("unread"),
+                    mailbox: settings["mailbox"] ?? ""))
         case "slack":
             return SlackConnector(
                 sourceID: config.id,
