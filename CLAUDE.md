@@ -17,7 +17,7 @@ scripts/install-local.sh                                 # Release → /Applicat
 
 Tests are Swift Testing (`@Test` / `#expect`), in `Tests/`.
 
-## The five rules that keep being learned the hard way
+## The six rules that keep being learned the hard way
 
 ### 1. `xcodebuild test` installs nothing
 
@@ -59,7 +59,42 @@ Put the predicate in a script rather than inline — quoting it through a shell
 wrapper fails with "too many arguments". This cost several cycles of believing
 code wasn't running when the logging simply wasn't reaching the terminal.
 
-### 2. Quote every path you hand to a shell
+### 2. AppleScript needs an entitlement, not just a usage string
+
+**A hardened-runtime app cannot send Apple events without
+`com.apple.security.automation.apple-events`.** Without it macOS refuses every
+event with `errAEEventNotPermitted` (**-1743**) and shows **no consent prompt at
+all** — the app is not permitted even to ask, so nothing appears in Privacy &
+Security → Automation for the user to allow. `NSAppleEventsUsageDescription`
+supplies the prompt's *wording*; the entitlement supplies the *right to be
+prompted*. Necessary and not sufficient, in that order.
+
+This shipped broken in 0.3.0 and cost real time because every symptom pointed
+elsewhere: the source polled happily every 60s, logged -1743 every time, and
+looked exactly like an empty inbox. It silently broke **two** features — the
+Apple Mail source and the Claude Code terminal-tab focus (`ClaudeSessionOpener`)
+— and `ENABLE_HARDENED_RUNTIME` is in `settings.base`, so Debug was affected
+too. Tests passed throughout, because the tests only exercise pure helpers.
+
+Diagnosis order that actually worked, when an Apple event fails:
+
+1. `codesign -d --entitlements - <app>` — is the entitlement there at all?
+2. `log show --last 5m --predicate 'subsystem == "com.apple.TCC"'` — **silence
+   means TCC was never consulted**, which means the refusal happened before
+   consent, which means the entitlement. A *denial* would appear here.
+3. Only then suspect TCC state or the user having declined.
+
+**And never `first <element> whose …`.** When the filter matches nothing, Mail
+raises "Invalid index" (**-1719**), which names nothing and sent this
+investigation down a thread-safety dead end. `count of (messages … whose …)`
+returns 0, so a miss becomes a fact you can attach a sentence to. This was the
+0.3.0 `markDone` bug.
+
+Related: **log the AppleScript error *message*, not just its number.**
+`NSAppleScript.errorBriefMessage` said "Invalid index" and named the bug
+outright; `-1719` on its own cost an hour.
+
+### 3. Quote every path you hand to a shell
 
 The bundle is `Inbox & Chill.app`. A shell reads the `&` as a background-job
 separator and silently splits the command in two — this killed the Claude Code
@@ -71,7 +106,7 @@ To debug a hook that "silently doesn't fire", run the *stored command string*
 the way the harness does — `sh -c "$CMD"` — not the binary with your own
 quoting. The latter hides the bug.
 
-### 3. Read the verdicts this repo already recorded
+### 4. Read the verdicts this repo already recorded
 
 Before proposing a connector change or answering an API-capability question,
 read: `PLAN.md` §6.9, the `authNote` strings in `Sync/ConnectorCatalog.swift`,
@@ -85,7 +120,7 @@ unverified, however carefully it was written.** `docs/slack-app-manifest.yml`
 was wrong in three ways the first time it met Slack's validator. Say so plainly
 when handing over something untested.
 
-### 4. Silent failure is this project's recurring bug class
+### 5. Silent failure is this project's recurring bug class
 
 Nearly every bug here was something returning bare on a permission problem, a
 missing scope, or a rejected token — indistinguishable from "nothing happened".
@@ -100,7 +135,7 @@ Precedents to copy: `SlackConnector.userTokenProblem(_:)`,
 `SlackConnector.searchScopeAdvice(code:)`, `NtfyConnector.status(forHTTPStatus:)`,
 `JournalWriter.explain(_:url:)`, `BannerAuthorization`.
 
-### 5. Put logic in `nonisolated static` pure functions
+### 6. Put logic in `nonisolated static` pure functions
 
 Connectors are actors and their real work needs network + Keychain, so anything
 worth testing belongs in a pure static helper the tests can call directly.
@@ -217,8 +252,21 @@ the components and rebuild the date in Swift. Field separators are ASCII 31/30
 because a subject can contain a tab or a pipe but not a control character.
 
 Authorization failure is `errAEEventNotPermitted` (**-1743**) and looks exactly
-like an empty inbox, which is the rule-4 case for this connector — see
-`AppleMailConnector.explain(appleScriptError:)`.
+like an empty inbox, which is the rule-5 case for this connector — see
+`AppleMailConnector.explain(appleScriptError:)`. In 0.3.0 that was the missing
+entitlement, not a TCC decision; see rule 2.
+
+**Addressing a message for write-back needs the account and mailbox, not an
+id.** Mail's numeric `id` is scoped to a mailbox, so the same number can mean
+different messages in different accounts and a bare lookup in the unified
+`inbox` is not reliably the message you meant. `MessageHandle` carries account
+id + mailbox name, with the RFC Message-ID and then the bare id as ordered
+fallbacks.
+
+**Done means read.** Marking a mail row done marks it read in Mail, and clears
+the flag as well when a flag is what queued it. Read is the load-bearing half:
+unflagging alone leaves the message unread, so an unread-scoped source
+re-queues it forever.
 
 ## Already exists — do not rebuild
 
@@ -252,9 +300,10 @@ authorize entitlements Apple must bless — iCloud, App Groups, Push, Keychain
 Sharing — and this app uses none. It is unsandboxed, so network access, the
 loopback listener and the Keychain all work without entitlements.
 
-Release must therefore ship with **no entitlements at all**, a hardened runtime,
-and a secure timestamp. Both of the last two were wrong at first and neither was
-visible in a normal build:
+Release ships **exactly one entitlement** — `com.apple.security.automation.apple-events`
+(see the AppleScript rule below; it needs no App ID or profile) — plus a
+hardened runtime and a secure timestamp. The last two were wrong at first and
+neither was visible in a normal build:
 
 - Xcode injects `com.apple.security.get-task-allow` (the debugger-attach
   entitlement) unless told not to. Notarization rejects it.
@@ -267,7 +316,8 @@ installed build before trusting it, because neither shows up as a build failure:
 
 ```bash
 codesign -dvv "/Applications/Inbox & Chill.app" 2>&1 | grep -E "Timestamp|flags="
-codesign -d --entitlements - "/Applications/Inbox & Chill.app"   # expect none
+codesign -d --entitlements - "/Applications/Inbox & Chill.app"   # expect ONLY apple-events
+codesign -d --entitlements - "/Applications/Inbox & Chill.app" 2>/dev/null | grep -c get-task-allow  # expect 0
 codesign --verify --deep --strict "/Applications/Inbox & Chill.app"
 ```
 

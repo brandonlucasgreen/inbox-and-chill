@@ -283,10 +283,14 @@ The parse returned `nil`, `occurredAt` fell back to `.now`, and because `jsonPol
 
 ## 6.12 Apple Mail — ✅ viable via AppleScript, and it is also the Gmail answer
 
-> **Verified against the real service 2026-08-20**: the Automation prompt was
-> approved and the source returned messages. Still unexercised: the
-> 100-message truncation path, and the -1743 refusal message (which only
-> renders for someone who declines the prompt).
+> **Verified against the real service 2026-08-20**, but only after 0.3.1.
+> 0.3.0 shipped broken twice over: the hardened runtime blocked every Apple
+> event because the app carried no
+> `com.apple.security.automation.apple-events` entitlement (-1743, and macOS
+> never offered the Automation prompt, so there was nothing to allow), and
+> `markDone` used `first message … whose`, which raises "Invalid index"
+> (-1719) whenever the lookup misses. Both fixed in 0.3.1; see CLAUDE.md
+> rule 2. Still unexercised: the 100-message truncation path.
 
 Verified on Brandon's Mac 2026-08-19: Automation permission already granted, Mail running, three IMAP accounts.
 

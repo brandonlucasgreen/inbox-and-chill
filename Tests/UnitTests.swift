@@ -990,17 +990,57 @@ struct AppleMailScriptTests {
         #expect(script.contains("items 1 thru \(AppleMailConnector.maxMessages)"))
     }
 
-    @Test("Marking done unflags a flagged message and reads an unread one")
+    /// "I dealt with this email" always means read; the flag is cleared only
+    /// when a flag is what queued it.
+    @Test("Marking done always marks read, and unflags only when flagged")
     func markDoneScripts() {
-        let unflag = AppleMailConnector.markDoneScript(
+        let flagged = AppleMailConnector.markDoneScript(
             handle: .init(mailID: 42, messageID: nil, unflag: true))
-        #expect(unflag.contains("set flagged status of m to false"))
-        #expect(unflag.contains("whose id is 42"))
+        #expect(flagged.contains("set read status of m to true"))
+        #expect(flagged.contains("set flagged status of m to false"))
 
-        let read = AppleMailConnector.markDoneScript(
+        let unread = AppleMailConnector.markDoneScript(
             handle: .init(mailID: 42, messageID: nil, unflag: false))
-        #expect(read.contains("set read status of m to true"))
-        #expect(!read.contains("flagged status"))
+        #expect(unread.contains("set read status of m to true"))
+        #expect(!unread.contains("flagged status"))
+    }
+
+    /// The -1719 bug: `first message … whose` raises "Invalid index" when the
+    /// filter matches nothing, which names nothing. Counting a whose-list
+    /// returns 0 instead, so a miss becomes a fact with a sentence attached.
+    @Test("Marking done never uses the idiom that raised -1719")
+    func markDoneAvoidsFirstWhose() {
+        let script = AppleMailConnector.markDoneScript(
+            handle: .init(mailID: 42, messageID: "a@b", unflag: true,
+                          account: "ACCT-1", mailbox: "INBOX"))
+        #expect(!script.contains("first message"))
+        #expect(script.contains("count of hits"))
+        #expect(script.contains(AppleMailConnector.notFoundMessage))
+    }
+
+    /// Mail's `id` is per-mailbox, so a bare id in the unified inbox can name
+    /// a different message in another account.
+    @Test("Marking done scopes the lookup to the account and mailbox it came from")
+    func markDoneScopesLookup() {
+        let script = AppleMailConnector.markDoneScript(
+            handle: .init(mailID: 42, messageID: "a@b", unflag: false,
+                          account: "ACCT-1", mailbox: "Work"))
+        #expect(script.contains("account id \"ACCT-1\""))
+        #expect(script.contains("mailbox \"Work\""))
+        // RFC id and bare id remain as ordered fallbacks.
+        #expect(script.contains("whose message id is \"a@b\""))
+        #expect(script.contains("whose id is 42"))
+    }
+
+    /// A handle written by 0.3.0 has no account or mailbox; it must still
+    /// produce a working script rather than crash or emit `account id ""`.
+    @Test("A 0.3.0 handle still marks done, via the fallbacks")
+    func markDoneWithLegacyHandle() {
+        let script = AppleMailConnector.markDoneScript(
+            handle: .init(mailID: 42, messageID: nil, unflag: false))
+        #expect(!script.contains("account id"))
+        #expect(script.contains("whose id is 42"))
+        #expect(script.contains("set read status of m to true"))
     }
 }
 
@@ -1037,6 +1077,33 @@ struct AppleMailParsingTests {
         let handle = try #require(AppleMailConnector.MessageHandle(payload: item.payload))
         #expect(handle.mailID == 826216)
         #expect(handle.unflag)
+    }
+
+    @Test("Account and mailbox round-trip into the handle when present")
+    func accountAndMailboxRoundTrip() throws {
+        let raw = output(
+            truncated: "0",
+            records: [
+                ["826216", "a@b", "Subject", "s@e", "2026-08-19 14:32:07",
+                 "true", "false", "ACCT-1", "INBOX"]
+            ])
+        let item = try #require(AppleMailConnector.items(fromScriptOutput: raw).items.first)
+        let handle = try #require(AppleMailConnector.MessageHandle(payload: item.payload))
+        #expect(handle.account == "ACCT-1")
+        #expect(handle.mailbox == "INBOX")
+    }
+
+    /// 0.3.0 wrote seven fields. Those rows must keep parsing.
+    @Test("A seven-field record from 0.3.0 still parses, with no account")
+    func sevenFieldRecordStillParses() throws {
+        let raw = output(
+            truncated: "0",
+            records: [["7", "a@b", "S", "s@e", "2026-08-19 09:00:00", "false", "false"]])
+        let item = try #require(AppleMailConnector.items(fromScriptOutput: raw).items.first)
+        let handle = try #require(AppleMailConnector.MessageHandle(payload: item.payload))
+        #expect(handle.account == nil)
+        #expect(handle.mailbox == nil)
+        #expect(handle.mailID == 7)
     }
 
     @Test("An unread record marks read rather than unflagging")
@@ -1178,6 +1245,8 @@ struct AppleMailFieldTests {
 
         #expect(AppleMailConnector.explain(appleScriptError: -600).contains("running"))
         #expect(AppleMailConnector.explain(appleScriptError: -1728).contains("-1728"))
+        // -1719 was the 0.3.0 markDone failure; it must name a cause now.
+        #expect(AppleMailConnector.explain(appleScriptError: -1719).contains("moved or deleted"))
         #expect(AppleMailConnector.explain(appleScriptError: 42).contains("42"))
     }
 }

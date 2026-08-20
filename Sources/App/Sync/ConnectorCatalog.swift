@@ -153,11 +153,11 @@ enum ConnectorCatalog {
             fields: [
                 .init(
                     key: "flagged", label: "Flagged messages", isSecret: false,
-                    help: "A message you flagged yourself is the strongest signal an inbox has, so these arrive high-signal. Marking one done unflags it in Mail.",
+                    help: "A message you flagged yourself is the strongest signal an inbox has, so these arrive high-signal. Marking one done marks it read in Mail and clears the flag.",
                     isToggle: true, defaultOn: true),
                 .init(
                     key: "unread", label: "Unread messages", isSecret: false,
-                    help: "Off by default on purpose: unread-in-inbox is thousands of messages for most people and would bury every other source. Marking one done marks it read in Mail.",
+                    help: "Off by default on purpose: unread-in-inbox is thousands of messages for most people and would bury every other source. Marking one done marks it read in Mail, the same as reading it there.",
                     isToggle: true, defaultOn: false),
                 .init(
                     key: "mailbox", label: "Mailbox", isSecret: false,

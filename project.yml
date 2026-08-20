@@ -84,8 +84,8 @@ targets:
         PRODUCT_NAME: Inbox & Chill
         PRODUCT_MODULE_NAME: InboxAndChill
         GENERATE_INFOPLIST_FILE: true
-        MARKETING_VERSION: "0.3.0"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "0.3.1"
+        CURRENT_PROJECT_VERSION: "4"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_LSUIElement: true
         INFOPLIST_KEY_CFBundleDisplayName: Inbox & Chill
@@ -96,6 +96,22 @@ targets:
         INFOPLIST_KEY_NSAppleEventsUsageDescription: Inbox & Chill asks your terminal to bring a Claude Code session's window to the front, and asks Mail for the messages you flagged or haven't read.
         ENABLE_HARDENED_RUNTIME: true
         ENABLE_USER_SCRIPT_SANDBOXING: false
+        # The hardened runtime blocks Apple events outright unless the app
+        # carries `com.apple.security.automation.apple-events`, and the
+        # refusal is errAEEventNotPermitted (-1743) with **no consent
+        # prompt** — the app is not permitted even to ask. That is exactly
+        # how it failed in 0.3.0: the Apple Mail source polled every 60s,
+        # logged -1743 every time, and macOS never offered Privacy &
+        # Security → Automation, so there was nothing for the user to allow.
+        # The NSAppleEventsUsageDescription above is necessary but not
+        # sufficient; it supplies the prompt's wording, this supplies the
+        # right to be prompted at all.
+        #
+        # This does not contradict "Release ships no entitlements": that rule
+        # is about `get-task-allow`, which notarization rejects. This is a
+        # hardened-runtime resource-access entitlement — no App ID, no
+        # provisioning profile, accepted by notarization.
+        CODE_SIGN_ENTITLEMENTS: InboxAndChill.entitlements
   inchill:
     type: tool
     platform: macOS

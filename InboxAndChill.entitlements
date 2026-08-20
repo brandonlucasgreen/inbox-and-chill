@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required to send Apple events at all under the hardened runtime.
+	     Without it macOS refuses every event with errAEEventNotPermitted
+	     (-1743) and shows NO consent prompt, because the app is not even
+	     permitted to ask. That is what broke the Apple Mail source and the
+	     Claude Code terminal-tab focus in 0.3.0.
+
+	     This is a hardened-runtime resource-access entitlement, so unlike
+	     iCloud/Push/App Groups it needs no App ID registration and no
+	     provisioning profile, and notarization accepts it. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

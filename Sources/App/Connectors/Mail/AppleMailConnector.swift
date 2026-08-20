@@ -121,11 +121,22 @@ actor AppleMailConnector: Connector {
         var mailID: Int
         var messageID: String?
         var unflag: Bool
+        /// Mail's `id` is scoped to a mailbox, not global, so a bare id
+        /// looked up in the unified inbox is not reliably the message we
+        /// meant. These two make it exact. Optional because handles written
+        /// by 0.3.0 don't have them.
+        var account: String?
+        var mailbox: String?
 
-        init(mailID: Int, messageID: String?, unflag: Bool) {
+        init(
+            mailID: Int, messageID: String?, unflag: Bool,
+            account: String? = nil, mailbox: String? = nil
+        ) {
             self.mailID = mailID
             self.messageID = messageID
             self.unflag = unflag
+            self.account = account
+            self.mailbox = mailbox
         }
 
         init?(payload: Data?) {
@@ -196,7 +207,9 @@ actor AppleMailConnector: Connector {
                             & fieldSep & ((year of d) as text) & "-" & (my pad(month of d as integer)) & "-" & (my pad(day of d)) ¬
                             & " " & (my pad(hours of d)) & ":" & (my pad(minutes of d)) & ":" & (my pad(seconds of d)) ¬
                             & fieldSep & ((flagged status of m) as text) ¬
-                            & fieldSep & ((read status of m) as text)
+                            & fieldSep & ((read status of m) as text) ¬
+                            & fieldSep & ((id of (account of (mailbox of m))) as text) ¬
+                            & fieldSep & ((name of (mailbox of m)) as text)
                     on error
                         -- Rule 4: a message Mail won't describe still gets a
                         -- row. Dropping it silently is the one outcome this
@@ -206,7 +219,8 @@ actor AppleMailConnector: Connector {
                             set rec to ((id of m) as text) & fieldSep & "" ¬
                                 & fieldSep & "\(undescribedTitle)" ¬
                                 & fieldSep & "" & fieldSep & "" ¬
-                                & fieldSep & "false" & fieldSep & "false"
+                                & fieldSep & "false" & fieldSep & "false" ¬
+                                & fieldSep & "" & fieldSep & ""
                         end try
                     end try
                     if rec is not "" then set out to out & rec & recSep
@@ -222,17 +236,64 @@ actor AppleMailConnector: Connector {
             """
     }
 
+    /// Marking done means "I dealt with this email": mark it **read**, and
+    /// unflag it too if a flag is what put it in the queue. Read is the part
+    /// that matters — leaving a dismissed message unread means the unread
+    /// scope re-queues it forever, and it is the behaviour Linear's
+    /// mark-read gives, which is what this is modelled on.
+    ///
+    /// Two things this must not do, both learned from -1719 in 0.3.0:
+    ///
+    /// - **Never `first message … whose`.** When the filter matches nothing
+    ///   Mail raises "Invalid index" (-1719), which says nothing useful.
+    ///   `count of (messages … whose …)` returns 0 instead, so a miss is a
+    ///   fact we can act on rather than an opaque failure.
+    /// - **Never look up a bare id in the unified inbox.** Mail's `id` is
+    ///   scoped to a mailbox, so the same number can mean different messages
+    ///   in different accounts. Scope it to the account and mailbox the
+    ///   message was found in, and keep the RFC Message-ID as the fallback
+    ///   for when Mail has moved it since.
     static func markDoneScript(handle: MessageHandle) -> String {
-        let action =
-            handle.unflag
-            ? "set flagged status of m to false" : "set read status of m to true"
+        var lookups: [String] = []
+        if let account = handle.account, !account.isEmpty,
+            let mailbox = handle.mailbox, !mailbox.isEmpty {
+            lookups.append(
+                "(messages of mailbox \(quoted(mailbox)) of account id \(quoted(account)) whose id is \(handle.mailID))"
+            )
+        }
+        // A 0.3.0 handle, or a message Mail has since moved: fall back to the
+        // stable RFC id, then to the bare numeric id as a last resort.
+        if let messageID = handle.messageID, !messageID.isEmpty {
+            lookups.append(
+                "(messages of inbox whose message id is \(quoted(messageID)))")
+        }
+        lookups.append("(messages of inbox whose id is \(handle.mailID))")
+
+        var body = "set hits to \(lookups[0])\n"
+        for lookup in lookups.dropFirst() {
+            body += "    if (count of hits) is 0 then set hits to \(lookup)\n"
+        }
+        body += """
+                if (count of hits) is 0 then error \(quoted(notFoundMessage)) number -1728
+                set m to item 1 of hits
+                set read status of m to true
+            """
+        if handle.unflag {
+            body += "\n    set flagged status of m to false"
+        }
+
         return """
             tell application "Mail"
-                set m to (first message of inbox whose id is \(handle.mailID))
-                \(action)
+                \(body)
             end tell
             """
     }
+
+    /// Raised by the script itself when every lookup misses, so the reason
+    /// reaching the user is this sentence rather than "-1728".
+    static let notFoundMessage =
+        "Inbox & Chill could not find that message in Mail any more — it may have been moved or deleted."
+
 
     /// Parses the script's output. Returns the items plus whether Mail had
     /// more messages than we asked for — which must reach
@@ -248,6 +309,10 @@ actor AppleMailConnector: Connector {
     static func item(fromRecord record: String) -> RemoteItem? {
         let fields = record.components(separatedBy: fieldSeparator)
         guard fields.count >= 7, let mailID = Int(trim(fields[0])) else { return nil }
+        // Fields 7 and 8 arrived in 0.3.1; tolerate their absence so a queue
+        // written by 0.3.0 still parses.
+        let account = fields.count > 7 ? trim(fields[7]) : ""
+        let mailbox = fields.count > 8 ? trim(fields[8]) : ""
 
         let messageID = trim(fields[1])
         let subject = trim(fields[2])
@@ -258,7 +323,9 @@ actor AppleMailConnector: Connector {
         let handle = MessageHandle(
             mailID: mailID,
             messageID: messageID.isEmpty ? nil : messageID,
-            unflag: isFlagged)
+            unflag: isFlagged,
+            account: account.isEmpty ? nil : account,
+            mailbox: mailbox.isEmpty ? nil : mailbox)
 
         return RemoteItem(
             externalID: messageID.isEmpty ? "mail-id:\(mailID)" : messageID,
@@ -336,6 +403,9 @@ actor AppleMailConnector: Connector {
         case -600, -609:
             return
                 "Mail isn't running, so there's nothing to read. Open Mail and this source fills in on the next refresh."
+        case -1719:
+            return
+                "Mail couldn't find that message where Inbox & Chill last saw it (AppleScript error -1719). It was probably moved or deleted; the row is cleared here either way."
         case -1728:
             return
                 "Mail couldn't return one of the requested properties (AppleScript error -1728). This is usually a message still downloading; it should resolve on the next refresh."
@@ -368,7 +438,14 @@ actor AppleMailConnector: Connector {
                     .executeAndReturnError(&error)
                 if let error {
                     let code = (error[NSAppleScript.errorNumber] as? Int) ?? 0
-                    log.error("Mail script failed: \(code, privacy: .public)")
+                    // The number alone is not actionable — "-1719" cost an
+                    // hour of guessing before the message turned out to say
+                    // "Invalid index", which named the bug outright.
+                    let detail =
+                        (error[NSAppleScript.errorBriefMessage] as? String)
+                        ?? (error[NSAppleScript.errorMessage] as? String) ?? "no message"
+                    log.error(
+                        "Mail script failed: \(code, privacy: .public) — \(detail, privacy: .public)")
                     continuation.resume(
                         throwing: AppleMailError(
                             errorDescription: explain(appleScriptError: code)))
