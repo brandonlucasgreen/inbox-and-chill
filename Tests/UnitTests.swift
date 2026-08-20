@@ -993,6 +993,79 @@ struct JSONPollerConnectorTests {
     }
 }
 
+// MARK: - JSONPollerConnector timestamp parsing
+// (Sources/App/Connectors/JSONPollerConnector.swift)
+//
+// Regression coverage for an undismissable-item bug. `fetch()` used a default
+// `ISO8601DateFormatter()`, whose option set parses whole seconds but returns
+// nil for fractional ones — so any feed with ".789Z" timestamps (Sentry's
+// `lastSeen`, among many) fell through to `.now`. Because this connector
+// declares `.remoteTruth` without `.markDone`, a dismissed item stays in
+// every snapshot, and `Store.resurrectIfNeeded` revives a done item whose
+// `remote.occurredAt > doneAt` — which `.now` always is. The item could not
+// be cleared until it left the feed.
+
+struct JSONPollerTimestampTests {
+    @Test func parsesWholeSecondTimestamps() throws {
+        let date = try #require(
+            JSONPollerConnector.timestamp(from: "2026-08-19T12:34:56Z"))
+        #expect(date.timeIntervalSince1970 == 1_787_142_896)
+    }
+
+    @Test func parsesFractionalSecondTimestamps() throws {
+        // The shape that used to fall through to `.now`.
+        let date = try #require(
+            JSONPollerConnector.timestamp(from: "2026-08-19T12:34:56.789Z"))
+        #expect(abs(date.timeIntervalSince1970 - 1_787_142_896.789) < 0.001)
+    }
+
+    @Test func bothShapesResolveToTheSameSecond() throws {
+        let whole = try #require(
+            JSONPollerConnector.timestamp(from: "2026-08-19T12:34:56Z"))
+        let fractional = try #require(
+            JSONPollerConnector.timestamp(from: "2026-08-19T12:34:56.789Z"))
+        #expect(fractional > whole)
+        #expect(fractional.timeIntervalSince(whole) < 1)
+    }
+
+    @Test func parsesNonZuluOffsets() throws {
+        let offset = try #require(
+            JSONPollerConnector.timestamp(from: "2026-08-19T14:34:56+02:00"))
+        let zulu = try #require(
+            JSONPollerConnector.timestamp(from: "2026-08-19T12:34:56Z"))
+        #expect(offset == zulu)
+    }
+
+    @Test func returnsNilForGarbage() {
+        // Nil is the contract that lets `fetch()` throw a named reason
+        // instead of substituting `.now` (the immortal-item path).
+        let garbage = [
+            "", "not a date", "19/08/2026", "1786797296",
+            "2026-08-19", "2026-13-45T99:99:99Z", "  ",
+        ]
+        for string in garbage {
+            #expect(
+                JSONPollerConnector.timestamp(from: string) == nil,
+                "expected nil for \(string.debugDescription)")
+        }
+    }
+
+    @Test func theTwoFormatterOptionSetsAreMutuallyExclusive() {
+        // The reason two formatters are needed rather than one. If a future
+        // Foundation makes either option set accept both shapes this test
+        // fails loudly, and the helper can collapse to one formatter.
+        let whole = ISO8601DateFormatter()
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        #expect(whole.date(from: "2026-08-19T12:34:56Z") != nil)
+        #expect(whole.date(from: "2026-08-19T12:34:56.789Z") == nil)
+        #expect(fractional.date(from: "2026-08-19T12:34:56Z") == nil)
+        #expect(fractional.date(from: "2026-08-19T12:34:56.789Z") != nil)
+    }
+}
+
+
 // MARK: - Claude Code hook command quoting
 // (Sources/App/Connectors/Local/ClaudeCodeIntegration.swift)
 //
