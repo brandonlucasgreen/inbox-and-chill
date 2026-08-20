@@ -31,14 +31,13 @@ struct TriageTests {
             snapshot: [a], sourceID: "s", sourceKind: "test", remoteTruth: true)
         #expect(r2.clearedRemotely == 1)
 
-        // b reappears → resurrects, and is reported as an arrival so it
-        // banners and journals. An item that had left the queue and is now
-        // back is an arrival from where the user sits; reporting nothing
-        // meant it slid back in silently.
+        // b reappears → resurrects silently. A source without
+        // `.announcesReturn` (every remote one today) treats a return as
+        // routine bookkeeping: back in the queue, no banner, no journal line.
         let r3 = try await store.reconcile(
             snapshot: [a, b], sourceID: "s", sourceKind: "test",
             remoteTruth: true)
-        #expect(r3.inserted.map(\.id) == ["test:b"])
+        #expect(r3.inserted.isEmpty)
         let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
         #expect(counts.total == 2 && counts.highSignal == 1)
     }
@@ -175,10 +174,10 @@ struct TriageTests {
         #expect(counts.total == 1)
     }
 
-    @Test("A resurrection is reported once, not on every later poll")
+    @Test("An announcing source reports a return once, not on every later poll")
     func resurrectionReportsOnce() async throws {
-        // The Claude Code case that motivated this: one row per session means
-        // the second and later "Claude finished" events for a session revive
+        // The Claude Code case that motivated `.announcesReturn`: one row per
+        // session means the second and later "Claude finished" events revive
         // an existing row instead of inserting a new one. Banners key off
         // `inserted`, so without this the very first finish was the only one
         // that ever reached the user.
@@ -189,7 +188,7 @@ struct TriageTests {
             occurredAt: .now.addingTimeInterval(-100))
         _ = try await store.apply(
             event: .upsert([session]), sourceID: "s", sourceKind: "local",
-            remoteTruth: false)
+            remoteTruth: false, announcesReturn: true)
 
         // The user replied: UserPromptSubmit clears the row.
         _ = try await store.apply(
@@ -201,14 +200,39 @@ struct TriageTests {
         session.title = "Claude finished in repo"
         let revived = try await store.apply(
             event: .upsert([session]), sourceID: "s", sourceKind: "local",
-            remoteTruth: false)
+            remoteTruth: false, announcesReturn: true)
         #expect(revived.inserted.map(\.id) == ["local:claude-abc"])
 
         // Still finished, nothing new: an already-live row is not an arrival.
         let again = try await store.apply(
             event: .upsert([session]), sourceID: "s", sourceKind: "local",
-            remoteTruth: false)
+            remoteTruth: false, announcesReturn: true)
         #expect(again.inserted.isEmpty)
+    }
+
+    @Test("Without the capability the same return stays silent")
+    func resurrectionIsSilentByDefault() async throws {
+        // The scope guard. Every remote source is on this path, so a
+        // regression that made returns announce everywhere would show up here
+        // rather than as banner noise on Brandon's machine.
+        let store = try makeStore()
+        var item = RemoteItem(
+            externalID: "issue-1", kind: "error", title: "Boom",
+            occurredAt: .now.addingTimeInterval(-100))
+        _ = try await store.apply(
+            event: .upsert([item]), sourceID: "s", sourceKind: "sentry",
+            remoteTruth: true)
+        try await store.markDone(uid: "sentry:issue-1")
+
+        item.occurredAt = .now
+        let back = try await store.apply(
+            event: .upsert([item]), sourceID: "s", sourceKind: "sentry",
+            remoteTruth: true)
+        #expect(back.inserted.isEmpty)
+
+        // Silent, but genuinely back in the queue — not dropped.
+        let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 1)
     }
 
     @Test("A source that changes an item's kind is believed")

@@ -29,6 +29,20 @@ struct ConnectorCapabilities: OptionSet, Sendable {
     static let remoteTruth = ConnectorCapabilities(rawValue: 1 << 2)
     /// Push connector: delivers events; SyncEngine skips interval polling.
     static let push = ConnectorCapabilities(rawValue: 1 << 3)
+    /// An item this source revives — one that was done and has been spoken
+    /// about again — is announced as a fresh arrival: it banners and lands in
+    /// the journal, instead of quietly reappearing in the queue.
+    ///
+    /// Opt-in per connector rather than the default, because for most sources
+    /// a return is routine bookkeeping and would be noise. It is the *point*
+    /// for `local`: a Claude Code session occupies one long-lived row, so
+    /// every finish after the first revives that row rather than inserting
+    /// one, and without this only the very first time a session waited on you
+    /// would ever reach you. Brandon's call, 2026-08-20 — *"i'd rather keep
+    /// it to specific sources, i want to see how other sources feel first.
+    /// claude code is kind of unique imo"* — so widening this is a decision
+    /// to take with him, not a tidy-up.
+    static let announcesReturn = ConnectorCapabilities(rawValue: 1 << 4)
 }
 
 /// Events a push connector can emit between full snapshots.

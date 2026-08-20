@@ -234,14 +234,27 @@ Three things that look like oversights and are not:
   in ctrl-R) and the Settings row is the better place to say hooks aren't
   landing. A human-typed `inchill notify` still fails loudly.
 
-Two knock-on changes in `Store`, both needed because a row now *lives*:
+Two knock-on changes, both needed because a row now *lives*:
 
-- **`resurrectIfNeeded` returns whether it revived, and a revival is reported
-  in `ReconcileResult.inserted`.** Banners and journal arrivals key off
-  `inserted`, so before this the second and later finishes of a session came
-  back silently — only the first one ever reached the user.
+- **`.announcesReturn`, a new capability, opt-in per connector.** A revived
+  item — done, then spoken about again — is reported in
+  `ReconcileResult.inserted`, which is what banners and journal arrivals key
+  off. `local` declares it and nothing else does: a Claude Code session's
+  second and later finishes revive its row rather than inserting one, so
+  without this only the first time a session ever waited on you would reach
+  you. Threaded from capabilities exactly like `remoteTruth`
+  (`SyncEngine.register` → `Store.reconcile`/`apply`).
+
+  **Deliberately not the default.** Brandon's call, 2026-08-20: *"i'd rather
+  keep it to specific sources, i want to see how other sources feel first.
+  claude code is kind of unique imo"* — the change was originally Store-wide,
+  which would have made Sentry banner every time a "done means seen" issue's
+  `lastSeen` moved. Widening it is a decision to take with him. The
+  regression guard is `resurrectionIsSilentByDefault` in `Tests/TriageTests.swift`.
 - **`update()` refreshes `kind`.** It was frozen at insert, so a row born
-  `claude_done` still claimed to be one after becoming `claude_waiting`.
+  `claude_done` still claimed to be one after becoming `claude_waiting`. This
+  one *is* global — the source is authoritative about what an item is, and a
+  refreshed `kind` produces no user-facing noise.
 
 Adding hooks to an existing install is why `ClaudeCodeIntegration` reports
 three states rather than a Bool: `.outdated` (our hooks are there but not the

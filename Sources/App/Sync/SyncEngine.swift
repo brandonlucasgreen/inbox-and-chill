@@ -15,6 +15,7 @@ actor SyncEngine {
     private let store: Store
     private var connectors: [String: any Connector] = [:]
     private var remoteTruth: [String: Bool] = [:]
+    private var announcesReturn: [String: Bool] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
     private var maintenanceTask: Task<Void, Never>?
     private let onChange: @Sendable (QueueChange) -> Void
@@ -30,6 +31,7 @@ actor SyncEngine {
         connectors[id] = connector
         let caps = connector.capabilities
         remoteTruth[id] = caps.contains(.remoteTruth)
+        announcesReturn[id] = caps.contains(.announcesReturn)
         tasks[id] = Task { [weak self] in
             await self?.drive(connector, capabilities: caps)
         }
@@ -116,7 +118,8 @@ actor SyncEngine {
             let result = try await store.reconcile(
                 snapshot: snapshot, sourceID: sourceID,
                 sourceKind: connector.sourceKind,
-                remoteTruth: (remoteTruth[sourceID] ?? false) && complete)
+                remoteTruth: (remoteTruth[sourceID] ?? false) && complete,
+                announcesReturn: announcesReturn[sourceID] ?? false)
             onChange(QueueChange(
                 sourceID: sourceID, inserted: result.inserted,
                 snoozeWakes: [], status: .ok(.now)))
@@ -137,7 +140,8 @@ actor SyncEngine {
             let result = try await store.apply(
                 event: event, sourceID: sourceID,
                 sourceKind: connector.sourceKind,
-                remoteTruth: remoteTruth[sourceID] ?? false)
+                remoteTruth: remoteTruth[sourceID] ?? false,
+                announcesReturn: announcesReturn[sourceID] ?? false)
             onChange(QueueChange(
                 sourceID: sourceID, inserted: result.inserted,
                 snoozeWakes: [], status: .ok(.now)))

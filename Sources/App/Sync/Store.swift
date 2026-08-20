@@ -27,7 +27,7 @@ actor Store {
     /// (hybrid rule) — unless pinned (pins are immortal, decision §2.1.6).
     func reconcile(
         snapshot: [RemoteItem], sourceID: String, sourceKind: String,
-        remoteTruth: Bool
+        remoteTruth: Bool, announcesReturn: Bool = false
     ) throws -> ReconcileResult {
         var result = ReconcileResult()
         let existing = try items(sourceID: sourceID)
@@ -39,7 +39,7 @@ actor Store {
             if let item = existing.first(where: { $0.uid == uid }) {
                 let revived = resurrectIfNeeded(item, from: remote)
                 update(item, from: remote)
-                if revived { result.inserted.append(summary(item)) }
+                if revived, announcesReturn { result.inserted.append(summary(item)) }
             } else {
                 let item = Item(
                     uid: uid, sourceID: sourceID, sourceKind: sourceKind,
@@ -69,13 +69,13 @@ actor Store {
     /// Apply an incremental push event.
     func apply(
         event: ConnectorEvent, sourceID: String, sourceKind: String,
-        remoteTruth: Bool
+        remoteTruth: Bool, announcesReturn: Bool = false
     ) throws -> ReconcileResult {
         switch event {
         case .snapshot(let items):
             return try reconcile(
                 snapshot: items, sourceID: sourceID, sourceKind: sourceKind,
-                remoteTruth: remoteTruth)
+                remoteTruth: remoteTruth, announcesReturn: announcesReturn)
         case .upsert(let remotes):
             var result = ReconcileResult()
             let existing = try items(sourceID: sourceID)
@@ -84,7 +84,7 @@ actor Store {
                 if let item = existing.first(where: { $0.uid == uid }) {
                     let revived = resurrectIfNeeded(item, from: remote)
                     update(item, from: remote)
-                    if revived { result.inserted.append(summary(item)) }
+                    if revived, announcesReturn { result.inserted.append(summary(item)) }
                 } else {
                     let item = Item(
                         uid: uid, sourceID: sourceID, sourceKind: sourceKind,
@@ -258,15 +258,17 @@ actor Store {
     /// Revives a done item the source has spoken about again, and reports
     /// whether it actually did.
     ///
-    /// The Bool is what makes a revival *visible*. Banners and journal
-    /// arrivals both key off `ReconcileResult.inserted`, so before this a
-    /// resurrected item slid back into the queue with no banner and no
-    /// journal line — silent, which is this project's recurring bug class
-    /// (CLAUDE.md rule 5). From the user's side an item that had left the
-    /// queue and is now back *is* an arrival, so it is reported as one.
+    /// The Bool is what lets a revival be made *visible*. Banners and journal
+    /// arrivals both key off `ReconcileResult.inserted`, and a resurrected
+    /// item otherwise slides back into the queue with no banner and no
+    /// journal line. Whether that silence is a bug depends on the source, so
+    /// the caller decides via `.announcesReturn`: for `local` a revival is
+    /// the normal way a Claude Code session says it is waiting again and must
+    /// be announced, while for a polled remote source it is routine
+    /// bookkeeping and announcing it would be noise.
     ///
-    /// It fires at most once per revival: the first call clears `doneAt`, so
-    /// subsequent polls take the `guard` and report nothing.
+    /// It reports at most once per revival either way: the first call clears
+    /// `doneAt`, so subsequent polls take the `guard` and report nothing.
     @discardableResult
     private func resurrectIfNeeded(_ item: Item, from remote: RemoteItem) -> Bool {
         guard let doneAt = item.doneAt else { return false }

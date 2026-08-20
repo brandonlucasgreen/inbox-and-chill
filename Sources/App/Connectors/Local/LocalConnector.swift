@@ -8,10 +8,15 @@ import Foundation
 /// read-state to diff against. A local item lives until the user does it, or
 /// until an explicit `/clear` post says otherwise (see the Claude Code
 /// waiting→done convention in `ClaudeCodeIntegration.swift`).
+///
+/// `.announcesReturn` because this source's rows are long-lived by design: a
+/// Claude Code session is one row for its whole life, so after the first
+/// event every `/notify` revives that row instead of inserting a new one.
+/// Without the capability only a session's *first* wait would ever banner.
 actor LocalConnector: Connector {
     nonisolated let sourceID: String
     nonisolated let sourceKind = "local"
-    nonisolated let capabilities: ConnectorCapabilities = [.push]
+    nonisolated let capabilities: ConnectorCapabilities = [.push, .announcesReturn]
 
     init(sourceID: String = "local") {
         self.sourceID = sourceID
