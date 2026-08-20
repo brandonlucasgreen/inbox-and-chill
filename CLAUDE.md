@@ -13,6 +13,8 @@ the things that have actually bitten, and the conventions to keep.
 xcodegen generate                                        # after editing project.yml
 xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill -configuration Debug test
 scripts/install-local.sh                                 # Release → /Applications → launch
+scripts/release.sh --dry-run                             # show what a release would do
+scripts/release.sh                                       # notarize + tag + GitHub release
 ```
 
 Tests are Swift Testing (`@Test` / `#expect`), in `Tests/`.
@@ -353,7 +355,9 @@ re-queues it forever.
 
 The app needs **no App ID registration and no provisioning profile**. Those only
 authorize entitlements Apple must bless — iCloud, App Groups, Push, Keychain
-Sharing — and this app uses none. It is unsandboxed, so network access, the
+Sharing — and this app uses none. (**True for Developer ID only.** The Mac App
+Store requires all three — App ID, embedded profile, Apple Distribution cert —
+plus a mandatory App Sandbox; that route was audited and declined, PLAN §2.1.8.) It is unsandboxed, so network access, the
 loopback listener and the Keychain all work without entitlements.
 
 Release ships **exactly one entitlement** — `com.apple.security.automation.apple-events`
@@ -384,6 +388,24 @@ not scriptable. `scripts/notarize.sh --preflight-only` checks a build is
 submittable without any credentials at all.
 `spctl -a` reporting "rejected — Unnotarized Developer ID" is expected until
 then and is harmless locally, since Gatekeeper only evaluates quarantined apps.
+
+**`scripts/release.sh` is the layer above it**: preconditions (on `main`, clean
+tree, in sync with `origin`, tag and release not already taken) → `notarize.sh`
+→ annotated tag → `gh release create` with the zip attached. Version comes from
+`MARKETING_VERSION` in `project.yml`, the single source of truth — bump and
+commit it before running.
+
+It **always rebuilds and re-notarizes** rather than attaching whatever sits in
+`dist/`. That is the whole point: before it there were no tags and no releases,
+so nothing recorded which source a zip came from, and `dist/` was holding a
+0.3.1 zip that predated two commits on `main`. A tag whose artifact was built
+from different code is worse than no tag.
+
+**The repo is private, so releases are visible only to collaborators** — a
+stranger gets a 404, not a download. That is also why there is no Sparkle
+auto-update: an appcast feed has to be fetchable without auth, so in-app
+updates need the repo (or at least the release assets) to be public first.
+That is a decision for Brandon, not a missing feature.
 
 **That last point cuts both ways: `spctl` on a copy you built is not a test.**
 Gatekeeper skips unquarantined apps entirely, so a local "accepted" says

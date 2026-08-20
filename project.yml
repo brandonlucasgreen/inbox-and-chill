@@ -84,8 +84,8 @@ targets:
         PRODUCT_NAME: Inbox & Chill
         PRODUCT_MODULE_NAME: InboxAndChill
         GENERATE_INFOPLIST_FILE: true
-        MARKETING_VERSION: "0.3.1"
-        CURRENT_PROJECT_VERSION: "4"
+        MARKETING_VERSION: "0.3.2"
+        CURRENT_PROJECT_VERSION: "5"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_LSUIElement: true
         INFOPLIST_KEY_CFBundleDisplayName: Inbox & Chill

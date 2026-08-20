@@ -22,7 +22,7 @@ To-dos and "things awaiting me" live in at least seven places: Linear inbox, Sla
 4. **App notifications**: silent by default; per-source opt-in banners; Claude/terminal sources default on; Focus modes respected.
 5. **Snooze**: write-through for Linear (real remote snooze), local for the rest, identical UI; snoozed items visible in a collapsed section; a waking item always banners (snoozing is consent to be interrupted). *Amendment: under a Focus mode, wake banners defer like any notification — honoring "always" literally would require the time-sensitive entitlement; politeness wins.*
 6. **Done items archive for 90 days** (searchable, ⌘Z undo-done), then purge. **Pin (⌘P)** exempts an item from *all* auto-clears, done, and purge — pinned section at top of panel, leaves only by unpinning.
-7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store at most a later degraded fork. Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
+7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store **audited and declined 2026-08-20 — see §2.1.8**. Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
 8. **Cloudflare relay deferred; Notion connector demoted to build-on-demand** (Notion's tenure in the stack is itself uncertain). v1 is fully self-contained — zero infrastructure.
 9. **Slack save emoji**: configurable, default 📌 `:pushpin:`. Slack app created + install attempted immediately.
 10. **Naming**: app **Inbox & Chill**, CLI **`inchill`**, bundle ID **`lol.bgreen.inboxandchill`**.
@@ -35,6 +35,53 @@ To-dos and "things awaiting me" live in at least seven places: Linear inbox, Sla
 **Shape**: utility / menu bar app, backed by a lightweight shoebox (a local store of notification items). Closest kin: Reminders MenuBar, Fantastical's menu bar mode, CodeEdit's… no — closest kin is actually **GitHub's old Trailer app** and **Mailplane-style unified badge counts**, but done as a first-class 2026 SwiftUI app.
 
 **Core objects**:
+### 2.1.8 Mac App Store — audited 2026-08-20, declined
+
+Brandon asked whether MAS was viable. It was tested, not reasoned about: a
+sandboxed variant was built (`CODE_SIGN_ENTITLEMENTS` override, `app-sandbox` +
+`network.client`/`network.server` + `automation.apple-events` +
+`files.user-selected.read-write`), launched, and observed.
+
+**What works.** The app builds, launches and keeps its localhost architecture:
+`NWListener` binds fine under `com.apple.security.network.server`. The embedded
+`inchill` is *not* sandboxed, so Claude Code can still execute it.
+
+**What breaks, all verified:**
+
+1. **The `inchill` handshake.** `URL.applicationSupportDirectory` redirects into
+   the container — `local-api.json` was written to
+   `~/Library/Containers/lol.bgreen.inboxandchill/Data/…` while the CLI reads
+   `~/Library/Application Support/…`. Every hook fails. *Fixable*: same-user
+   containers are `drwx------` and readable, so the CLI can try the container
+   path first.
+2. **`~/.claude/settings.json`.** Outside the container: needs a folder picker
+   plus a persisted security-scoped bookmark, on a hidden directory, and the
+   *folder* rather than the file because backups are written beside it. The
+   one-click integration becomes a picker dance.
+3. **The journal.** `{{YYYY}}` tokens resolve to a different file daily, so a
+   file bookmark cannot work — it needs a folder bookmark. (The Obsidian
+   iCloud vault was denied even *un*sandboxed, confirming the existing Full
+   Disk Access requirement.)
+
+**Policy risk that cannot be tested locally:** Apple Mail and the terminal-tab
+focus both need `com.apple.security.automation.apple-events`, which MAS
+permits — but "reads your mail" and "sends Apple events to arbitrary
+terminals" draw review scrutiny, and guideline 2.4.5(i) is precisely about not
+writing outside your container, which the Claude Code integration does by
+design.
+
+**Also required, and absent:** MAS needs an App ID, an embedded provisioning
+profile and an Apple Distribution certificate. He holds Developer ID and Apple
+Development only. And a sandboxed app gets a container-scoped keychain, so
+every token would need re-pasting.
+
+**Verdict — declined.** Technically buildable only as a degraded fork, and the
+Claude Code integration is the most exposed feature. Developer ID +
+notarization already works and costs no review latency. **Do not re-open this
+without new information**; the reasoning is the evidence above, not a
+preference. His call, given the audit: skip MAS, spend the effort on the
+GitHub release path instead.
+
 - **Item** — one actionable notification (a Slack mention, a Linear inbox entry, a PR review request, a Claude-waiting event). Can be: opened (deep link), selected, copied (URL + title), marked done (with write-through + ⌘Z undo), snoozed, **pinned**, archived, filtered, grouped.
 - **Source** — a configured connection (Slack workspace, Linear org, GitHub account, webhook endpoint). Can be: added, paused, removed, reordered, badge-toggled.
 
@@ -358,7 +405,7 @@ Unchanged caveat: an integration sees only pages explicitly shared with it, so c
 - **M4 — Local sources**: localhost listener + `inchill` CLI + one-click Claude Code hook setup (§6.8); generic JSON poller UI.
 - **M5 — Mac-arsed pass**: main triage window (sortable table, multi-select), drag-out & rich copy, App Intents/Shortcuts ("Get my queue", "Snooze item"), launch-at-login, state restoration audit, full Mac behaviour test plan (menus, VoiceOver, light/dark, multi-display); Developer ID signing + notarization pipeline for the eventual GitHub release.
 - **M6 — Sentry + Apple Mail** (2026-08-19): the two sources Brandon prioritised after the §6.10–6.15 exploration. Sentry is the clean REST citizen; Apple Mail is the one that also answers Gmail.
-- **Backlog (build on demand)**: Notion poll-half (§6.14), Apple Reminders/EventKit and Calendar (§6.6/§6.15), Stripe (§6.15), Cloudflare relay + automation bridges (§4.4/§6.7), App Store fork investigation. **Blocked on an account to test against, not on code**: PagerDuty, Jira, Zendesk, Intercom (§6.15).
+- **Backlog (build on demand)**: Notion poll-half (§6.14), Apple Reminders/EventKit and Calendar (§6.6/§6.15), Stripe (§6.15), Cloudflare relay + automation bridges (§4.4/§6.7). **Blocked on an account to test against, not on code**: PagerDuty, Jira, Zendesk, Intercom (§6.15).
 
 ## 8. Risks & open questions
 
