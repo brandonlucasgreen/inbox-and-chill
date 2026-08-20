@@ -13,6 +13,29 @@ actor JSONPollerConnector: Connector {
     private let url: URL?
     private let mapping: [String: String]
 
+    // Two formatters, because the option sets are mutually exclusive:
+    // the whole-second one returns nil for "2026-08-19T12:34:56.789Z" and
+    // the fractional one returns nil for "2026-08-19T12:34:56Z".
+    // ISO8601DateFormatter is documented thread-safe; it just lacks a
+    // Sendable annotation. Mirrors LinearConnector.parseISO8601.
+    private nonisolated(unsafe) static let iso8601Whole: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    private nonisolated(unsafe) static let iso8601Fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    /// Both ISO-8601 shapes a feed may send, whole seconds first (the more
+    /// common). `nil` means neither matched — callers must **not** substitute
+    /// `.now`; see the throw in `fetch()` for why.
+    nonisolated static func timestamp(from string: String) -> Date? {
+        iso8601Whole.date(from: string) ?? iso8601Fractional.date(from: string)
+    }
+
     init(sourceID: String, urlString: String, mapping: String) {
         self.sourceID = sourceID
         self.url = URL(string: urlString)
@@ -52,8 +75,7 @@ actor JSONPollerConnector: Connector {
             throw ConnectorError("Feed is not a JSON array (or {items: []})")
         }
 
-        let iso = ISO8601DateFormatter()
-        return array.compactMap { obj in
+        return try array.compactMap { obj in
             func str(_ field: String) -> String? {
                 guard let key = mapping[field] else { return nil }
                 if let s = obj[key] as? String { return s }
@@ -63,10 +85,32 @@ actor JSONPollerConnector: Connector {
             guard let id = str("id") ?? str("url"),
                 let title = str("title")
             else { return nil }
-            let date = str("time").flatMap { iso.date(from: $0) } ?? .now
+            // An unparseable timestamp is surfaced, not swallowed (rule 4).
+            // `.now` is the one value that must never be substituted here:
+            // this connector has `.remoteTruth` but not `.markDone`, so a
+            // dismissed item stays in every snapshot, and a fresh `.now` is
+            // always later than `doneAt` — `Store.resurrectIfNeeded` revives
+            // it on the very next poll. The item becomes undismissable.
+            // Failing the whole cycle with a named reason is the deliberate
+            // trade: a mapping is per-feed, so a parse failure is nearly
+            // always the mapping rather than one odd row, and a visible
+            // error beats a queue the user cannot clear.
+            var occurredAt = Date.now
+            if let raw = str("time") {
+                guard let parsed = Self.timestamp(from: raw) else {
+                    throw ConnectorError(
+                        """
+                        Feed field "\(mapping["time"] ?? "time")" is not an \
+                        ISO-8601 timestamp: "\(raw.prefix(60))". Point `time=` \
+                        at a field formatted like "2026-08-19T12:34:56Z" or \
+                        "2026-08-19T12:34:56.789Z".
+                        """)
+                }
+                occurredAt = parsed
+            }
             return RemoteItem(
                 externalID: id, kind: "custom", title: title,
-                snippet: str("body"), url: str("url"), occurredAt: date,
+                snippet: str("body"), url: str("url"), occurredAt: occurredAt,
                 highSignal: false)
         }
     }
