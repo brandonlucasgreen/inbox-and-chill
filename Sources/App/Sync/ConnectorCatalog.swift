@@ -57,10 +57,10 @@ enum ConnectorCatalog {
                 .init(
                     key: "apiKey", label: "Personal API Key", isSecret: true,
                     placeholder: "lin_api_…",
-                    help: "Linear → Settings → API → Personal API keys")
+                    help: "Linear → Settings → Security & Access → Personal API keys")
             ],
             setupSteps: [
-                "Open Linear → Settings → API.",
+                "Open Linear → Settings → Security & Access.",
                 "Under **Personal API keys**, create a key (`lin_api_…`).",
                 "Paste it below.",
             ],

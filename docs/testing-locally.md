@@ -133,7 +133,7 @@ echo '{"session_id":"demo","cwd":"'$PWD'"}' | inchill claude-hook stop
 
 Fastest first:
 
-1. **Linear** (~2 min): linear.app → Settings → API → personal key. Items
+1. **Linear** (~2 min): linear.app → Settings → Security & Access → personal key. Items
    mirror your Linear inbox; mark-done archives there; snoozes sync.
 2. **GitHub** (~3 min): classic PAT with `notifications` scope
    (github.com/settings/tokens — fine-grained tokens don't work), authorize

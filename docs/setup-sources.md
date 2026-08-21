@@ -6,7 +6,7 @@ Each source is added from Settings → Sources → Add. This walks through the e
 
 **Field:** Personal API Key
 
-1. In Linear, go to **Settings → API**.
+1. In Linear, go to **Settings → Security & Access**.
 2. Under **Personal API keys**, create a new key (`lin_api_…`).
 3. Paste it into the source's **Personal API Key** field.
 
