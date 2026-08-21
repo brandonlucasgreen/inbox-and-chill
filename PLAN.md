@@ -296,6 +296,76 @@ A central **SyncEngine** (actor) schedules fetches per-connector with per-source
 - Store is a *cache with local annotations* — the services remain the source of truth for read state where they support it; local-only state (snooze, "done locally") layers on top.
 - **Keychain** for every token/secret. Nothing sensitive in UserDefaults or on disk.
 
+#### 4.3.1 Where state lives, and which of it is a *permission* (audited 2026-08-21)
+
+Asked while building the first-run reset script: is any of this nonstandard,
+and should tokens be in iCloud Keychain instead? Answers, because the question
+recurs and the first half of it rests on a conflation.
+
+**Five stores, but only one permission.** A fresh install lacks five things and
+they are not equivalent:
+
+| State | Where | Permission |
+|---|---|---|
+| Item store, `local-api.json` | `~/Library/Application Support/InboxAndChill/` | none, ever — the app's own directory, sandboxed or not |
+| Prefs (journal, badge, hotkey, Sparkle) | `UserDefaults` → `~/Library/Preferences/lol.bgreen.inboxandchill.plist` | **none** |
+| Source tokens | Keychain, service `lol.bgreen.inboxandchill` | no TCC prompt, but a signature-bound ACL — see below |
+| Automation (Apple events) | TCC | **yes — the only prompt in this list** |
+| Notification (banner) permission | TCC / Notification Center | yes, and **unresettable** — no supported API |
+
+So first run has two real prompts (Automation for Mail, notifications for
+banners) plus Gatekeeper before either. Everything else is files.
+`scripts/reset-first-run.sh` clears the resettable four and says plainly that
+it cannot do the fifth. Nothing here is unusual for a menu-bar app holding API
+tokens; the unusual thing is *how many* tokens there are to lose, which is the
+§2.1.11 onboarding problem, not a storage problem.
+
+**iCloud Keychain — declined, for three reasons.**
+
+1. **It needs the App ID and provisioning profile this app deliberately does
+   not have.** Syncing requires the data-protection keychain
+   (`kSecUseDataProtectionKeychain: true`) plus `kSecAttrSynchronizable`, and
+   the data-protection keychain resolves items through
+   `application-identifier` / `keychain-access-groups` entitlements — which
+   need a registered App ID and an embedded profile. Needing neither is a
+   load-bearing property of the Developer ID route (see the Distribution notes
+   in CLAUDE.md). This would take on exactly the administrative cost §2.1.8
+   counted against MAS, for a feature nobody asked for.
+2. **The data-protection keychain has already bitten this project, from the
+   other side.** The notarytool credential investigations: Local Items is a
+   data-protection keychain, it **locks when the Mac sleeps, a DarkWake does
+   not unlock it**, and `security` cannot enumerate it. Two separate
+   investigations went into that. Tokens there would import the same failure —
+   a connector polling during a dark-wake window fails to read its token and
+   the source goes red for reasons nobody can reproduce. The file-based login
+   keychain reported `no-timeout` at the same moment the other was failing.
+3. **`kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is right for this data.** A
+   Slack user token synced to every Mac on the account widens the blast radius
+   of one compromised machine, in exchange for not re-pasting on a second Mac.
+
+The honest counter-argument: the person sync would help is a **two-Mac buyer**,
+which is the §2.1.11 audience. But the fix there is *fewer credentials* — the
+zero-setup source work — not syncing more of them. Same conclusion §2.1.10
+reached by a different road, so revisit this only if that work lands and
+two-Mac setup is still the complaint.
+
+**The Keychain risk that is real, and is not sync.** The file-based keychain
+binds an item's ACL to the **code identity** of the build that created it,
+which is why `project.yml` signs with real Developer ID even for Debug: a
+signed build's requirement is bundle ID plus team, which every later signed
+build satisfies, while an ad-hoc build has no certificate to form that
+requirement from and gets pinned to the binary hash instead. So an *unsigned*
+build re-prompts on every rebuild with *"Inbox & Chill wants to use your
+confidential information stored in … in your keychain"* and a password field.
+`Keychain.swift`'s read-through cache is what holds that to once per launch
+rather than once per poll.
+
+**Already documented — README's Signing section covers the mechanism and gives
+the `codesign -d -r-` check.** Recorded here only because it is the answer to
+"is the Keychain choice risky?", and the answer is: yes, but in a way that
+affects people building from source unsigned, not the signed builds anyone
+downloads, and not in a way iCloud Keychain would fix.
+
 ### 4.4 Custom sources (API/webhook)
 
 Two complementary mechanisms:
