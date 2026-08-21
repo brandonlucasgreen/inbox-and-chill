@@ -24,3 +24,25 @@ carries the exemption; it cannot match anything but this key's own line.
 regexTarget = "line"
 # 32 raw bytes -> 43 base64 characters plus one '=' of padding, so 44 total.
 regexes = ['''SUPublicEDKey:\s*[A-Za-z0-9+/]{43}=''']
+
+[[allowlists]]
+description = """
+Two test fixtures in commits that are already history. Both were credential-\
+SHAPED rather than credentials in use — a Slack token that was always \
+synthetic, and an ntfy token of uncertain provenance — and both were replaced \
+with plainly fake values in HEAD.
+
+Purging them was considered and declined on 2026-08-21. A force-push does not \
+erase anything from GitHub: old objects stay reachable by direct SHA and merged \
+PR refs keep their commits, so rewriting 67 commits would have bought \
+obscurity, not deletion. The ntfy token was rotated instead, which removes the \
+value of finding it. That is the real fix; this is bookkeeping.
+
+Scoped to these two commit hashes, so any NEW secret in this file is still \
+reported. If the history is ever rewritten, these hashes change and the \
+entries simply stop matching — which is the right failure direction.
+"""
+commits = [
+  "aa92a8adffcd1732effc36212da9dd921c0629c5",  # Slack: reject the wrong token kind with an explanation
+  "8d7c33dd558a9cb431e73428ca38bf298d10c6fb",  # ntfy: add username/password auth, and surface auth failures
+]
