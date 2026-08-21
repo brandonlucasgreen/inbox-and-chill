@@ -13,6 +13,7 @@ the things that have actually bitten, and the conventions to keep.
 xcodegen generate                                        # after editing project.yml
 xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill -configuration Debug test
 scripts/install-local.sh                                 # Release → /Applications → launch
+scripts/reset-first-run.sh --dry-run                     # back to a fresh install (see below)
 scripts/release.sh --dry-run                             # show what a release would do
 scripts/release.sh                                       # notarize + tag + release + appcast
 scripts/sparkle-keys.sh                                  # ONE TIME: create the update-signing key

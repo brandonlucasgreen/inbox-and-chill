@@ -625,6 +625,17 @@ per target**; a background timer was spending it.
   button, for a source status message with no button in reach;
   `notRequestedMessage` does not, because in the UI the button is beside it.
 
+**Testing it needs `scripts/reset-first-run.sh`.** The interesting half of this
+flow is a permission state, and macOS grants the Automation prompt for an
+app→target pair exactly once — deleting the app does not bring it back, because
+TCC keys on the code signature and `install-local.sh` signs with a stable
+Developer ID precisely so permissions *stick*. The script resets TCC, the store,
+prefs and the Keychain, and prints the four states to walk (not asked, granted,
+declined, Mail closed) plus the regression that matters most: add a Mail source,
+leave it two minutes, and confirm **no dialog appears on its own**. It cannot
+reset notification permission — there is no supported API for that — so banners
+have to be tested on a Mac that has never run the app.
+
 The claims in the preflight copy are assertions about
 `AppleMailConnector.fetchScript` and `markDoneScript` — subject/sender/date and
 never the body, read state and a flag only if a flag queued the row, no network
