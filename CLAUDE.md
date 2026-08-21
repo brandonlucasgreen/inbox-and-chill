@@ -394,9 +394,23 @@ separate investigations:
   `com.apple.gke.notary.tool.saved-creds.<profile>`. Searching service
   `com.apple.gke.notary.tool` or account `<profile>` misses it even in the
   right keychain.
-- **notarytool prints the same message when it merely cannot read the item**,
-  and Local Items unlocks independently of the login keychain, so the failure
-  is often transient.
+- **notarytool prints the same message when it merely cannot read the item.**
+
+**The trigger, identified 2026-08-21: sleep.** The Local Items keychain locks
+when the Mac sleeps, and a **DarkWake does not unlock it** — that needs the
+user's login credential. So a non-interactive read during a dark-wake window
+fails, and the same command succeeds again once someone touches the machine.
+Caught by lining the two up: reads succeeded at 19:58 local, failed at 22:45,
+and `pmset -g log` showed `Entering Sleep state 'Maintenance Sleep'` at
+22:32/22:36 with a `DarkWake from Deep Idle` at 22:44:45. On battery this
+happens every few minutes while idle, which is why the credentials seem to come
+and go on their own. Nothing is being deleted; **an unattended release run is
+simply unreliable.**
+
+The file-based login keychain is *not* affected — `security show-keychain-info`
+reported `no-timeout` (unlocked) at the same moment the Local Items read was
+failing. That is the argument for pinning the profile there with `--keychain`:
+it survives sleep, so a release can run unattended.
 
 The only reliable check is notarytool itself:
 

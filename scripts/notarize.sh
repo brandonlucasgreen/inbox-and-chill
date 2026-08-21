@@ -73,7 +73,11 @@ lives in the iCloud "Local Items" keychain, which:
 
   - the \`security\` command cannot list at all, so "security find-generic-password
     finds nothing" is NOT evidence of deletion, and
-  - can be transiently unavailable, answering "not found".
+  - locks when the Mac SLEEPS, and a DarkWake does not unlock it, so an
+    unattended run answers "not found" through no fault of yours.
+
+If the Mac has been idle, wake it and run this again — that alone usually
+fixes it.
 
 Check what is really there before re-creating anything:
 
