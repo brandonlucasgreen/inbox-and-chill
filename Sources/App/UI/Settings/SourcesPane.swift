@@ -26,6 +26,9 @@ struct SourcesPane: View {
             BannerPermissionNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            MailPermissionNotice()
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             HStack {
                 Button { isAdding = true } label: {
                     Label("Add Source", systemImage: "plus")

@@ -83,6 +83,23 @@ actor AppleMailConnector: Connector {
             )
         }
 
+        // Ask macOS before sending the event, never after.
+        //
+        // The non-prompting check is silent and cheap, and it buys two
+        // things. It turns every permission state into a named reason on the
+        // *first* poll rather than a -1743 the user only sees if they go
+        // looking. And it stops a background timer from being what raises
+        // macOS's Automation dialog: `tell application "Mail"` launches Mail
+        // and can trigger the prompt, so a poll that runs before the user has
+        // ever been asked spends the one prompt macOS gives, unattributed, up
+        // to 60s after they last touched the app. `MailAutomation.resolve`
+        // with `prompting: false` cannot show a dialog; only the button in
+        // Settings passes `true`.
+        let permission = await MailAutomation.resolve(prompting: false)
+        if let refusal = permission.fetchRefusal {
+            throw AppleMailError(errorDescription: refusal)
+        }
+
         let output = try await Self.runScript(Self.fetchScript(scope: scope))
         let (items, truncated) = Self.items(fromScriptOutput: output)
         snapshotComplete = !truncated

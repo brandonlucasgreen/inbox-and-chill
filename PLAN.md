@@ -22,7 +22,7 @@ To-dos and "things awaiting me" live in at least seven places: Linear inbox, Sla
 4. **App notifications**: silent by default; per-source opt-in banners; Claude/terminal sources default on; Focus modes respected.
 5. **Snooze**: write-through for Linear (real remote snooze), local for the rest, identical UI; snoozed items visible in a collapsed section; a waking item always banners (snoozing is consent to be interrupted). *Amendment: under a Focus mode, wake banners defer like any notification — honoring "always" literally would require the time-sensitive entitlement; politeness wins.*
 6. **Done items archive for 90 days** (searchable, ⌘Z undo-done), then purge. **Pin (⌘P)** exempts an item from *all* auto-clears, done, and purge — pinned section at top of panel, leaves only by unpinning.
-7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store **audited and declined 2026-08-20 — see §2.1.8**. Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
+7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store **audited and declined 2026-08-20 — see §2.1.8**, **re-audited 2026-08-21 against a pared-down variant — see §2.1.10** (the sandbox objection does not survive cutting the CLI/Mail/journal; the case against MAS is now onboarding and differentiation). Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
 8. **Cloudflare relay deferred; Notion connector demoted to build-on-demand** (Notion's tenure in the stack is itself uncertain). v1 is fully self-contained — zero infrastructure.
 9. **Slack save emoji**: configurable, default 📌 `:pushpin:`. Slack app created + install attempted immediately.
 10. **Naming**: app **Inbox & Chill**, CLI **`inchill`**, bundle ID **`lol.bgreen.inboxandchill`**.
@@ -124,6 +124,145 @@ build is the only signed one, because it isn't.
 flip the repo public, and — if he still wants the paid path — create the Lemon
 Squeezy product. None is scriptable.
 
+### 2.1.10 Mac App Store, re-opened 2026-08-21 — a pared-down MAS variant
+
+§2.1.8 said "do not re-open without new information". This is the new
+information: Brandon proposed **cutting** the three features that audit found
+broken — the `inchill` CLI, the Apple Mail source, and the journal — and
+shipping a reduced build to MAS. That invalidates §2.1.8's evidence rather
+than contradicting it: all three of its verified breakages live in code the
+proposal deletes.
+
+**The sandbox objection does not survive the cut.** The remaining source set
+(Linear, GitHub, Slack, ntfy, Sentry, Custom JSON) was swept for
+sandbox-hostile API and there is none. What is left uses `URLSession` and
+WebSockets, the Keychain, SwiftData under Application Support, `NSPasteboard`,
+`SMAppService`, `UserNotifications`, App Intents, `NSWorkspace.open` and
+KeyboardShortcuts' Carbon hotkey — every one of which is sandbox-legal and all
+but the first need no entitlement. **The variant needs exactly one:
+`com.apple.security.network.client`.** No `network.server` (that was the local
+listener alone), no `apple-events`, no security-scoped bookmarks. Container
+redirection stops mattering once nothing outside the container reads the store,
+and a container-scoped Keychain is only a migration problem, which a separate
+product has no migration to do.
+
+**And it is a variant, not a fork.** The coupling was measured, not estimated.
+Whole directories leave cleanly — `Connectors/Mail/`, `Connectors/Local/`,
+`Journal/`, `Sources/CLI/`, `Support/UpdateController.swift` — and the shared
+code touches them in eight seams: two `AppState.makeConnector` cases, two
+`ConnectorCatalog.all` entries, `SettingsView`'s `ClaudeCodeIntegrationRow` and
+its journal section, ~53 lines of journal prefs and a **single**
+`JournalWriter.shared.record` call in `AppState`, the `ClaudeSessionOpener`
+call, `PanelView`'s automation-settings link, and Sparkle's four references.
+XcodeGen already builds from directory lists, so a second target with a
+different `sources:` plus `#if MAS` on those seams is the whole mechanism.
+This matters because a fork is what would make the idea bad, and this is not one.
+
+**So the blockers are no longer technical. Two remain, and both are worse.**
+
+1. **Onboarding, which collides with Guideline 2.1.** Every surviving source is
+   BYO-credential, and the `authNote` strings record *why* each one has to be:
+   Slack needs the user to register their own app and paste a
+   twelve-scope manifest, GitHub needs a classic PAT (fine-grained are
+   rejected outright), Linear a personal API key, Sentry an org slug and token.
+   That is self-hosted-developer-tool onboarding sold to someone who has just
+   paid at a checkout — a refund engine. It also has to survive App Review,
+   which needs working credentials to see any feature at all; without them the
+   app is an empty window. Supplying a live test workspace, PAT and Linear org
+   is possible once and required again on every resubmission.
+2. **The variant is the app minus its reason to exist.** The Claude Code
+   integration is the differentiator — one row per session, `UserPromptSubmit`
+   as the load-bearing clear, `.announcesReturn`. §2.1.8 called it the most
+   exposed feature; it still is, only now deleted rather than degraded. What
+   ships is "unified inbox for Linear/GitHub/Slack" competing on App Store
+   discovery, at a 15–30% cut, with worse setup than anything else in that
+   category. Note also which source the cut removes: Mail is the only
+   mass-market one in the list. Everything kept is a developer tool.
+
+**"A more kosher way" to read Mail does not exist on MAS.** Verified against
+Apple's own guidance rather than reasoned about:
+
+- The sanctioned sandbox path is `com.apple.security.scripting-targets`, which
+  requires the *target* app to declare an access group. Per QA1888 the only
+  documented access group Mail exposes is **compose**. The sanctioned path can
+  create a message and cannot read one.
+- The fallbacks (`temporary-exception.apple-events`,
+  `automation.apple-events`) are what Apple explicitly calls a last resort.
+  Mechanically they upload — the ITMS-90285 rejection was an App Store Connect
+  backend bug, fixed in 2018 — but review treatment is contested and "reads
+  your mail over Apple events" is the shape reviewers push on.
+- The non-AppleScript routes are worse, not better. Gmail's API needs
+  restricted scopes, so an annual CASA Tier 2 assessment (lab pricing from
+  ~$500 to several thousand a year) with unverified apps capped at 100 users
+  behind a warning screen; IMAP-direct means writing an IMAP client and still
+  needs Google OAuth; a MailKit extension acts on messages at delivery and
+  cannot enumerate a mailbox on demand, which is the wrong shape for a queue.
+
+**Sparkle cuts the other way.** True that MAS makes Sparkle unnecessary — for
+the MAS build. The direct build still has the features, so it still ships, so
+both update paths get maintained rather than one. And §2.1.9 already settled
+that the purchase is support and convenience, not access: MAS adds a paywalled
+channel to an MIT-licensed app whose fuller version is a free download beside it.
+
+**Recommendation: still no — but for an inverted reason, which is the useful
+part.** 2026-08-20 said *technically impossible without degrading the app*.
+This audit says *technically easy, commercially and product-wise upside-down*.
+That names the conditions under which it stops being upside-down, which the
+first audit could not:
+
+- **A zero-setup source exists.** OAuth where it is possible, or the deferred
+  Cloudflare relay (§2.1: decision 8). That shrinks the Guideline 2.1 problem
+  and the refund problem at the same time, and it is the prerequisite for MAS
+  being worth anything.
+- **The goal becomes revenue rather than support.** Then MAS's payments and
+  discovery are the actual prize — and the work that unlocks it is onboarding,
+  not a MAS target.
+
+Corollary: because it is a variant and roughly a day's work, this does not need
+deciding now and stays reversible. **Do not build the MAS target before the
+onboarding work**; it would ship the weaker app into the harsher channel and
+learn nothing that the onboarding work does not teach first.
+
+**Verdict: Brandon's call.** The audit's finding is that the sandbox reasoning
+in §2.1.8 is now obsolete and the case against MAS rests entirely on onboarding
+and differentiation instead.
+
+### 2.1.11 Who buys this — the non-technical buyer, decided 2026-08-21
+
+Brandon's call after §2.1.10: skip MAS, and market the direct build to less
+technical buyers with a proper landing page. That changes who the app is *for*,
+which changes §2.1.9's reasoning about what a purchase means. Three consequences.
+
+**The direct build is the only one that can serve this buyer, and Apple Mail is
+why.** Mail is the sole zero-credential source in the app — no token, nothing to
+register, nothing to sign into — and it covers Gmail (§6.13). Every other source
+is BYO-credential by necessity, documented in its `authNote`. So the reduced MAS
+variant §2.1.10 costed out would have been aimed squarely at non-technical
+buyers while having cut the one source they could actually set up. That is the
+argument against MAS restated from the demand side, and it is the stronger form.
+
+**The purchase reads differently now, and §2.1.9 needs this amendment.** That
+section worried that an MIT licence plus a free notarized download undercuts
+paying. It only undercuts it for people who would clone the repo and run
+`xcodebuild`. For someone who does not know what a build step is, paying *is*
+the access path — not as a technicality but in practice. So "the purchase is
+support and convenience, not access" stays literally true while ceasing to be
+awkward: for this audience convenience is the whole product. The README should
+still not imply the paid build is the only signed one, because it isn't.
+
+**The binding constraint is source #2, not the landing page.** Aggregation means
+nothing with one source, and today the second source is where the tokens start.
+So the honest offering for a non-technical buyer right now is Mail plus ntfy.
+Either the positioning narrows to something true today — a Mail triage queue
+that grows as you add tools — or the zero-setup-source work §2.1.10 named as
+MAS's prerequisite gets done for the direct build instead. Same work, better
+channel, and it is the one thing that would widen this audience.
+
+**Which makes first run the conversion point, not the copy.** The first thing a
+non-technical buyer meets is macOS asking permission to control Mail, and on a
+cold Mail a ~12 second wait behind it. Both used to arrive unannounced from a
+background poll. See §6.16.
+
 - **Item** — one actionable notification (a Slack mention, a Linear inbox entry, a PR review request, a Claude-waiting event). Can be: opened (deep link), selected, copied (URL + title), marked done (with write-through + ⌘Z undo), snoozed, **pinned**, archived, filtered, grouped.
 - **Source** — a configured connection (Slack workspace, Linear org, GitHub account, webhook endpoint). Can be: added, paused, removed, reordered, badge-toggled.
 
@@ -156,6 +295,76 @@ A central **SyncEngine** (actor) schedules fetches per-connector with per-source
 - **SwiftData** (or GRDB if we hit SwiftData limits) for the item store: item id, source, type, title, snippet, deep-link URL, actors, timestamps, readAt, snoozedUntil, local state.
 - Store is a *cache with local annotations* — the services remain the source of truth for read state where they support it; local-only state (snooze, "done locally") layers on top.
 - **Keychain** for every token/secret. Nothing sensitive in UserDefaults or on disk.
+
+#### 4.3.1 Where state lives, and which of it is a *permission* (audited 2026-08-21)
+
+Asked while building the first-run reset script: is any of this nonstandard,
+and should tokens be in iCloud Keychain instead? Answers, because the question
+recurs and the first half of it rests on a conflation.
+
+**Five stores, but only one permission.** A fresh install lacks five things and
+they are not equivalent:
+
+| State | Where | Permission |
+|---|---|---|
+| Item store, `local-api.json` | `~/Library/Application Support/InboxAndChill/` | none, ever — the app's own directory, sandboxed or not |
+| Prefs (journal, badge, hotkey, Sparkle) | `UserDefaults` → `~/Library/Preferences/lol.bgreen.inboxandchill.plist` | **none** |
+| Source tokens | Keychain, service `lol.bgreen.inboxandchill` | no TCC prompt, but a signature-bound ACL — see below |
+| Automation (Apple events) | TCC | **yes — the only prompt in this list** |
+| Notification (banner) permission | TCC / Notification Center | yes, and **unresettable** — no supported API |
+
+So first run has two real prompts (Automation for Mail, notifications for
+banners) plus Gatekeeper before either. Everything else is files.
+`scripts/reset-first-run.sh` clears the resettable four and says plainly that
+it cannot do the fifth. Nothing here is unusual for a menu-bar app holding API
+tokens; the unusual thing is *how many* tokens there are to lose, which is the
+§2.1.11 onboarding problem, not a storage problem.
+
+**iCloud Keychain — declined, for three reasons.**
+
+1. **It needs the App ID and provisioning profile this app deliberately does
+   not have.** Syncing requires the data-protection keychain
+   (`kSecUseDataProtectionKeychain: true`) plus `kSecAttrSynchronizable`, and
+   the data-protection keychain resolves items through
+   `application-identifier` / `keychain-access-groups` entitlements — which
+   need a registered App ID and an embedded profile. Needing neither is a
+   load-bearing property of the Developer ID route (see the Distribution notes
+   in CLAUDE.md). This would take on exactly the administrative cost §2.1.8
+   counted against MAS, for a feature nobody asked for.
+2. **The data-protection keychain has already bitten this project, from the
+   other side.** The notarytool credential investigations: Local Items is a
+   data-protection keychain, it **locks when the Mac sleeps, a DarkWake does
+   not unlock it**, and `security` cannot enumerate it. Two separate
+   investigations went into that. Tokens there would import the same failure —
+   a connector polling during a dark-wake window fails to read its token and
+   the source goes red for reasons nobody can reproduce. The file-based login
+   keychain reported `no-timeout` at the same moment the other was failing.
+3. **`kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is right for this data.** A
+   Slack user token synced to every Mac on the account widens the blast radius
+   of one compromised machine, in exchange for not re-pasting on a second Mac.
+
+The honest counter-argument: the person sync would help is a **two-Mac buyer**,
+which is the §2.1.11 audience. But the fix there is *fewer credentials* — the
+zero-setup source work — not syncing more of them. Same conclusion §2.1.10
+reached by a different road, so revisit this only if that work lands and
+two-Mac setup is still the complaint.
+
+**The Keychain risk that is real, and is not sync.** The file-based keychain
+binds an item's ACL to the **code identity** of the build that created it,
+which is why `project.yml` signs with real Developer ID even for Debug: a
+signed build's requirement is bundle ID plus team, which every later signed
+build satisfies, while an ad-hoc build has no certificate to form that
+requirement from and gets pinned to the binary hash instead. So an *unsigned*
+build re-prompts on every rebuild with *"Inbox & Chill wants to use your
+confidential information stored in … in your keychain"* and a password field.
+`Keychain.swift`'s read-through cache is what holds that to once per launch
+rather than once per poll.
+
+**Already documented — README's Signing section covers the mechanism and gives
+the `codesign -d -r-` check.** Recorded here only because it is the answer to
+"is the Keychain choice risky?", and the answer is: yes, but in a way that
+affects people building from source unsigned, not the signed builds anyone
+downloads, and not in a way iCloud Keychain would fix.
 
 ### 4.4 Custom sources (API/webhook)
 
@@ -436,6 +645,72 @@ Unchanged caveat: an integration sees only pages explicitly shared with it, so c
 - **Discord** — the user-token API violates ToS, and a bot token cannot see your DMs. Same shape as the `xoxc`/`xoxd` verdict in §6.1.
 - **Mixpanel / Amplitude alerts** — no personal notification API; they alert by email and Slack, so they already arrive through those sources.
 - **GitHub Actions** — already arrives as `ci_activity`, handled by `GitHubConnector.humanize`. Don't rebuild it.
+
+## 6.16 First run — the Apple Mail permission flow (built 2026-08-21)
+
+The conversion point for the audience §2.1.11 describes, and it was previously
+the app's worst moment.
+
+**What it used to do.** Adding an Apple Mail source registered a connector that
+polled 60s later. `tell application "Mail"` launches Mail and trips TCC, so the
+first thing the user saw was macOS's Automation dialog — Apple's wording, no
+context, up to a minute after they last touched the app, and on a cold Mail a
+further ~12 seconds of nothing. "Don't Allow" is the safe answer to an
+unexplained dialog, and the refusal that follows (-1743) is
+indistinguishable from an empty inbox. macOS shows that dialog **once per app
+per target**; a background timer was spending it.
+
+**The rule now: explain, then ask because a button was pressed.**
+
+- `MailAutomationAuthorization` — pure. Maps the `OSStatus` from
+  `AEDeterminePermissionToAutomateTarget` to a verdict, owns every string, and
+  owns the pre-prompt copy as a structured `Preflight` so the tests can assert
+  on the parts. Mirrors `BannerAuthorization` deliberately, for the reason that
+  type gives: the wording is the part that has to be right and a test process
+  cannot stand up TCC.
+- `MailAutomation` — the one impure call. `resolve(prompting:)` wraps
+  `AEDeterminePermissionToAutomateTarget`, which **answers without prompting
+  when `askUserIfNeeded` is false**. That is the primitive the whole flow rests
+  on: the app can know its permission state without spending the prompt.
+- `AppleMailConnector.fetch()` checks non-prompting before building a script,
+  so every permission state becomes a named source status on the *first* poll
+  instead of a -1743 nobody sees.
+- `MailAccessSection` in the source editor is the only place in the app that
+  passes `prompting: true`. **Keep it that way.** It sits above the toggles, for
+  the reason the setup steps do, and the macOS dialog appears with the
+  explanation still on screen.
+- `MailPermissionNotice` in the Sources list is the counterpart to
+  `BannerPermissionNotice` for every day after setup, with "Check Again"
+  because granting in System Settings does not notify the app.
+
+**Two deliberate decisions worth not undoing:**
+
+- **A closed Mail does not poll.** `Outcome.allowsFetch` is true only for
+  `.granted`, so `.mailNotRunning` refuses too. macOS won't report a permission
+  state while Mail is closed, and fetching anyway would launch Mail from a
+  background timer — the last remaining path to an unattributed dialog. The
+  cost is that the app will not auto-launch Mail to fill its queue, which is
+  what `explain(-600)` already told users it did not do.
+- **Two wordings for the not-yet-asked state.** `notRequestedAdvice` names the
+  button, for a source status message with no button in reach;
+  `notRequestedMessage` does not, because in the UI the button is beside it.
+
+**Testing it needs `scripts/reset-first-run.sh`.** The interesting half of this
+flow is a permission state, and macOS grants the Automation prompt for an
+app→target pair exactly once — deleting the app does not bring it back, because
+TCC keys on the code signature and `install-local.sh` signs with a stable
+Developer ID precisely so permissions *stick*. The script resets TCC, the store,
+prefs and the Keychain, and prints the four states to walk (not asked, granted,
+declined, Mail closed) plus the regression that matters most: add a Mail source,
+leave it two minutes, and confirm **no dialog appears on its own**. It cannot
+reset notification permission — there is no supported API for that — so banners
+have to be tested on a Mac that has never run the app.
+
+The claims in the preflight copy are assertions about
+`AppleMailConnector.fetchScript` and `markDoneScript` — subject/sender/date and
+never the body, read state and a flag only if a flag queued the row, no network
+path at all. `preflightSaysTheLoadBearingThings` guards them, because a
+reassurance that has drifted out of date is worse than none.
 
 ## 7. Milestones
 

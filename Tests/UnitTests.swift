@@ -946,6 +946,124 @@ struct SentryProblemTests {
 
 // MARK: - Apple Mail
 
+@Suite("Mail automation permission mapping")
+struct MailAutomationAuthorizationTests {
+    typealias Auth = MailAutomationAuthorization
+
+    /// The function that decides whether the source polls at all. Every wrong
+    /// answer it can give is silent, which is why it is pure and tested
+    /// rather than trusted.
+    @Test("Each OSStatus maps to the right verdict")
+    func statusMapping() {
+        #expect(Auth.outcome(forStatus: 0) == .granted)
+        #expect(Auth.outcome(forStatus: -1744) == .notRequested)
+        #expect(Auth.outcome(forStatus: -1743) == .blocked(Auth.deniedMessage))
+        #expect(Auth.outcome(forStatus: -600) == .mailNotRunning)
+        #expect(Auth.outcome(forStatus: -609) == .mailNotRunning)
+    }
+
+    /// An unrecognised status must not read as permission. The precedent is
+    /// `BannerAuthorization.settledOutcome`, which refuses to assume delivery
+    /// for the same reason.
+    @Test("An unknown status blocks and reports its number")
+    func unknownStatusBlocks() {
+        let outcome = Auth.outcome(forStatus: -12345)
+        #expect(outcome != .granted)
+        #expect(outcome.allowsFetch == false)
+        #expect(outcome.message?.contains("-12345") == true)
+    }
+
+    /// "You just clicked Don't Allow" and "this was refused at some point"
+    /// are both -1743 to macOS and need different sentences.
+    @Test("A just-declined prompt reads differently from an old refusal")
+    func declineIsDistinctFromDenial() {
+        #expect(Auth.requestOutcome(forStatus: -1743) == .blocked(Auth.declinedMessage))
+        #expect(Auth.outcome(forStatus: -1743) == .blocked(Auth.deniedMessage))
+        #expect(Auth.declinedMessage != Auth.deniedMessage)
+        // Anything that isn't a refusal is mapped identically either way.
+        #expect(Auth.requestOutcome(forStatus: 0) == .granted)
+        #expect(Auth.requestOutcome(forStatus: -600) == .mailNotRunning)
+    }
+
+    /// Only a granted verdict may fetch — including declining to fetch when
+    /// Mail is closed, because `tell application "Mail"` launches Mail and a
+    /// launch from a background poll is the last path to an Automation dialog
+    /// the user cannot connect to anything they did.
+    @Test("Only granted permits a poll")
+    func onlyGrantedPolls() {
+        #expect(Auth.Outcome.granted.allowsFetch)
+        #expect(!Auth.Outcome.notRequested.allowsFetch)
+        #expect(!Auth.Outcome.blocked("nope").allowsFetch)
+        #expect(!Auth.Outcome.mailNotRunning.allowsFetch)
+    }
+
+    /// Rule 5: the refusal is the whole point. A blocked poll that returned
+    /// no reason would be indistinguishable from an empty inbox.
+    @Test("Every non-granted verdict carries a reason")
+    func refusalsExplainThemselves() {
+        #expect(Auth.Outcome.granted.fetchRefusal == nil)
+        for outcome: Auth.Outcome in [
+            .notRequested, .blocked(Auth.deniedMessage), .mailNotRunning,
+        ] {
+            let refusal = outcome.fetchRefusal
+            #expect(refusal != nil)
+            #expect(refusal?.isEmpty == false)
+        }
+    }
+
+    /// The not-yet-asked state has two wordings on purpose: the source status
+    /// has to say where the button is, the UI beside the button must not.
+    @Test("The not-requested advice points at the button; the UI copy doesn't")
+    func notRequestedHasTwoWordings() {
+        #expect(Auth.notRequestedAdvice.contains("Allow Mail Access"))
+        #expect(!Auth.notRequestedMessage.contains("Allow Mail Access"))
+        #expect(Auth.Outcome.notRequested.fetchRefusal == Auth.notRequestedAdvice)
+    }
+
+    /// Two wordings for one condition is how a user ends up believing they
+    /// have two problems. `AppleMailConnector.explain(-1743)` says this when a
+    /// live poll hits the refusal; this says it before one ever runs.
+    @Test("The denial copy agrees with the connector's own -1743 message")
+    func denialAgreesWithConnector() {
+        let connector = AppleMailConnector.explain(appleScriptError: -1743)
+        for message in [connector, Auth.deniedMessage] {
+            #expect(message.contains("Automation"))
+            #expect(message.contains("permanently empty"))
+        }
+    }
+
+    /// The copy the user reads *instead of* being ambushed. These assertions
+    /// are about substance, not phrasing: each bullet is a claim about what
+    /// `fetchScript` and `markDoneScript` actually do, and a reassurance that
+    /// drifts out of date is worse than no reassurance at all.
+    @Test("The preflight makes the claims it needs to")
+    func preflightSaysTheLoadBearingThings() {
+        let preflight = Auth.preflight
+        #expect(!preflight.title.isEmpty)
+        #expect(preflight.bullets.count == 3)
+        #expect(preflight.bullets.allSatisfy { !$0.isEmpty })
+
+        let everything =
+            ([preflight.title, preflight.lead, preflight.promptNote,
+              preflight.coldNote] + preflight.bullets)
+            .joined(separator: " ")
+
+        // True of fetchScript: subject, sender and date; never the body.
+        #expect(everything.contains("never the body"))
+        // True of markDoneScript: read status, and the flag only if a flag
+        // queued the row.
+        #expect(everything.contains("unflags it"))
+        // The connector has no network path at all.
+        #expect(everything.contains("Nothing leaves this Mac"))
+        // The dialog about to appear is macOS's, not the app's.
+        #expect(everything.contains("macOS"))
+        // Declining is survivable but looks like nothing — say so first.
+        #expect(everything.contains("empty"))
+        // A cold Mail costs ~12s and must not read as a broken source.
+        #expect(everything.contains("ten seconds"))
+    }
+}
+
 @Suite("Apple Mail script building")
 struct AppleMailScriptTests {
     @Test("Flagged-only asks Mail only about flags")
