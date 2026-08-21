@@ -36,6 +36,7 @@ struct SettingsView: View {
                     ClaudeCodeIntegrationRow()
                 }
                 JournalSettingsSection()
+                UpdatesSection()
             }
             .formStyle(.grouped)
             .tabItem { Label("General", systemImage: "gearshape") }

@@ -1,7 +1,11 @@
 #!/bin/bash
 #
-# Cut a release: notarize the current source, tag it, and publish a GitHub
-# release with the notarized zip attached.
+# Cut a release: notarize the current source, tag it, publish a GitHub release
+# with both artifacts attached, and regenerate the Sparkle update feed.
+#
+# Two artifacts, because they have different jobs: the .zip is what Sparkle
+# downloads to update an existing install, and the .dmg is what a person
+# downloads the first time. Both are notarized and stapled.
 #
 # Why this exists: before it, "releasing" meant running notarize.sh and then
 # hand-sending `dist/InboxAndChill-<version>.zip` to someone. There were no
@@ -18,7 +22,7 @@
 # source of truth — bump it there and commit before running this.
 #
 # Usage:
-#   scripts/release.sh              # confirm, then notarize + tag + publish
+#   scripts/release.sh              # confirm, then notarize + tag + publish + feed
 #   scripts/release.sh --dry-run    # show exactly what would happen, do nothing
 #   scripts/release.sh --yes        # skip the confirmation prompt
 #
@@ -70,16 +74,39 @@ if gh release view "$TAG" >/dev/null 2>&1; then
   die "a GitHub release $TAG already exists."
 fi
 
+# CFBundleVersion is what Sparkle actually compares to decide whether a
+# release is newer — not the marketing version. If it does not increase, every
+# existing install looks at the feed, concludes it is already current, and
+# never updates: a silent no-op release, which is precisely the failure this
+# project keeps having to design against.
+BUILD=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed 's/.*"\(.*\)".*/\1/')
+[ -n "$BUILD" ] || die "could not read CURRENT_PROJECT_VERSION from project.yml."
+PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+if [ -n "$PREV_TAG" ]; then
+  PREV_BUILD=$(git show "$PREV_TAG:project.yml" 2>/dev/null \
+    | grep -m1 'CURRENT_PROJECT_VERSION:' | sed 's/.*"\(.*\)".*/\1/')
+  if [ -n "$PREV_BUILD" ] && [ "$BUILD" -le "$PREV_BUILD" ]; then
+    die "CURRENT_PROJECT_VERSION is $BUILD, but $PREV_TAG already shipped $PREV_BUILD.
+    Sparkle compares this number, so an update that does not raise it is
+    invisible to everyone already running the app. Bump it in project.yml."
+  fi
+fi
+
 ZIP="dist/InboxAndChill-$VERSION.zip"
+DMG="dist/dmg/InboxAndChill-$VERSION.dmg"
 COMMIT=$(git rev-parse --short HEAD)
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+VISIBILITY=$(gh repo view --json visibility -q .visibility)
 
 cat <<EOF
 ==> Release plan
-    repo        $REPO
-    version     $VERSION
+    repo        $REPO ($VISIBILITY)
+    version     $VERSION  (build $BUILD)
     tag         $TAG  ->  $COMMIT
-    artifact    $ZIP  (rebuilt and notarized now, not reused)
+    artifacts   $ZIP  (Sparkle downloads this)
+                $DMG  (what a person downloads)
+                both rebuilt and notarized now, never reused
+    feed        appcast.xml, regenerated and committed after publishing
 EOF
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -90,7 +117,7 @@ fi
 if [ "$ASSUME_YES" -eq 0 ]; then
   # The tag push and the release are the outward-facing steps, so the
   # confirmation sits before both rather than before the build.
-  printf "==> Notarize, tag and publish %s? [y/N] " "$TAG"
+  printf "==> Notarize, tag, publish and update the feed for %s? [y/N] " "$TAG"
   read -r reply
   case "$reply" in [yY]*) ;; *) echo "    aborted."; exit 1 ;; esac
 fi
@@ -101,6 +128,7 @@ scripts/notarize.sh
 [ -f "$ZIP" ] || die "notarize.sh finished but $ZIP is missing.
     Its version comes from the built Info.plist; if that disagrees with
     project.yml's MARKETING_VERSION, regenerate the project: xcodegen generate"
+[ -f "$DMG" ] || die "notarize.sh finished but $DMG is missing."
 
 # --- Tag, then publish ----------------------------------------------------
 echo "==> Tagging $TAG"
@@ -112,15 +140,42 @@ NOTES_FLAG=(--generate-notes)
 if PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null); then
   NOTES_FLAG=(--generate-notes --notes-start-tag "$PREV")
 fi
-gh release create "$TAG" "$ZIP" --title "Inbox & Chill $VERSION" "${NOTES_FLAG[@]}"
+gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" "${NOTES_FLAG[@]}"
+
+# --- Publish the update feed ---------------------------------------------
+# Strictly after the release exists, because the feed's enclosure URL points
+# at that release's asset. Generating it first would publish a feed naming a
+# URL that 404s, and Sparkle's report for that reads like a network fault.
+echo "==> Regenerating appcast.xml"
+scripts/appcast.sh
+
+if [ -n "$(git status --porcelain appcast.xml)" ]; then
+  git add appcast.xml
+  git commit -q -m "Publish appcast for $VERSION"
+  git push -q origin main
+  echo "    appcast.xml committed and pushed"
+else
+  echo "    appcast.xml unchanged (nothing to commit)"
+fi
 
 cat <<EOF
 ==> Done
     $(gh release view "$TAG" --json url -q .url)
 
-    The zip is notarized and stapled, so it opens on a Mac that has never
-    seen this app — that is the only test that means anything (CLAUDE.md).
-
-    Note: this repo is PRIVATE, so the release and its asset are visible
-    only to you and collaborators. Anyone else gets a 404, not a download.
+    Both artifacts are notarized and stapled, so they open on a Mac that has
+    never seen this app — the only test that means anything (CLAUDE.md).
 EOF
+
+if [ "$VISIBILITY" != "PUBLIC" ]; then
+  cat <<EOF
+    WARNING: this repo is $VISIBILITY, so the release assets 404 for everyone
+    but you. In-app updates cannot work until it is public — Sparkle fetches
+    appcast.xml and the zip with no credentials at all.
+EOF
+else
+  cat <<EOF
+    Existing installs will see this within a day, or immediately via
+    Settings -> Check Now. raw.githubusercontent caches appcast.xml for about
+    five minutes, so it is not offered the very second this finishes.
+EOF
+fi

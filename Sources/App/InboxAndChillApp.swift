@@ -5,6 +5,10 @@ import SwiftUI
 @main
 struct InboxAndChillApp: App {
     @State private var appState = AppState()
+    // Created here, at App scope, which is what Sparkle's own SwiftUI guidance
+    // does: the updater must outlive any one window, and a menu bar app has no
+    // AppDelegate to hang it off.
+    @State private var updates = UpdateController()
 
     init() {
         IntentContext.appState = appState
@@ -19,6 +23,7 @@ struct InboxAndChillApp: App {
         MenuBarExtra {
             PanelView()
                 .environment(appState)
+                .environment(updates)
                 .modelContainer(appState.container)
         } label: {
             MenuBarLabel(badgeText: appState.badgeText)
@@ -28,6 +33,7 @@ struct InboxAndChillApp: App {
         Window("Inbox & Chill", id: "main") {
             MainWindowView()
                 .environment(appState)
+                .environment(updates)
                 .modelContainer(appState.container)
                 // LSUIElement apps have no Dock icon or ⌘Tab entry — while
                 // the triage window is open, become a regular app so it
@@ -41,11 +47,12 @@ struct InboxAndChillApp: App {
                 }
         }
         .defaultLaunchBehavior(.suppressed)
-        .commands { MainWindowCommands() }
+        .commands { MainWindowCommands(updates: updates) }
 
         Settings {
             SettingsView()
                 .environment(appState)
+                .environment(updates)
                 .modelContainer(appState.container)
         }
     }

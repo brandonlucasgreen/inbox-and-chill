@@ -12,7 +12,19 @@ import SwiftUI
 struct MainWindowCommands: Commands {
     @FocusedValue(\.triageActions) private var actions
 
+    /// Passed in rather than read from the environment: `Commands` bodies are
+    /// not part of the view hierarchy, so `@Environment` does not reach them.
+    let updates: UpdateController
+
     var body: some Commands {
+        // The Mac-standard slot for this is the app menu, right under About.
+        // It is only on screen while the triage window is open — an accessory
+        // app has no menu bar otherwise — which is why Settings carries the
+        // same controls rather than deferring to this.
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { updates.checkForUpdates() }
+                .disabled(!updates.canCheck)
+        }
         CommandMenu("Queue") { queueMenu }
         CommandGroup(after: .sidebar) { scopeMenu }
     }

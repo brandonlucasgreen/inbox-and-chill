@@ -1,5 +1,7 @@
 # Inbox & Chill
 
+**MIT licensed** — free to use, build, fork, and ship. See [LICENSE](LICENSE).
+
 A native macOS menu bar app that pulls your unread/actionable items from Linear, GitHub, Slack, ntfy, custom JSON feeds, and your terminal (including Claude Code) into one queue — and then helps you empty it.
 
 Inbox & Chill is a **triage queue, not a status mirror**. It doesn't try to be a client for any of these services — no composing Slack messages, no editing Linear issues. Items flow in, you act on them (open, done, snooze, pin, archive), and the queue goes to zero. The moment an item needs real work, it deep-links you into the app that owns it. The menu bar is the primary surface: click the icon (or hit a global hotkey) and a panel drops down with everything waiting for you, grouped by source.
@@ -22,6 +24,9 @@ Every row is one line until you move onto it, and then it opens to a paragraph �
 
 **Automation**
 Siri Shortcuts / App Intents expose the queue outside the app: get items, get a count, snooze, or mark done from Shortcuts.app, Spotlight, or a voice command.
+
+**Updates**
+The app checks for new versions once a day and asks before installing anything, via [Sparkle](https://sparkle-project.org). You can turn the check off, or trigger one, in Settings → General → Updates. Builds you make yourself have no update-signing key, so they say so in that pane rather than failing quietly later.
 
 **Triage verbs**
 - Open — deep-links into the owning app or URL
@@ -98,13 +103,37 @@ Three ways out, in order of how much you'll like them: sign with your own Develo
 
 The build also compiles and embeds the `inchill` CLI inside the app bundle (`Contents/MacOS/inchill`), signed with the same identity — see [docs/shell-integration.md](docs/shell-integration.md).
 
+**In-app updates, if you want them in your own build.** Sparkle verifies every
+download against a public key baked into the app, and this repo deliberately
+ships no key — so a fresh clone builds an app that says "no update-signing key"
+in Settings rather than one that discovers the problem mid-install. To wire up
+your own:
+
+```sh
+scripts/sparkle-keys.sh        # creates the keypair, prints the line to paste
+xcodegen generate
+```
+
+You will also need somewhere to serve an `appcast.xml` your build can reach, and
+`SUFeedURL` in `project.yml` pointed at it. None of this is needed just to use
+the app.
+
 ## Status
 
-This is a personal tool, built for one person's daily use, and pre-release. Expect rough edges, and expect the shape of things (especially per-source setup) to shift. It's planned for eventual open-source release on GitHub; if you're reading this from a clone, you're early.
+This is a personal tool, built for one person's daily use, and pre-release. Expect rough edges, and expect the shape of things (especially per-source setup) to shift.
+
+The code is MIT licensed, but the repository is **still private** — so its GitHub releases are visible only to collaborators, and in-app updates are dormant until that changes (Sparkle has to be able to fetch the feed and the download with no credentials at all). If you're reading this from a clone, you're early.
 
 ## License
 
-TBD.
+[MIT](LICENSE). Do what you like with it.
+
+Two dependencies and the icon are also MIT, and ship inside the app:
+[KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts),
+[Sparkle](https://sparkle-project.org), and Microsoft's
+[Fluent Emoji](https://github.com/microsoft/fluentui-emoji) victory hand — see
+[docs/brand/vendor/](docs/brand/vendor/) for the licence texts and how each
+shipped file is derived.
 
 ## Design
 

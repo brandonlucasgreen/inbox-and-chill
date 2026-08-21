@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Sparkle
 import SwiftData
 import Testing
 import UserNotifications
@@ -1283,6 +1284,109 @@ struct NewSourceCatalogTests {
     }
 }
 
+// MARK: - Sparkle updates (Sources/App/Support/UpdateController.swift)
+
+/// A build that cannot update is the rule-5 case for Sparkle: the app checks,
+/// finds it has no way to verify a download, and does nothing — which looks
+/// exactly like being up to date. These are the sentences that keep it from
+/// being silent.
+@Suite("Update configuration problems")
+struct UpdateConfigurationTests {
+    // configurationProblem only asks whether a key is present and non-blank —
+    // Sparkle validates the real thing — so this is deliberately not shaped
+    // like a key, to keep secret scanners quiet on a repo meant to go public.
+    private static let key = "EXAMPLE-not-a-real-signing-key"
+    private static let feed = "https://example.com/appcast.xml"
+
+    @Test("A build with both a feed and a key has no problem to report")
+    func fullyConfigured() {
+        #expect(
+            UpdateController.configurationProblem(
+                info: ["SUFeedURL": Self.feed, "SUPublicEDKey": Self.key]) == nil)
+    }
+
+    /// The case a clone hits: `scripts/sparkle-keys.sh` has never been run, so
+    /// the build has a feed but nothing to verify a download against. It must
+    /// say so, and say what to run — not report a signature failure later,
+    /// which reads as a corrupted download.
+    @Test("A missing signing key is explained, and names the script that fixes it")
+    func missingSigningKey() throws {
+        let problem = try #require(
+            UpdateController.configurationProblem(info: ["SUFeedURL": Self.feed]))
+        #expect(problem.contains("sparkle-keys.sh"))
+        #expect(problem.contains("built it yourself"))
+    }
+
+    @Test("A missing feed URL is explained")
+    func missingFeed() throws {
+        let problem = try #require(
+            UpdateController.configurationProblem(info: ["SUPublicEDKey": Self.key]))
+        #expect(problem.contains("no update feed"))
+    }
+
+    /// A key that is present but blank is the same as absent, and is what an
+    /// unreplaced placeholder in project.yml would produce.
+    @Test("Whitespace-only values count as missing")
+    func blankValuesAreMissing() {
+        #expect(
+            UpdateController.configurationProblem(
+                info: ["SUFeedURL": Self.feed, "SUPublicEDKey": "   "]) != nil)
+        #expect(UpdateController.configurationProblem(info: [:]) != nil)
+        #expect(UpdateController.configurationProblem(info: nil) != nil)
+    }
+}
+
+/// Sparkle reports "nothing new" and "the user cancelled" through the same
+/// callback as real failures. Printing those in red would train you to ignore
+/// the red text, which is the one thing it cannot afford.
+@Suite("Update failure explanations")
+struct UpdateFailureExplanationTests {
+    private func sparkleError(_ code: Int) -> NSError {
+        NSError(
+            domain: SUSparkleErrorDomain, code: code,
+            userInfo: [NSLocalizedDescriptionKey: "described by Sparkle"])
+    }
+
+    @Test("No update found is not a failure")
+    func noUpdateIsSilent() {
+        #expect(UpdateController.explain(sparkleError(1001)) == nil)
+    }
+
+    @Test("A cancelled or postponed install is not a failure")
+    func userChoicesAreSilent() {
+        #expect(UpdateController.explain(sparkleError(4007)) == nil)
+        #expect(UpdateController.explain(sparkleError(4008)) == nil)
+    }
+
+    /// A download that fails its signature check is the one failure that must
+    /// never be summarised as "couldn't update" — it says the bytes did not
+    /// come from the key this build trusts.
+    @Test("A signature failure says the update was not installed")
+    func signatureFailureIsLoud() throws {
+        let message = try #require(UpdateController.explain(sparkleError(3001)))
+        #expect(message.contains("signature"))
+        #expect(message.contains("not installed"))
+    }
+
+    @Test("An unreadable feed points at the download as a way out")
+    func feedFailureOffersFallback() throws {
+        let message = try #require(UpdateController.explain(sparkleError(1002)))
+        #expect(message.contains("update feed"))
+        #expect(message.contains("GitHub"))
+    }
+
+    /// Network trouble arrives as an NSURLError, not a Sparkle error, and its
+    /// own description is already a decent sentence.
+    @Test("Errors from outside Sparkle are passed through")
+    func foreignErrorsPassThrough() throws {
+        let offline = NSError(
+            domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet,
+            userInfo: [NSLocalizedDescriptionKey: "The Internet connection appears to be offline."])
+        let message = try #require(UpdateController.explain(offline))
+        #expect(message.contains("offline"))
+    }
+}
+
 /// A credential that fails to save is indistinguishable from one that saved
 /// — the sheet closes, the field still shows the token, and the source then
 /// fails to authenticate for a reason nothing on screen accounts for. These
@@ -1850,7 +1954,7 @@ struct NtfyConnectorTests {
     func onlyHTTPSchemesAreOpened() throws {
         // NSDataDetector matches both; a click that opened a mail composer
         // because the message mentioned an address would be a surprise.
-        #expect(NtfyConnector.firstURL(in: "mail brandon@buffer.com") == nil)
+        #expect(NtfyConnector.firstURL(in: "mail someone@example.com") == nil)
         #expect(NtfyConnector.firstURL(in: "ftp://files.example/x") == nil)
     }
 
@@ -2315,8 +2419,8 @@ struct NtfyAuthTests {
     func bearerToken() {
         #expect(
             NtfyConnector.authorizationHeader(
-                token: "tk_3gd7d2yftt4b8ixyfe9mnmro88o76", username: nil, password: nil)
-                == "Bearer tk_3gd7d2yftt4b8ixyfe9mnmro88o76")
+                token: "tk_example_not_a_real_token", username: nil, password: nil)
+                == "Bearer tk_example_not_a_real_token")
     }
 
     @Test("Username and password become base64 basic auth")
@@ -2405,16 +2509,16 @@ struct NtfyFailureStatusTests {
 struct SlackTokenValidationTests {
     @Test("A plain user token is accepted")
     func validUserToken() {
-        #expect(SlackConnector.userTokenProblem("xoxp-123-456-abc") == nil)
+        #expect(SlackConnector.userTokenProblem("xoxp-example-user-token") == nil)
         // Pasted with stray whitespace is still fine.
-        #expect(SlackConnector.userTokenProblem("  xoxp-123\n") == nil)
+        #expect(SlackConnector.userTokenProblem("  xoxp-example\n") == nil)
     }
 
     /// The one Brandon actually hit: `xoxe.xoxp-` is an app *configuration*
     /// token — Manifest API only, 12-hour life, useless for the Web API.
     @Test("An xoxe. configuration token is rejected with the reason")
     func configurationTokenRejected() throws {
-        let problem = try #require(SlackConnector.userTokenProblem("xoxe.xoxp-1-abc"))
+        let problem = try #require(SlackConnector.userTokenProblem("xoxe.xoxp-example-config-token"))
         #expect(problem.contains("configuration token"))
         #expect(problem.contains("OAuth & Permissions"))
         #expect(problem.contains("12 hours"))
@@ -2422,8 +2526,8 @@ struct SlackTokenValidationTests {
 
     @Test("Bot and app-level tokens are named for what they are")
     func wrongTokenKinds() throws {
-        #expect(try #require(SlackConnector.userTokenProblem("xoxb-1-2-3")).contains("bot token"))
-        let appLevel = try #require(SlackConnector.userTokenProblem("xapp-1-A-2-3"))
+        #expect(try #require(SlackConnector.userTokenProblem("xoxb-example-bot-token")).contains("bot token"))
+        let appLevel = try #require(SlackConnector.userTokenProblem("xapp-example-app-token"))
         #expect(appLevel.contains("App-Level Token field"))
     }
 

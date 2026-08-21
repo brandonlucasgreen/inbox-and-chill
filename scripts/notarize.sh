@@ -24,6 +24,7 @@
 #   scripts/notarize.sh --app <path>       # notarize an app that already exists
 #   scripts/notarize.sh --profile <name>   # keychain profile (default below)
 #   scripts/notarize.sh --preflight-only   # check a build is submittable, no credentials needed
+#   scripts/notarize.sh --skip-dmg         # zip only; skip the DMG and its extra round trip
 #
 set -euo pipefail
 
@@ -33,12 +34,14 @@ APP_NAME="Inbox & Chill.app"
 PROFILE="${NOTARY_PROFILE:-inbox-and-chill}"
 APP=""
 PREFLIGHT_ONLY=0
+SKIP_DMG=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --app) APP="${2:-}"; shift 2 ;;
     --profile) PROFILE="${2:-}"; shift 2 ;;
     --preflight-only) PREFLIGHT_ONLY=1; shift ;;
+    --skip-dmg) SKIP_DMG=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -109,9 +112,15 @@ fi
 
 # --- Build ----------------------------------------------------------------
 if [ -z "$APP" ]; then
-  echo "==> Building (Release)"
+  # `clean` is deliberate. An incremental Release build can run
+  # ExtractAppIntentsMetadata *after* the app is signed, which rewrites
+  # Contents/Resources/Metadata.appintents/extract.actionsdata and breaks the
+  # seal — the preflight below then refuses to submit, a long way from the
+  # cause. Observed 2026-08-21. A release is rare and has to describe one
+  # known state anyway, so it pays the few extra minutes.
+  echo "==> Building (Release, clean)"
   xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill \
-    -configuration Release build >/tmp/inchill-notarize-build.log 2>&1 || {
+    -configuration Release clean build >/tmp/inchill-notarize-build.log 2>&1 || {
       echo "Build failed. Last 40 lines:" >&2
       tail -40 /tmp/inchill-notarize-build.log >&2
       exit 1
@@ -158,6 +167,47 @@ fi
 codesign --verify --deep --strict "$APP" 2>/dev/null \
   && echo "    signature: valid (deep)" \
   || { echo "    signature: FAILED --verify --deep --strict" >&2; FAIL=1; }
+
+# Nested code, one item at a time.
+#
+# This exists for a specific trap. Sparkle.framework carries Autoupdate,
+# Updater.app and two XPC services *inside* it, and Xcode's embed step
+# re-signs only the framework bundle — leaving those four **ad-hoc signed
+# with no secure timestamp**. Nothing above catches that: an ad-hoc signature
+# is a valid signature, so `--verify --deep --strict` is perfectly happy, and
+# the app runs and self-updates fine on this machine. Notarization is the
+# first thing that says no, and it says it a long way from the cause.
+# project.yml's "Re-sign Sparkle's nested helpers" phase is the fix; this is
+# the regression guard for it. Verified broken-then-fixed 2026-08-21.
+NESTED=()
+[ -f "$APP/Contents/MacOS/inchill" ] && NESTED+=("$APP/Contents/MacOS/inchill")
+if [ -d "$APP/Contents/Frameworks/Sparkle.framework" ]; then
+  SPARKLE_DIR="$APP/Contents/Frameworks/Sparkle.framework/Versions/Current"
+  NESTED+=(
+    "$APP/Contents/Frameworks/Sparkle.framework"
+    "$SPARKLE_DIR/Autoupdate"
+    "$SPARKLE_DIR/Updater.app"
+    "$SPARKLE_DIR/XPCServices/Downloader.xpc"
+    "$SPARKLE_DIR/XPCServices/Installer.xpc"
+  )
+fi
+
+for ITEM in "${NESTED[@]}"; do
+  [ -e "$ITEM" ] || continue
+  LABEL="${ITEM#"$APP/Contents/"}"
+  ITEM_INFO=$(codesign -dvv "$ITEM" 2>&1 || true)
+  PROBLEMS=""
+  case "$ITEM_INFO" in *adhoc*) PROBLEMS="$PROBLEMS ad-hoc-signed" ;; esac
+  case "$ITEM_INFO" in *"Developer ID Application"*) ;; *) PROBLEMS="$PROBLEMS not-Developer-ID" ;; esac
+  case "$ITEM_INFO" in *"flags=0x10000(runtime)"*) ;; *) PROBLEMS="$PROBLEMS no-hardened-runtime" ;; esac
+  case "$ITEM_INFO" in *Timestamp=*) ;; *) PROBLEMS="$PROBLEMS no-secure-timestamp" ;; esac
+  if [ -n "$PROBLEMS" ]; then
+    echo "    nested: $LABEL —$PROBLEMS" >&2
+    FAIL=1
+  else
+    echo "    nested: $LABEL ok"
+  fi
+done
 
 [ "$FAIL" -eq 0 ] || { echo "Preflight failed; not submitting." >&2; exit 1; }
 
@@ -209,6 +259,49 @@ OUT="$OUT_DIR/InboxAndChill-$VERSION.zip"
 rm -f "$OUT"
 ditto -c -k --keepParent "$APP" "$OUT"
 
+# --- DMG, for people rather than for Sparkle ------------------------------
+# Sparkle updates from the zip — nothing to mount, no user interaction. A
+# human downloading the app for the first time gets the DMG, which is the
+# format a Mac user expects and which carries the drag-to-Applications window.
+#
+# The DMG is notarized and stapled in its own right. The app inside it already
+# is, which is what makes the *app* open cleanly, but the disk image is itself
+# the quarantined thing that gets double-clicked first, so it needs its own
+# ticket to be trusted with no network.
+if [ "$SKIP_DMG" -eq 0 ]; then
+  # Deliberately a subdirectory rather than beside the zip: generate_appcast
+  # treats every archive in its source directory as a release, so a .dmg and a
+  # .zip of the same version side by side would yield two feed entries for one
+  # release.
+  DMG_DIR="$OUT_DIR/dmg"
+  mkdir -p "$DMG_DIR"
+  DMG="$DMG_DIR/InboxAndChill-$VERSION.dmg"
+  STAGE=$(mktemp -d)
+  cp -R "$APP" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"
+  rm -f "$DMG"
+  echo "==> Building $DMG"
+  hdiutil create -volname "Inbox & Chill" -srcfolder "$STAGE" \
+    -ov -quiet -format UDZO "$DMG"
+  rm -rf "$STAGE"
+
+  echo "==> Notarizing the DMG (a second round trip)"
+  DMG_OUT="$WORK/submit-dmg.txt"
+  set +e
+  xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait 2>&1 | tee "$DMG_OUT"
+  DMG_RC=${PIPESTATUS[0]}
+  set -e
+  DMG_ID=$(awk '/^  id: /{print $2; exit}' "$DMG_OUT")
+  if [ "$DMG_RC" -ne 0 ] || ! grep -q "status: Accepted" "$DMG_OUT"; then
+    echo "==> The DMG was not notarized." >&2
+    [ -n "$DMG_ID" ] && xcrun notarytool log "$DMG_ID" --keychain-profile "$PROFILE" >&2 || true
+    exit 1
+  fi
+  xcrun stapler staple "$DMG"
+  xcrun stapler validate "$DMG"
+fi
+
 echo "==> Done"
 echo "    notarized and stapled: $APP"
-echo "    distributable:         $OUT"
+echo "    for Sparkle:           $OUT"
+[ "$SKIP_DMG" -eq 0 ] && echo "    for people:            $DMG"

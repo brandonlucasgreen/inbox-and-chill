@@ -14,7 +14,9 @@ xcodegen generate                                        # after editing project
 xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill -configuration Debug test
 scripts/install-local.sh                                 # Release → /Applications → launch
 scripts/release.sh --dry-run                             # show what a release would do
-scripts/release.sh                                       # notarize + tag + GitHub release
+scripts/release.sh                                       # notarize + tag + release + appcast
+scripts/sparkle-keys.sh                                  # ONE TIME: create the update-signing key
+scripts/appcast.sh                                       # regenerate appcast.xml from dist/
 ```
 
 Tests are Swift Testing (`@Test` / `#expect`), in `Tests/`.
@@ -448,10 +450,12 @@ so nothing recorded which source a zip came from, and `dist/` was holding a
 from different code is worse than no tag.
 
 **The repo is private, so releases are visible only to collaborators** — a
-stranger gets a 404, not a download. That is also why there is no Sparkle
-auto-update: an appcast feed has to be fetchable without auth, so in-app
-updates need the repo (or at least the release assets) to be public first.
-That is a decision for Brandon, not a missing feature.
+stranger gets a 404, not a download. Sparkle is now wired in (2026-08-21) but
+**inert for exactly this reason**: an appcast and the zip it names have to be
+fetchable with no credentials. The code is finished and verified; flipping the
+repo public is the remaining step, and it is Brandon's call, not a missing
+feature. He deferred it on 2026-08-21 — not ready yet. See the Sparkle section
+below and PLAN §2.1.9.
 
 **That last point cuts both ways: `spctl` on a copy you built is not a test.**
 Gatekeeper skips unquarantined apps entirely, so a local "accepted" says
@@ -483,6 +487,102 @@ between releases. The only sequence that produces a stapled install is
 `notarize.sh` followed by `install-local.sh` with no source change in between.
 Symptom of getting it wrong: `stapler staple` fails with
 "Could not find base64 encoded ticket in response".
+
+## In-app updates (Sparkle) — three traps, all silent
+
+Sparkle 2.9.6, added 2026-08-21. `UpdateController` owns it; the feed is
+`appcast.xml` at the repo root, served by raw.githubusercontent.
+
+**It cannot work while the repo is private, and that is the mechanism, not a
+bug.** Sparkle fetches the appcast and then the zip with no credentials, and a
+private repo's release assets 404 for everyone but a collaborator. It *does*
+have an `httpHeaders` property — so "Sparkle can't send a token" is wrong — but
+a token shipped inside a downloadable app is public by construction. Until the
+repo is flipped, `release.sh` warns, `appcast.sh` reports the non-200, and the
+Updates pane says so. Nothing pretends otherwise. See PLAN §2.1.9.
+
+### 1. `INFOPLIST_KEY_<anything>` only works for keys Xcode already knows
+
+`INFOPLIST_KEY_SUFeedURL` built, linked, signed and shipped a bundle with **no
+`SUFeedURL` in it**, with no warning at any stage — Sparkle would simply have
+had no feed to read. Xcode's `INFOPLIST_KEY_*` mechanism honours an allowlist
+and drops everything else on the floor.
+
+So the app now uses an **XcodeGen-generated `Info.plist`** (`info:` in
+project.yml; the output is gitignored like the `.xcodeproj`). One trap inside
+that trap: XcodeGen's plist defaults hardcode `CFBundleShortVersionString` to
+`1.0` and `CFBundleVersion` to `1`. Left alone they pin every build to version
+1.0 — breaking the About pane, the name `notarize.sh` gives the dist zip, and
+Sparkle's "is this newer?" comparison. Both are mapped explicitly to
+`$(MARKETING_VERSION)`/`$(CURRENT_PROJECT_VERSION)`. So is
+`LSMinimumSystemVersion`, which Xcode injects only into plists it generates
+itself, and which Sparkle reads to set `sparkle:minimumSystemVersion`.
+
+**Verify against the built plist, never the build log:**
+
+```bash
+plutil -extract SUFeedURL raw "/Applications/Inbox & Chill.app/Contents/Info.plist"
+```
+
+### 2. Xcode leaves Sparkle's nested helpers ad-hoc signed
+
+`Sparkle.framework` is not one binary. It carries `Autoupdate`, `Updater.app`
+and two XPC services *inside* it, and Xcode's embed step re-signs only the
+framework bundle — leaving all four **ad-hoc signed, with no team identifier
+and no secure timestamp**. Verified on a Release build, 2026-08-21.
+
+Nothing catches it on the way past. The build succeeds, `codesign --verify
+--deep --strict` **passes** (an ad-hoc signature is a valid signature), and the
+app runs and self-updates perfectly well locally. Notarization is the first
+thing that objects, and it objects a long way from the cause — the same shape
+as the `get-task-allow` and missing-timestamp bugs above.
+
+Fixed by project.yml's *Re-sign Sparkle's nested helpers* phase, which signs
+inside-out because sealing an inner item invalidates every seal around it.
+`notarize.sh`'s preflight now checks each nested item individually, and that is
+the regression guard. `--verify --deep` is not, and never was.
+
+```bash
+codesign -dvv "<app>/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate" 2>&1 \
+  | grep -E "adhoc|Developer ID|Timestamp="
+```
+
+### 3. An unsigned appcast entry looks exactly like a working one
+
+`generate_appcast` signs an enclosure **only when the app inside that archive
+declares `SUPublicEDKey`**. A build made before the key existed produces an
+entry with no `sparkle:edSignature` — which Sparkle then refuses, so nobody
+updates and nothing says why. `appcast.sh` fails outright when the newest entry
+is unsigned, and names the script that fixes it.
+
+Two more facts about the feed:
+
+- **`CURRENT_PROJECT_VERSION` must increase every release.** It is what Sparkle
+  compares, not `MARKETING_VERSION`. `release.sh` refuses to tag otherwise;
+  without that check a release is a silent no-op for every existing install.
+- **GitHub release URLs embed the tag**, and `generate_appcast` can only prepend
+  one fixed prefix, so `appcast.sh` inserts `v<version>/` per enclosure
+  afterwards. That is safe because `edSignature` signs the archive bytes, not
+  the URL. It is idempotent, and it refuses to write a feed with an un-tagged
+  URL left in it. The zip's filename must carry the same version as the bundle
+  inside it — which holds, because `notarize.sh` names it from the built
+  `Info.plist`.
+
+### The signing key lives in the *login* keychain
+
+`generate_keys` stores it in the file-based login keychain — not the iCloud
+"Local Items" keychain that has twice made the notary credentials look deleted.
+So `security` can see it, Time Machine backs it up, and **it does not lock when
+the Mac sleeps**. Losing it is unrecoverable, though: existing installs trust
+only the public key baked into the build they are already running. Back it up.
+
+### Releases build clean now
+
+`notarize.sh` runs `clean build`. An incremental Release build can run
+`ExtractAppIntentsMetadata` *after* codesign, rewriting
+`Contents/Resources/Metadata.appintents/extract.actionsdata` and breaking the
+seal; preflight then refuses to submit, a long way from the cause. Observed
+2026-08-21.
 
 ## Working in a git worktree
 

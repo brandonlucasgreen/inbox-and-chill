@@ -82,6 +82,48 @@ without new information**; the reasoning is the evidence above, not a
 preference. His call, given the audit: skip MAS, spend the effort on the
 GitHub release path instead.
 
+### 2.1.9 In-app updates via Sparkle — built 2026-08-21, dormant until the repo is public
+
+Sparkle 2.9.6 is wired in, signed, and verified end to end. It is **inert
+until the repository is public**, and that is a constraint of the mechanism,
+not a missing feature.
+
+**Why public is not negotiable.** Sparkle fetches two things with no
+credentials: `appcast.xml` and the zip the feed names. A private repo's release
+assets return 404 to everyone but a collaborator, so there is nothing for it to
+read. Sparkle *does* expose an `httpHeaders` property, so "it cannot send a
+token" would be wrong — but any token shipped inside a distributed app is
+public by construction, and this one would grant repo read access to anyone who
+ran `strings` on the binary. So the honest statement is: **a credential cannot
+be kept secret in a downloadable app, therefore the feed and the download must
+be things anyone may fetch.**
+
+**The consequence for selling a build, decided 2026-08-21.** A public
+auto-update feed and a paywalled binary are mutually exclusive. The feed must
+name a URL that anybody can download, and the feed URL itself is readable out
+of the shipped app. With license-key gating ruled out as a non-goal, there is
+no way to serve updates to buyers only. Brandon's call: **the purchase is
+support and convenience — skipping the build step and funding the work — not
+access.** The README has to say that plainly rather than implying the paid
+build is the only signed one, because it isn't.
+
+**What was verified rather than assumed:**
+
+- The whole appcast pipeline, against the real notarized zips: signing,
+  `sparkle:minimumSystemVersion` extraction from `LSMinimumSystemVersion`,
+  per-release download URLs, and an EdDSA signature checked back with
+  `sign_update --verify`.
+- That `generate_appcast` signs an enclosure **only when the app inside the
+  archive declares `SUPublicEDKey`**. A build made before the key existed
+  produces a silently unsigned entry, which Sparkle then refuses. `appcast.sh`
+  fails loudly on that rather than publishing it.
+- That Xcode leaves Sparkle's four nested helpers ad-hoc signed. See CLAUDE.md;
+  it is the notarization trap of this change.
+
+**Still Brandon's to do:** create the signing key (`scripts/sparkle-keys.sh`),
+flip the repo public, and — if he still wants the paid path — create the Lemon
+Squeezy product. None is scriptable.
+
 - **Item** — one actionable notification (a Slack mention, a Linear inbox entry, a PR review request, a Claude-waiting event). Can be: opened (deep link), selected, copied (URL + title), marked done (with write-through + ⌘Z undo), snoozed, **pinned**, archived, filtered, grouped.
 - **Source** — a configured connection (Slack workspace, Linear org, GitHub account, webhook endpoint). Can be: added, paused, removed, reordered, badge-toggled.
 

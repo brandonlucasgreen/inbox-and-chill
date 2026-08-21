@@ -8,6 +8,13 @@ packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     from: 2.0.0
+  # In-app updates. Sparkle ships as a binary XCFramework, so SPM embeds and
+  # Xcode re-signs it with our Developer ID — see the nested-code preflight in
+  # scripts/notarize.sh, which exists because that re-signing is the one part
+  # notarization cares about and the one part no build failure would reveal.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.9.6
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -46,6 +53,7 @@ targets:
     sources: [Sources/App]
     dependencies:
       - package: KeyboardShortcuts
+      - package: Sparkle
       - target: inchill
         embed: false
     postBuildScripts:
@@ -78,22 +86,60 @@ targets:
           - $(BUILT_PRODUCTS_DIR)/inchill
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/inchill
+      - name: Re-sign Sparkle's nested helpers
+        # Sparkle.framework is not one binary: it carries Autoupdate,
+        # Updater.app and two XPC services inside it. Xcode's embed step
+        # re-signs the framework *bundle* with our Developer ID and leaves
+        # all four of those **ad-hoc signed, with no team identifier and no
+        # secure timestamp** — verified on a Release build, 2026-08-21.
+        #
+        # Nothing catches that on the way past. The build succeeds,
+        # `codesign --verify --deep --strict` passes (an ad-hoc signature is
+        # a valid signature), and the app runs and updates fine locally.
+        # Notarization is the first thing that objects, and it objects a long
+        # way from the cause — exactly the failure shape that made
+        # get-task-allow and the missing timestamp cost real time before.
+        #
+        # Signed inside-out, because sealing an inner item invalidates every
+        # signature wrapped around it. Xcode signs the app bundle itself
+        # after this phase, so the outermost seal is still the real one.
+        #
+        # Entitlements are deliberately dropped: the only one present is
+        # ad-hoc signing's placeholder `com.apple.application-identifier`,
+        # which asserts an App ID this app does not have and does not need
+        # (see the Distribution notes in CLAUDE.md).
+        script: |
+          set -e
+          FRAMEWORK="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/Sparkle.framework"
+          [ -d "$FRAMEWORK" ] || exit 0
+
+          IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
+          # Same reasoning as the inchill step: the timestamp server is a
+          # network round trip, so only release builds pay for it.
+          if [ "$IDENTITY" = "-" ] || [ "$CONFIGURATION" = "Debug" ]; then
+            STAMP="--timestamp=none"
+          else
+            STAMP="--timestamp"
+          fi
+
+          VERSION_DIR="$FRAMEWORK/Versions/Current"
+          for NESTED in \
+            "$VERSION_DIR/XPCServices/Downloader.xpc" \
+            "$VERSION_DIR/XPCServices/Installer.xpc" \
+            "$VERSION_DIR/Updater.app" \
+            "$VERSION_DIR/Autoupdate" ; do
+            [ -e "$NESTED" ] || continue
+            codesign --force --options runtime "$STAMP" --sign "$IDENTITY" "$NESTED"
+          done
+          codesign --force --options runtime "$STAMP" --sign "$IDENTITY" "$FRAMEWORK"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: lol.bgreen.inboxandchill
         PRODUCT_NAME: Inbox & Chill
         PRODUCT_MODULE_NAME: InboxAndChill
-        GENERATE_INFOPLIST_FILE: true
         MARKETING_VERSION: "0.3.2"
         CURRENT_PROJECT_VERSION: "5"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_LSUIElement: true
-        INFOPLIST_KEY_CFBundleDisplayName: Inbox & Chill
-        # Focusing the Terminal tab a Claude Code item came from is an
-        # AppleEvent to that terminal. Without this string macOS denies the
-        # event outright instead of asking — and the denial looks exactly
-        # like "nothing happened".
-        INFOPLIST_KEY_NSAppleEventsUsageDescription: Inbox & Chill asks your terminal to bring a Claude Code session's window to the front, and asks Mail for the messages you flagged or haven't read.
         ENABLE_HARDENED_RUNTIME: true
         ENABLE_USER_SCRIPT_SANDBOXING: false
         # The hardened runtime blocks Apple events outright unless the app
@@ -112,6 +158,67 @@ targets:
         # hardened-runtime resource-access entitlement — no App ID, no
         # provisioning profile, accepted by notarization.
         CODE_SIGN_ENTITLEMENTS: InboxAndChill.entitlements
+    # A GENERATED Info.plist, not a hand-maintained one — gitignored exactly
+    # like the .xcodeproj, so project.yml stays the single source of truth and
+    # `xcodegen generate` is what produces both.
+    #
+    # Why not GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* any more: Xcode's
+    # INFOPLIST_KEY_<name> mechanism only honours the keys it already knows
+    # about. `INFOPLIST_KEY_SUFeedURL` compiled, linked and shipped a bundle
+    # with NO SUFeedURL in it, with no warning at any stage — Sparkle would
+    # simply have had no feed to read. Verified by reading the built plist,
+    # which is the only thing that settles it (CLAUDE.md rule 1).
+    info:
+      path: InboxAndChill-Info.plist
+      properties:
+        # XcodeGen's own defaults for these two are the literals "1.0" and
+        # "1". Left alone they would silently pin every build to version 1.0,
+        # which breaks the About pane, the name notarize.sh gives the dist
+        # zip, and — worst — Sparkle's "is this newer?" comparison, so no
+        # update would ever be offered.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDisplayName: Inbox & Chill
+        LSUIElement: true
+        # Xcode injects this only into a plist it generates itself. Sparkle
+        # reads it out of the app inside the zip to write the appcast's
+        # sparkle:minimumSystemVersion, so a missing value here would offer
+        # the update to Macs that cannot run it.
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        # Focusing the Terminal tab a Claude Code item came from is an
+        # AppleEvent to that terminal. Without this string macOS denies the
+        # event outright instead of asking — and the denial looks exactly
+        # like "nothing happened".
+        NSAppleEventsUsageDescription: Inbox & Chill asks your terminal to bring a Claude Code session's window to the front, and asks Mail for the messages you flagged or haven't read.
+
+        # --- Sparkle in-app updates -----------------------------------------
+        # The feed must be fetchable with no credentials at all: Sparkle sends
+        # no headers and takes no token, for the appcast or for the zip it
+        # then downloads. That is the whole reason this repo is public — a
+        # private repo's release assets 404 for everyone but a collaborator,
+        # so there was nothing for Sparkle to fetch.
+        #
+        # raw.githubusercontent serves the committed appcast.xml directly, so
+        # there is no Pages build to enable and nothing to keep in sync. Its
+        # CDN caches for ~5 minutes, which is why a release you just cut is
+        # not offered instantly.
+        SUFeedURL: https://raw.githubusercontent.com/brandonlucasgreen/inbox-and-chill/main/appcast.xml
+        #
+        # SUPublicEDKey is deliberately ABSENT until you generate the signing
+        # keypair — one command, once, ever:
+        #
+        #     scripts/sparkle-keys.sh
+        #
+        # It prints the line to paste right here:
+        #
+        #     SUPublicEDKey: <44-character base64 key>
+        #
+        # then run `xcodegen generate`. A placeholder is not used on purpose:
+        # Sparkle would accept it, fetch a real update, fail the EdDSA check
+        # and report a signature error — which reads like a corrupted download
+        # rather than "you never made a key". Absent, the Updates section in
+        # Settings names the actual problem instead (rule 5, and see
+        # UpdateController.configurationProblem).
   inchill:
     type: tool
     platform: macOS
