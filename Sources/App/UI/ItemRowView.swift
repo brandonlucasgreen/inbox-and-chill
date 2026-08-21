@@ -102,7 +102,7 @@ struct ItemRowView: View {
 
     @ViewBuilder private var trailing: some View {
         if isHovering {
-            HStack(spacing: 2) {
+            HStack(spacing: 1) {
                 actionButton(
                     "arrow.up.forward.app", key: "⏎", "Open (⏎)", "Open"
                 ) {
@@ -156,15 +156,15 @@ struct ItemRowView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 13))
+                    .font(.system(size: 11))
                 KeyCap(key)
             }
             // Icon-only buttons need an explicit frame — the bare glyph's
             // bounds make a fiddly ~14pt hit target.
-            .padding(.horizontal, 4)
-            .frame(height: 24)
+            .padding(.horizontal, 2)
+            .frame(height: 22)
             .contentShape(.rect)
         }
         .help(help)
@@ -269,7 +269,7 @@ struct KeyCap: View {
 
     var body: some View {
         Text(key)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .font(.system(size: 9, weight: .semibold, design: .rounded))
             .monospacedDigit()
             // Every other cap is a single glyph; "⌘P" is two, and the trailing
             // action stack was squeezing it down to a lone ellipsis. A cap is
@@ -277,7 +277,7 @@ struct KeyCap: View {
             .lineLimit(1)
             .fixedSize()
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 3)
+            .padding(.horizontal, 2)
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
