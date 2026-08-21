@@ -22,7 +22,7 @@ To-dos and "things awaiting me" live in at least seven places: Linear inbox, Sla
 4. **App notifications**: silent by default; per-source opt-in banners; Claude/terminal sources default on; Focus modes respected.
 5. **Snooze**: write-through for Linear (real remote snooze), local for the rest, identical UI; snoozed items visible in a collapsed section; a waking item always banners (snoozing is consent to be interrupted). *Amendment: under a Focus mode, wake banners defer like any notification — honoring "always" literally would require the time-sensitive entitlement; politeness wins.*
 6. **Done items archive for 90 days** (searchable, ⌘Z undo-done), then purge. **Pin (⌘P)** exempts an item from *all* auto-clears, done, and purge — pinned section at top of panel, leaves only by unpinning.
-7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store **audited and declined 2026-08-20 — see §2.1.8**. Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
+7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store **audited and declined 2026-08-20 — see §2.1.8**, **re-audited 2026-08-21 against a pared-down variant — see §2.1.10** (the sandbox objection does not survive cutting the CLI/Mail/journal; the case against MAS is now onboarding and differentiation). Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
 8. **Cloudflare relay deferred; Notion connector demoted to build-on-demand** (Notion's tenure in the stack is itself uncertain). v1 is fully self-contained — zero infrastructure.
 9. **Slack save emoji**: configurable, default 📌 `:pushpin:`. Slack app created + install attempted immediately.
 10. **Naming**: app **Inbox & Chill**, CLI **`inchill`**, bundle ID **`lol.bgreen.inboxandchill`**.
@@ -123,6 +123,109 @@ build is the only signed one, because it isn't.
 **Still Brandon's to do:** create the signing key (`scripts/sparkle-keys.sh`),
 flip the repo public, and — if he still wants the paid path — create the Lemon
 Squeezy product. None is scriptable.
+
+### 2.1.10 Mac App Store, re-opened 2026-08-21 — a pared-down MAS variant
+
+§2.1.8 said "do not re-open without new information". This is the new
+information: Brandon proposed **cutting** the three features that audit found
+broken — the `inchill` CLI, the Apple Mail source, and the journal — and
+shipping a reduced build to MAS. That invalidates §2.1.8's evidence rather
+than contradicting it: all three of its verified breakages live in code the
+proposal deletes.
+
+**The sandbox objection does not survive the cut.** The remaining source set
+(Linear, GitHub, Slack, ntfy, Sentry, Custom JSON) was swept for
+sandbox-hostile API and there is none. What is left uses `URLSession` and
+WebSockets, the Keychain, SwiftData under Application Support, `NSPasteboard`,
+`SMAppService`, `UserNotifications`, App Intents, `NSWorkspace.open` and
+KeyboardShortcuts' Carbon hotkey — every one of which is sandbox-legal and all
+but the first need no entitlement. **The variant needs exactly one:
+`com.apple.security.network.client`.** No `network.server` (that was the local
+listener alone), no `apple-events`, no security-scoped bookmarks. Container
+redirection stops mattering once nothing outside the container reads the store,
+and a container-scoped Keychain is only a migration problem, which a separate
+product has no migration to do.
+
+**And it is a variant, not a fork.** The coupling was measured, not estimated.
+Whole directories leave cleanly — `Connectors/Mail/`, `Connectors/Local/`,
+`Journal/`, `Sources/CLI/`, `Support/UpdateController.swift` — and the shared
+code touches them in eight seams: two `AppState.makeConnector` cases, two
+`ConnectorCatalog.all` entries, `SettingsView`'s `ClaudeCodeIntegrationRow` and
+its journal section, ~53 lines of journal prefs and a **single**
+`JournalWriter.shared.record` call in `AppState`, the `ClaudeSessionOpener`
+call, `PanelView`'s automation-settings link, and Sparkle's four references.
+XcodeGen already builds from directory lists, so a second target with a
+different `sources:` plus `#if MAS` on those seams is the whole mechanism.
+This matters because a fork is what would make the idea bad, and this is not one.
+
+**So the blockers are no longer technical. Two remain, and both are worse.**
+
+1. **Onboarding, which collides with Guideline 2.1.** Every surviving source is
+   BYO-credential, and the `authNote` strings record *why* each one has to be:
+   Slack needs the user to register their own app and paste a
+   twelve-scope manifest, GitHub needs a classic PAT (fine-grained are
+   rejected outright), Linear a personal API key, Sentry an org slug and token.
+   That is self-hosted-developer-tool onboarding sold to someone who has just
+   paid at a checkout — a refund engine. It also has to survive App Review,
+   which needs working credentials to see any feature at all; without them the
+   app is an empty window. Supplying a live test workspace, PAT and Linear org
+   is possible once and required again on every resubmission.
+2. **The variant is the app minus its reason to exist.** The Claude Code
+   integration is the differentiator — one row per session, `UserPromptSubmit`
+   as the load-bearing clear, `.announcesReturn`. §2.1.8 called it the most
+   exposed feature; it still is, only now deleted rather than degraded. What
+   ships is "unified inbox for Linear/GitHub/Slack" competing on App Store
+   discovery, at a 15–30% cut, with worse setup than anything else in that
+   category. Note also which source the cut removes: Mail is the only
+   mass-market one in the list. Everything kept is a developer tool.
+
+**"A more kosher way" to read Mail does not exist on MAS.** Verified against
+Apple's own guidance rather than reasoned about:
+
+- The sanctioned sandbox path is `com.apple.security.scripting-targets`, which
+  requires the *target* app to declare an access group. Per QA1888 the only
+  documented access group Mail exposes is **compose**. The sanctioned path can
+  create a message and cannot read one.
+- The fallbacks (`temporary-exception.apple-events`,
+  `automation.apple-events`) are what Apple explicitly calls a last resort.
+  Mechanically they upload — the ITMS-90285 rejection was an App Store Connect
+  backend bug, fixed in 2018 — but review treatment is contested and "reads
+  your mail over Apple events" is the shape reviewers push on.
+- The non-AppleScript routes are worse, not better. Gmail's API needs
+  restricted scopes, so an annual CASA Tier 2 assessment (lab pricing from
+  ~$500 to several thousand a year) with unverified apps capped at 100 users
+  behind a warning screen; IMAP-direct means writing an IMAP client and still
+  needs Google OAuth; a MailKit extension acts on messages at delivery and
+  cannot enumerate a mailbox on demand, which is the wrong shape for a queue.
+
+**Sparkle cuts the other way.** True that MAS makes Sparkle unnecessary — for
+the MAS build. The direct build still has the features, so it still ships, so
+both update paths get maintained rather than one. And §2.1.9 already settled
+that the purchase is support and convenience, not access: MAS adds a paywalled
+channel to an MIT-licensed app whose fuller version is a free download beside it.
+
+**Recommendation: still no — but for an inverted reason, which is the useful
+part.** 2026-08-20 said *technically impossible without degrading the app*.
+This audit says *technically easy, commercially and product-wise upside-down*.
+That names the conditions under which it stops being upside-down, which the
+first audit could not:
+
+- **A zero-setup source exists.** OAuth where it is possible, or the deferred
+  Cloudflare relay (§2.1: decision 8). That shrinks the Guideline 2.1 problem
+  and the refund problem at the same time, and it is the prerequisite for MAS
+  being worth anything.
+- **The goal becomes revenue rather than support.** Then MAS's payments and
+  discovery are the actual prize — and the work that unlocks it is onboarding,
+  not a MAS target.
+
+Corollary: because it is a variant and roughly a day's work, this does not need
+deciding now and stays reversible. **Do not build the MAS target before the
+onboarding work**; it would ship the weaker app into the harsher channel and
+learn nothing that the onboarding work does not teach first.
+
+**Verdict: Brandon's call.** The audit's finding is that the sandbox reasoning
+in §2.1.8 is now obsolete and the case against MAS rests entirely on onboarding
+and differentiation instead.
 
 - **Item** — one actionable notification (a Slack mention, a Linear inbox entry, a PR review request, a Claude-waiting event). Can be: opened (deep link), selected, copied (URL + title), marked done (with write-through + ⌘Z undo), snoozed, **pinned**, archived, filtered, grouped.
 - **Source** — a configured connection (Slack workspace, Linear org, GitHub account, webhook endpoint). Can be: added, paused, removed, reordered, badge-toggled.
