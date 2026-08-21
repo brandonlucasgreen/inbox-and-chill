@@ -21,6 +21,36 @@ scripts/appcast.sh                                       # regenerate appcast.xm
 
 Tests are Swift Testing (`@Test` / `#expect`), in `Tests/`.
 
+## How work lands: a PR, always
+
+**Do not push to `main`.** Branch, open a PR, let Brandon review it. This
+changed on 2026-08-21 and the reason is simply that he is no longer the only
+person committing here — the repo had no PR flow because it had one author, and
+that stopped being true.
+
+```bash
+git checkout -b <kind>/<short-name> origin/main   # fix/… feat/… docs/…
+# work, commit
+git push -u origin <branch>
+gh pr create --title "…" --body "…"
+```
+
+Two things that follow from more than one contributor, and bite quietly:
+
+- **Rebase on `origin/main` before you push, and check what came in.** Guest PRs
+  land between your first commit and your last. `git diff --stat HEAD origin/main`
+  tells you whether they touched anything you touched; if not, a rebase is free.
+- **`CURRENT_PROJECT_VERSION` is a merge magnet.** Every release bumps it, so two
+  branches that both bump it conflict. Leave it alone in feature branches — the
+  release bump is its own commit on `main`.
+
+Releases are still cut from `main`, after merge: `release.sh` refuses to run from
+any other branch, on a dirty tree, or out of sync with `origin`.
+
+Nothing about the review rules changes for an agent: say plainly what you did
+**not** verify (rule 1), and do not contradict a recorded verdict without
+reading it first (rule 4). A PR body is a good place for both.
+
 ## The six rules that keep being learned the hard way
 
 ### 1. `xcodebuild test` installs nothing
