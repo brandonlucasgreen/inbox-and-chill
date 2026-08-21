@@ -41,6 +41,12 @@ final class AppState {
     /// get must never fail silently (PLAN §2).
     private(set) var bannerAuthorization: BannerAuthorization.Outcome?
 
+    /// Whether macOS will let the app read Mail; `nil` until something has
+    /// looked. Same contract as `bannerAuthorization` and for the same
+    /// reason — a refusal here is invisible from the queue, because it looks
+    /// exactly like an inbox with nothing in it.
+    private(set) var mailAutomation: MailAutomationAuthorization.Outcome?
+
     /// Persisted across relaunch (§5.3). nil = All.
     var selectedSourceFilter: String? {
         get {
@@ -423,6 +429,40 @@ final class AppState {
     /// permission state is recorded where it can be read after the fact.
     private static let bannerLog = Logger(
         subsystem: "lol.bgreen.inboxandchill", category: "banners")
+
+    /// Resolves permission to read Mail, recording the outcome in
+    /// `mailAutomation`, and reports whether a read can go ahead.
+    ///
+    /// `prompting: false` only reads the state and never shows a dialog, so
+    /// it is safe on appear, on refresh, anywhere. Pass `true` **only** from
+    /// a control the user just pressed: macOS shows the Automation dialog
+    /// once, and the whole point of this flow is that the user has read what
+    /// it is for before it appears (`MailAutomationAuthorization.preflight`).
+    @discardableResult
+    func resolveMailAutomation(prompting: Bool) async -> Bool {
+        let previous = mailAutomation
+        let outcome = await MailAutomation.resolve(prompting: prompting)
+        mailAutomation = outcome
+        // Only on the transition *into* granted. Permission just arrived, so
+        // the sources that were refusing to poll have something to say now,
+        // and without this the user waits out a poll interval after clicking
+        // Allow — which reads as the permission not having worked. Firing on
+        // every resolve instead would re-poll every source in the app each
+        // time this view merely appeared.
+        if outcome.allowsFetch, previous?.allowsFetch != true {
+            await engine.refreshNow()
+        }
+        return outcome.allowsFetch
+    }
+
+    /// Whether any configured, enabled source actually needs Mail — the
+    /// notice is silent otherwise, exactly like `hasBannerEnabledSource`.
+    var hasEnabledMailSource: Bool {
+        let configs =
+            (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
+            ?? []
+        return configs.contains { $0.kind == "appleMail" && $0.isEnabled }
+    }
 
     /// Requests permission on first use (if undetermined), then posts.
     private func postBanners(_ items: [ItemSummary], sound: Bool) async {

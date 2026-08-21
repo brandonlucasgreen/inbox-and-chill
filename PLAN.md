@@ -227,6 +227,42 @@ learn nothing that the onboarding work does not teach first.
 in §2.1.8 is now obsolete and the case against MAS rests entirely on onboarding
 and differentiation instead.
 
+### 2.1.11 Who buys this — the non-technical buyer, decided 2026-08-21
+
+Brandon's call after §2.1.10: skip MAS, and market the direct build to less
+technical buyers with a proper landing page. That changes who the app is *for*,
+which changes §2.1.9's reasoning about what a purchase means. Three consequences.
+
+**The direct build is the only one that can serve this buyer, and Apple Mail is
+why.** Mail is the sole zero-credential source in the app — no token, nothing to
+register, nothing to sign into — and it covers Gmail (§6.13). Every other source
+is BYO-credential by necessity, documented in its `authNote`. So the reduced MAS
+variant §2.1.10 costed out would have been aimed squarely at non-technical
+buyers while having cut the one source they could actually set up. That is the
+argument against MAS restated from the demand side, and it is the stronger form.
+
+**The purchase reads differently now, and §2.1.9 needs this amendment.** That
+section worried that an MIT licence plus a free notarized download undercuts
+paying. It only undercuts it for people who would clone the repo and run
+`xcodebuild`. For someone who does not know what a build step is, paying *is*
+the access path — not as a technicality but in practice. So "the purchase is
+support and convenience, not access" stays literally true while ceasing to be
+awkward: for this audience convenience is the whole product. The README should
+still not imply the paid build is the only signed one, because it isn't.
+
+**The binding constraint is source #2, not the landing page.** Aggregation means
+nothing with one source, and today the second source is where the tokens start.
+So the honest offering for a non-technical buyer right now is Mail plus ntfy.
+Either the positioning narrows to something true today — a Mail triage queue
+that grows as you add tools — or the zero-setup-source work §2.1.10 named as
+MAS's prerequisite gets done for the direct build instead. Same work, better
+channel, and it is the one thing that would widen this audience.
+
+**Which makes first run the conversion point, not the copy.** The first thing a
+non-technical buyer meets is macOS asking permission to control Mail, and on a
+cold Mail a ~12 second wait behind it. Both used to arrive unannounced from a
+background poll. See §6.16.
+
 - **Item** — one actionable notification (a Slack mention, a Linear inbox entry, a PR review request, a Claude-waiting event). Can be: opened (deep link), selected, copied (URL + title), marked done (with write-through + ⌘Z undo), snoozed, **pinned**, archived, filtered, grouped.
 - **Source** — a configured connection (Slack workspace, Linear org, GitHub account, webhook endpoint). Can be: added, paused, removed, reordered, badge-toggled.
 
@@ -539,6 +575,61 @@ Unchanged caveat: an integration sees only pages explicitly shared with it, so c
 - **Discord** — the user-token API violates ToS, and a bot token cannot see your DMs. Same shape as the `xoxc`/`xoxd` verdict in §6.1.
 - **Mixpanel / Amplitude alerts** — no personal notification API; they alert by email and Slack, so they already arrive through those sources.
 - **GitHub Actions** — already arrives as `ci_activity`, handled by `GitHubConnector.humanize`. Don't rebuild it.
+
+## 6.16 First run — the Apple Mail permission flow (built 2026-08-21)
+
+The conversion point for the audience §2.1.11 describes, and it was previously
+the app's worst moment.
+
+**What it used to do.** Adding an Apple Mail source registered a connector that
+polled 60s later. `tell application "Mail"` launches Mail and trips TCC, so the
+first thing the user saw was macOS's Automation dialog — Apple's wording, no
+context, up to a minute after they last touched the app, and on a cold Mail a
+further ~12 seconds of nothing. "Don't Allow" is the safe answer to an
+unexplained dialog, and the refusal that follows (-1743) is
+indistinguishable from an empty inbox. macOS shows that dialog **once per app
+per target**; a background timer was spending it.
+
+**The rule now: explain, then ask because a button was pressed.**
+
+- `MailAutomationAuthorization` — pure. Maps the `OSStatus` from
+  `AEDeterminePermissionToAutomateTarget` to a verdict, owns every string, and
+  owns the pre-prompt copy as a structured `Preflight` so the tests can assert
+  on the parts. Mirrors `BannerAuthorization` deliberately, for the reason that
+  type gives: the wording is the part that has to be right and a test process
+  cannot stand up TCC.
+- `MailAutomation` — the one impure call. `resolve(prompting:)` wraps
+  `AEDeterminePermissionToAutomateTarget`, which **answers without prompting
+  when `askUserIfNeeded` is false**. That is the primitive the whole flow rests
+  on: the app can know its permission state without spending the prompt.
+- `AppleMailConnector.fetch()` checks non-prompting before building a script,
+  so every permission state becomes a named source status on the *first* poll
+  instead of a -1743 nobody sees.
+- `MailAccessSection` in the source editor is the only place in the app that
+  passes `prompting: true`. **Keep it that way.** It sits above the toggles, for
+  the reason the setup steps do, and the macOS dialog appears with the
+  explanation still on screen.
+- `MailPermissionNotice` in the Sources list is the counterpart to
+  `BannerPermissionNotice` for every day after setup, with "Check Again"
+  because granting in System Settings does not notify the app.
+
+**Two deliberate decisions worth not undoing:**
+
+- **A closed Mail does not poll.** `Outcome.allowsFetch` is true only for
+  `.granted`, so `.mailNotRunning` refuses too. macOS won't report a permission
+  state while Mail is closed, and fetching anyway would launch Mail from a
+  background timer — the last remaining path to an unattributed dialog. The
+  cost is that the app will not auto-launch Mail to fill its queue, which is
+  what `explain(-600)` already told users it did not do.
+- **Two wordings for the not-yet-asked state.** `notRequestedAdvice` names the
+  button, for a source status message with no button in reach;
+  `notRequestedMessage` does not, because in the UI the button is beside it.
+
+The claims in the preflight copy are assertions about
+`AppleMailConnector.fetchScript` and `markDoneScript` — subject/sender/date and
+never the body, read state and a flag only if a flag queued the row, no network
+path at all. `preflightSaysTheLoadBearingThings` guards them, because a
+reassurance that has drifted out of date is worse than none.
 
 ## 7. Milestones
 

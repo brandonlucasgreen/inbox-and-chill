@@ -82,6 +82,14 @@ struct SourceEditorSheet: View {
                     Section("How to get set up") { setupSteps }
                 }
 
+                // Above the toggles for the same reason the setup steps
+                // are: this is what you need before deciding anything. It is
+                // also the only place in the app that can raise macOS's
+                // Automation dialog, and it does so from a button.
+                if descriptor.id == "appleMail" {
+                    MailAccessSection()
+                }
+
                 if !descriptor.fields.isEmpty {
                     Section {
                         ForEach(descriptor.fields) { field in

@@ -128,6 +128,32 @@ Related: **log the AppleScript error *message*, not just its number.**
 `NSAppleScript.errorBriefMessage` said "Invalid index" and named the bug
 outright; `-1719` on its own cost an hour.
 
+**And exactly one place in the app may spend the Automation prompt.** macOS
+shows that dialog once per app per target and never again, so *who* triggers it
+decides whether the user ever understood what they were agreeing to. For Mail
+that place is `MailAccessSection` in the source editor — the only caller that
+passes `prompting: true` — and it renders
+`MailAutomationAuthorization.preflight` above the button, so the explanation is
+on screen when the dialog lands. Everything else, `AppleMailConnector.fetch()`
+included, calls `MailAutomation.resolve(prompting: false)`, which
+`AEDeterminePermissionToAutomateTarget` answers **without** prompting when
+`askUserIfNeeded` is false. That is the primitive worth remembering: the app can
+read its own permission state for free.
+
+Two consequences that look like bugs and are not:
+
+- **A closed Mail does not poll** (`Outcome.allowsFetch` is true only for
+  `.granted`). `tell application "Mail"` *launches* Mail, so fetching with
+  permission unknown would raise the dialog from a 60s timer, which is the
+  whole failure being prevented.
+- **Adding a `prompting: true` caller is a regression**, even a well-meaning
+  one on first launch. If a new AppleScript target needs consent, give it its
+  own preflight rather than widening an existing one.
+
+`ClaudeSessionOpener` is the other Apple-event caller and is already fine: it
+fires on ⏎ against a *terminal* (a different TCC target), so its prompt is
+attributable to a keypress the user just made.
+
 ### 3. Quote every path you hand to a shell
 
 The bundle is `Inbox & Chill.app`. A shell reads the `&` as a background-job
