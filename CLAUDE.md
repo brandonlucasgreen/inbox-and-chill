@@ -17,7 +17,7 @@ scripts/verify-bundle.sh                                 # audit a built .app (s
 scripts/install-local.sh                                 # Release → /Applications → launch
 scripts/reset-first-run.sh --dry-run                     # back to a fresh install (see below)
 scripts/release.sh --dry-run                             # show what a release would do
-scripts/release.sh                                       # notarize + tag + release + appcast
+scripts/release.sh                                       # notarize + tag + release + appcast (runbook: docs/releasing.md)
 scripts/sparkle-keys.sh                                  # ONE TIME: create the update-signing key
 scripts/appcast.sh                                       # regenerate appcast.xml from dist/
 ```
@@ -565,13 +565,22 @@ so nothing recorded which source a zip came from, and `dist/` was holding a
 0.3.1 zip that predated two commits on `main`. A tag whose artifact was built
 from different code is worse than no tag.
 
-**The repo is private, so releases are visible only to collaborators** — a
-stranger gets a 404, not a download. Sparkle is now wired in (2026-08-21) but
-**inert for exactly this reason**: an appcast and the zip it names have to be
-fetchable with no credentials. The code is finished and verified; flipping the
-repo public is the remaining step, and it is Brandon's call, not a missing
-feature. He deferred it on 2026-08-21 — not ready yet. See the Sparkle section
-below and PLAN §2.1.9.
+**The repo went public on 2026-08-21**, which was the last precondition for
+Sparkle. Release assets now download with no credentials (verified: the
+`v0.3.2` zip returns 200 anonymously). The earlier note here — that Sparkle was
+inert because a private repo 404s for strangers — described a state that no
+longer holds.
+
+**Sparkle still does not work yet, for a different reason: nothing has shipped
+since it was wired in.** `v0.3.2` is tagged at `21c231b`, before `5a9ce81`
+(Sparkle) and `806b42d` (the signing key), so the only published build has no
+Sparkle in it at all — no `UpdateController`, no `SUFeedURL`, no
+`SUPublicEDKey`. It does not fail to find an update; it never looks. And
+`appcast.xml` has never been generated, so the feed URL 404s.
+
+The next release fixes both at once, and is a one-time manual install for
+anyone on 0.3.2. **`docs/releasing.md` is the runbook** — read it before
+cutting a release. See also PLAN §2.1.9.
 
 **That last point cuts both ways: `spctl` on a copy you built is not a test.**
 Gatekeeper skips unquarantined apps entirely, so a local "accepted" says
@@ -609,13 +618,15 @@ Symptom of getting it wrong: `stapler staple` fails with
 Sparkle 2.9.6, added 2026-08-21. `UpdateController` owns it; the feed is
 `appcast.xml` at the repo root, served by raw.githubusercontent.
 
-**It cannot work while the repo is private, and that is the mechanism, not a
-bug.** Sparkle fetches the appcast and then the zip with no credentials, and a
-private repo's release assets 404 for everyone but a collaborator. It *does*
-have an `httpHeaders` property — so "Sparkle can't send a token" is wrong — but
-a token shipped inside a downloadable app is public by construction. Until the
-repo is flipped, `release.sh` warns, `appcast.sh` reports the non-200, and the
-Updates pane says so. Nothing pretends otherwise. See PLAN §2.1.9.
+**It could not work while the repo was private, and that was the mechanism,
+not a bug.** Sparkle fetches the appcast and then the zip with no credentials,
+and a private repo's release assets 404 for everyone but a collaborator. It
+*does* have an `httpHeaders` property — so "Sparkle can't send a token" is
+wrong — but a token shipped inside a downloadable app is public by
+construction. That constraint is now satisfied: the repo went public on
+2026-08-21. What remains is that no Sparkle-carrying build has been released
+yet, and no `appcast.xml` exists — `docs/releasing.md` covers both. See PLAN
+§2.1.9.
 
 ### 1. `INFOPLIST_KEY_<anything>` only works for keys Xcode already knows
 
