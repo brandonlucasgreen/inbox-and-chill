@@ -110,6 +110,34 @@ To debug a hook that "silently doesn't fire", run the *stored command string*
 the way the harness does — `sh -c "$CMD"` — not the binary with your own
 quoting. The latter hides the bug.
 
+**And these scripts run under bash 3.2, not the bash you have in mind.** macOS
+still ships 3.2.57, where expanding an **empty array** under `set -u` is an
+"unbound variable" *error*, not an empty expansion:
+
+```bash
+ARGS=()
+cmd "${ARGS[@]}"                    # bash 3.2 + set -u: fatal
+cmd ${ARGS[@]+"${ARGS[@]}"}         # correct
+```
+
+This shipped broken in `appcast.sh` on 2026-08-21 and would have failed **every
+real release**: the array was only non-empty when an env var supplied a key
+file, which is exactly the path used while testing, so the tested path worked
+and the default one — read the key from the Keychain — died. If a script takes
+an optional-flags array, use the `+` form. Every script here starts
+`set -euo pipefail`, so this is not hypothetical.
+
+Also worth knowing when checking secrets: **`gitleaks` defaults to the working
+tree only.** The scan that matters is
+
+```bash
+gitleaks detect --source . --log-opts="--all" --redact
+```
+
+`.gitleaks.toml` holds one deliberate exemption (Sparkle's *public* key) and
+explains why a global allowlist must not use `paths` — it ORs with `regexes`
+rather than ANDing, so a path filter exempts the whole file.
+
 ### 4. Read the verdicts this repo already recorded
 
 Before proposing a connector change or answering an API-capability question,
