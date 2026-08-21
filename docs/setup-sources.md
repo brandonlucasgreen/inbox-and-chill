@@ -41,7 +41,7 @@ Two things follow from it:
 
 Slack setup has more steps because you're creating your own Slack app rather than pasting in a single key.
 
-1. Go to **https://api.slack.com/apps → Create New App → From an app manifest**, pick your workspace, and paste in the contents of [`docs/slack-app-manifest.yml`](slack-app-manifest.yml).
+1. Go to **https://api.slack.com/apps → Create New App → From an app manifest**, pick your workspace, switch to the **YAML** tab, and paste in the contents of [`docs/slack-app-manifest.yml`](slack-app-manifest.yml).
 2. Click **Install to Workspace**. If your workspace has "Require App Approval" turned on, this queues an approval request instead of installing immediately — a workspace admin will need to approve it before the app can be used. (It's a read-only app that only ever acts on your own account, which tends to be an easy approval to ask for.)
 3. Once installed, collect your tokens:
    - **User OAuth Token** (`xoxp-…`) — on the app's **OAuth & Permissions** page, under "OAuth Tokens for Your Workspace". **Required.**

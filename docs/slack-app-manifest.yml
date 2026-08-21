@@ -1,7 +1,8 @@
 # Inbox & Chill — Slack app manifest
 #
 # Create the app: https://api.slack.com/apps → "Create New App" →
-# "From an app manifest" → pick the Buffer workspace → paste this file.
+# "From an app manifest" → pick the Buffer workspace → switch to the YAML
+# tab → paste this file.
 # Then: Install to Workspace (this may trigger an admin approval request).
 #
 # After install, collect the token(s) for the app's Slack source settings:
