@@ -23,28 +23,25 @@ struct FilterBar: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 4) {
+            FlowLayout(horizontalSpacing: 4, verticalSpacing: 4) {
+                chip(
+                    label: "All", systemImage: "tray.2", count: totalCount,
+                    isOn: selection == nil, shortcut: 1
+                ) { selection = nil }
+                ForEach(Array(sources.enumerated()), id: \.element.id) {
+                    offset, source in
                     chip(
-                        label: "All", systemImage: "tray.2", count: totalCount,
-                        isOn: selection == nil, shortcut: 1
-                    ) { selection = nil }
-                    ForEach(Array(sources.enumerated()), id: \.element.id) {
-                        offset, source in
-                        chip(
-                            label: source.name,
-                            systemImage: source.systemImage,
-                            count: counts[source.id] ?? 0,
-                            isOn: selection == source.id,
-                            shortcut: offset + 2
-                        ) { selection = source.id }
-                    }
+                        label: source.name,
+                        systemImage: source.systemImage,
+                        count: counts[source.id] ?? 0,
+                        isOn: selection == source.id,
+                        shortcut: offset + 2
+                    ) { selection = source.id }
                 }
-                .padding(.horizontal, 8)
-                .padding(.top, 8)
-                .padding(.bottom, isFiltering ? 0 : 6)
             }
-            .scrollIndicators(.never)
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+            .padding(.bottom, isFiltering ? 0 : 6)
 
             if isFiltering {
                 filterField
@@ -116,6 +113,59 @@ struct FilterBar: View {
                 ? "Show \(label) (⌘\(shortcut))" : "Show \(label)")
         .accessibilityLabel("\(label) filter")
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+}
+
+/// Lays out children left-to-right, wrapping onto a new row when the next
+/// child no longer fits the available width — the source filter chips have
+/// no fixed count, and a horizontally-scrolling row hid the ones that didn't
+/// fit with no visible scrollbar and no way to reach them without knowing to
+/// scroll. Wrapping means every chip is always on screen and clickable,
+/// however many sources are configured.
+struct FlowLayout: Layout {
+    var horizontalSpacing: CGFloat = 4
+    var verticalSpacing: CGFloat = 4
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var totalHeight: CGFloat = 0
+        var lineWidth: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if lineWidth > 0, lineWidth + horizontalSpacing + size.width > width {
+                totalHeight += lineHeight + verticalSpacing
+                lineWidth = 0
+                lineHeight = 0
+            }
+            lineWidth += (lineWidth > 0 ? horizontalSpacing : 0) + size.width
+            lineHeight = max(lineHeight, size.height)
+        }
+        totalHeight += lineHeight
+        return CGSize(width: width.isFinite ? width : lineWidth, height: totalHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+        cache: inout ()
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += lineHeight + verticalSpacing
+                lineHeight = 0
+            }
+            subview.place(
+                at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: .unspecified)
+            x += size.width + horizontalSpacing
+            lineHeight = max(lineHeight, size.height)
+        }
     }
 }
 
