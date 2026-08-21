@@ -12,6 +12,8 @@ the things that have actually bitten, and the conventions to keep.
 ```bash
 xcodegen generate                                        # after editing project.yml
 xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill -configuration Debug test
+scripts/check-shell.sh                                   # what CI runs on scripts/
+scripts/verify-bundle.sh                                 # audit a built .app (see CI, below)
 scripts/install-local.sh                                 # Release → /Applications → launch
 scripts/reset-first-run.sh --dry-run                     # back to a fresh install (see below)
 scripts/release.sh --dry-run                             # show what a release would do
@@ -44,6 +46,35 @@ Two things that follow from more than one contributor, and bite quietly:
 - **`CURRENT_PROJECT_VERSION` is a merge magnet.** Every release bumps it, so two
   branches that both bump it conflict. Leave it alone in feature branches — the
   release bump is its own commit on `main`.
+
+### CI runs on every PR (added 2026-08-21)
+
+`.github/workflows/` — full explanation, including what it deliberately does
+not do, in `docs/ci.md`. The short version, and the parts that change how you
+work here:
+
+- **CI never signs anything for real.** No Developer ID certificate, no notary
+  credentials, no Sparkle private key reaches a runner; builds there are
+  ad-hoc signed. So CI cannot tell you a build is notarizable — that is still
+  `scripts/notarize.sh --preflight-only` on a Mac, and it is still the only
+  thing that can.
+- **A green CI run is not rule 1 satisfied.** It runs `xcodebuild test`, which
+  installs nothing. "Ran against a real install" still means
+  `scripts/install-local.sh` and a check against the installed binary, and the
+  PR template asks you to say so either way.
+- **`scripts/verify-bundle.sh` is the new regression guard for the Info.plist
+  traps.** Nothing checked SUFeedURL, the version keys, or LSUIElement before
+  — the `INFOPLIST_KEY_SUFeedURL` bug shipped a bundle with no feed URL and no
+  stage warned. Add a check there when you add a plist key something reads at
+  runtime. It runs on PRs that touch `project.yml`, the entitlements file,
+  `scripts/`, or the workflows; and on every merge to `main`.
+- **`scripts/check-shell.sh` enforces the bash 3.2 array rule** from rule 3, by
+  grepping. An array that provably can never be empty is excused with a
+  `# bash32-ok` comment above the line, saying why — `release.sh` has the one
+  example.
+- **macOS runner minutes bill at 10× on a private repo.** That is why the cheap
+  checks are on Linux, why superseded PR runs cancel, and why the Release
+  audit is conditional. Adding a second macOS job is a real cost decision.
 
 Releases are still cut from `main`, after merge: `release.sh` refuses to run from
 any other branch, on a dirty tree, or out of sync with `origin`.
