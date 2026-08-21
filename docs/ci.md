@@ -59,7 +59,15 @@ that **produce no build failure at all**:
 
 This second build doesn't run on every pull request — it's a full rebuild, and
 everything it catches lives in `project.yml`, `InboxAndChill.entitlements` or
-`scripts/`. So it runs when one of those changes, and on every merge to `main`.
+`scripts/`. So it runs when a pull request touches one of those, and on every
+merge to `main`.
+
+**"Touches" means the whole pull request, not the latest commit.** The gate
+diffs the branch against `main`, so once a PR has changed one of those files,
+every later push to it re-runs the audit — including a push that only edits a
+doc. That is deliberate: what matters before merge is whether *the change being
+merged* alters the build or signing configuration, not whether the most recent
+commit happened to.
 
 `scripts/verify-bundle.sh` also works on your own machine:
 
@@ -116,15 +124,24 @@ This repository is private, and GitHub bills private-repo Actions minutes
 against a monthly allowance. **macOS minutes count as ten** — a four-minute
 macOS job spends forty minutes of allowance.
 
-Measured on the first green run (2026-08-21), a full pull request costs about
-**42 minutes of allowance**: the macOS job took 3m18s (billed as 4 × 10), the
-shell job 17s, the secret scan about a minute. On the Pro plan's 3,000 free
-minutes that is roughly **70 pull requests a month** before it costs real
-money. A run that skips the Release audit is nearer 2 minutes, and a warm
-Swift-package cache saves another 25 seconds.
+Measured over the first two green runs (2026-08-21), a full pull request costs
+about **42–45 minutes of allowance**: the macOS job took 3m18s and 3m42s
+(billed as 4 × 10), the shell job under 20s, the secret scan about a minute. On
+the Pro plan's 3,000 free minutes that is roughly **65–70 pull requests a
+month** before it costs real money.
 
-Those are real numbers, not estimates — but they will drift as the app grows,
-and the macOS job is the only one worth watching.
+Both of those runs included the Release audit, so a run without it has not been
+timed — the Release build alone was about 70 seconds of the total, which is the
+most that skipping it could save.
+
+One measurement worth recording because it is not what you would guess: the
+Swift-package cache saved essentially nothing on time. Resolution took 24s
+cold and 23s warm. It stays because it removes a network fetch from
+github.com on every run, which is a reliability argument rather than a speed
+one — but don't expect it to make anything faster.
+
+Those are real numbers, not estimates. They will drift as the app grows, and
+the macOS job is the only one worth watching.
 
 Three things in the setup exist because of that:
 
