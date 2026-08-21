@@ -28,7 +28,7 @@ actor LinearConnector: Connector {
         var errorDescription: String? {
             switch self {
             case .missingAPIKey(let sourceID):
-                return "No Linear API key in Keychain for source \"\(sourceID)\". Add a Personal API Key under Settings → Sources (Linear → Settings → API → Personal API keys)."
+                return "No Linear API key in Keychain for source \"\(sourceID)\". Add a Personal API Key under Settings → Sources (Linear → Settings → Security & Access → Personal API keys)."
             case .transport(let detail):
                 return "Linear request failed: \(detail)"
             case .httpError(let status, let body):
