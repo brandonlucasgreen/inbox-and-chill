@@ -14,6 +14,7 @@ struct SourceEditorSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Query private var allSources: [SourceConfig]
 
     /// nil = adding a new source; non-nil = editing this one in place.
     var existing: SourceConfig?
@@ -45,6 +46,28 @@ struct SourceEditorSheet: View {
         ConnectorCatalog.descriptor(for: selectedKindID) ?? ConnectorCatalog.all[0]
     }
 
+    /// Kinds that already have a source and don't allow a second one —
+    /// these are the rows the picker greys out. Excludes `existing` itself,
+    /// though the picker never renders in edit mode anyway (the kind is
+    /// fixed then), so this only ever matters for add mode.
+    private var singleInstanceKindsInUse: Set<String> {
+        Set(
+            allSources
+                .filter { $0.id != existing?.id }
+                .map(\.kind)
+                .filter { kind in
+                    ConnectorCatalog.descriptor(for: kind)?.allowsMultiple != true
+                })
+    }
+
+    /// The kind a fresh "Add Source" sheet should open on: the first one
+    /// that isn't already greyed out, so the sheet never opens pre-selected
+    /// on a row you can't actually choose.
+    private func firstAvailableKindID(excluding taken: Set<String>) -> String {
+        ConnectorCatalog.all.first { !taken.contains($0.id) }?.id
+            ?? ConnectorCatalog.all.first!.id
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(existing == nil ? "Add Source" : "Edit Source")
@@ -58,8 +81,14 @@ struct SourceEditorSheet: View {
                     if existing == nil {
                         Picker("Kind", selection: $selectedKindID) {
                             ForEach(ConnectorCatalog.all) { kind in
-                                Label(kind.displayName, systemImage: kind.systemImage)
+                                let taken = singleInstanceKindsInUse.contains(kind.id)
+                                Label(
+                                    taken
+                                        ? "\(kind.displayName) — already connected"
+                                        : kind.displayName,
+                                    systemImage: kind.systemImage)
                                     .tag(kind.id)
+                                    .disabled(taken)
                             }
                         }
                         .onChange(of: selectedKindID) { _, newValue in
@@ -120,6 +149,15 @@ struct SourceEditorSheet: View {
             .padding(16)
         }
         .frame(width: 560, height: 560)
+        .task {
+            // Land on a row you can actually pick — `init` runs before the
+            // `@Query` above has anything to filter against, so the default
+            // first kind might turn out to already be greyed out.
+            guard existing == nil, singleInstanceKindsInUse.contains(selectedKindID)
+            else { return }
+            selectedKindID = firstAvailableKindID(excluding: singleInstanceKindsInUse)
+            name = ConnectorCatalog.descriptor(for: selectedKindID)?.displayName ?? ""
+        }
     }
 
     // MARK: Setup steps

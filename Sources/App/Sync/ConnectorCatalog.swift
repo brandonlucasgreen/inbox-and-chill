@@ -24,6 +24,14 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
     /// Defaults for new sources of this kind (decision §2.1.4: local
     /// sources banner by default).
     var bannersDefaultOn: Bool = false
+    /// Whether a second source of this kind is ever useful. `false` for
+    /// every provider that authenticates as a single account/mailbox/
+    /// listener — a second Linear or Apple Mail source would just be the
+    /// same one, configured twice. `true` for the generic feeds (custom
+    /// JSON, ntfy), which are built around pointing at more than one URL or
+    /// topic. The add-source picker greys out a kind once one exists,
+    /// unless this is `true`.
+    var allowsMultiple: Bool = false
     /// How to get the credentials, in the app rather than in a doc nobody
     /// opens. Numbered in order; one short imperative sentence each, and
     /// inline markdown is rendered.
@@ -183,6 +191,7 @@ enum ConnectorCatalog {
                     placeholder: "id=id,title=title,url=url,time=created_at",
                     help: "Maps feed JSON keys to item fields"),
             ],
+            allowsMultiple: true,
             setupSteps: [
                 "Point **Feed URL** at any URL returning a JSON array, or an object with an `items` array.",
                 "In **Field Mapping**, name the keys your feed uses: `id=id,title=title,url=link,time=created_at`.",
@@ -212,6 +221,7 @@ enum ConnectorCatalog {
                     help: "Optional — sent as HTTP basic auth alongside the username."),
             ],
             bannersDefaultOn: true,
+            allowsMultiple: true,
             setupSteps: [
                 "Choose a topic name — on a public server, anyone who guesses it can publish to you, so make it unguessable.",
                 "Enter it below, then send yourself one: `curl -d hello ntfy.sh/<topic>`.",
