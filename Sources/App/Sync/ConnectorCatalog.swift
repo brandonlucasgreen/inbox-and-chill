@@ -113,8 +113,8 @@ enum ConnectorCatalog {
             setupSteps: [
                 "Go to api.slack.com/apps → **Create New App** → **From an app manifest**.",
                 "Pick your workspace, switch to the **YAML** tab, paste the manifest, and create the app.",
-                "**Install to Workspace** — your admin may have to approve it.",
-                "**OAuth & Permissions** → copy the **User OAuth Token** (`xoxp-…`) into the field below.",
+                "Open **OAuth & Permissions** in the left panel. Under **OAuth Tokens**, click **Install** (the button names your workspace) — your admin may have to approve it.",
+                "Copy the **User OAuth Token** (`xoxp-…`) that appears into the field below.",
                 "Optional, for channel mentions: **Basic Information → App-Level Tokens → Generate**, scope `connections:write`, and paste that (`xapp-…`) too.",
             ],
             setupURL: "https://api.slack.com/apps",
