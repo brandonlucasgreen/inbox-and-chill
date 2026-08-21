@@ -193,7 +193,22 @@ if [ -d "$APP/Contents/Frameworks/Sparkle.framework" ]; then
 fi
 
 for ITEM in ${NESTED[@]+"${NESTED[@]}"}; do
-  [ -e "$ITEM" ] || continue
+  if [ ! -e "$ITEM" ]; then
+    # A guard that skips what it cannot find passes vacuously — which is how
+    # this whole class of bug got here. Autoupdate and Updater.app have shipped
+    # in every Sparkle 2.x, so their absence means the layout moved and this
+    # check is no longer looking at the right places. Say so and fail; the XPC
+    # services are genuinely optional, so they only get a note.
+    case "$ITEM" in
+      *XPCServices*)
+        echo "    nested: ${ITEM#"$APP/Contents/"} absent (optional)" ;;
+      *)
+        echo "    nested: ${ITEM#"$APP/Contents/"} MISSING — Sparkle's layout changed;" >&2
+        echo "            this preflight is no longer checking what it thinks." >&2
+        FAIL=1 ;;
+    esac
+    continue
+  fi
   LABEL="${ITEM#"$APP/Contents/"}"
   ITEM_INFO=$(codesign -dvv "$ITEM" 2>&1 || true)
   PROBLEMS=""

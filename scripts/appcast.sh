@@ -85,10 +85,21 @@ If it keeps failing, check that the key is readable at all:
     .sparkle/*/bin/sign_update <any-file>
 EOF
     else
+      # Note the hedge. `generate_keys -p` failing does not prove there is no
+      # key — it could not run, or could not read one. Asserting absence from a
+      # failed lookup is the mistake the comment above is about, and it would be
+      # daft to make it three lines later.
       cat >&2 <<'EOF'
-error: generate_appcast failed and no signing key was found. Create one:
+error: generate_appcast failed, and no signing key could be read either.
+
+If you have never created one, this is why:
 
     scripts/sparkle-keys.sh
+
+If you believe a key already exists, do NOT create a second one — that would
+strand everyone running a build that trusts the first. Check first:
+
+    .sparkle/*/bin/generate_keys -p
 EOF
     fi
     exit 1

@@ -203,7 +203,6 @@ targets:
         # CDN caches for ~5 minutes, which is why a release you just cut is
         # not offered instantly.
         SUFeedURL: https://raw.githubusercontent.com/brandonlucasgreen/inbox-and-chill/main/appcast.xml
-        SUPublicEDKey: B7RS84O0N7JK6Fv3uqBMuD6+1Qo7mg8o9nbYMp1FLnc=
         #
         # The public half of the EdDSA keypair Sparkle verifies every download
         # against. Generated 2026-08-21 by scripts/sparkle-keys.sh, which found
@@ -218,6 +217,7 @@ targets:
         # just cannot *publish* updates. A clone that removes this line gets an
         # app that says so in Settings rather than one that fails mid-install
         # (UpdateController.configurationProblem).
+        SUPublicEDKey: B7RS84O0N7JK6Fv3uqBMuD6+1Qo7mg8o9nbYMp1FLnc=
   inchill:
     type: tool
     platform: macOS
