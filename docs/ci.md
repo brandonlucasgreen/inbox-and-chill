@@ -26,7 +26,7 @@ have to start it.
   the unsafe pattern. If an array genuinely can never be empty, a `# bash32-ok`
   comment above the line excuses it and says why.
 
-### 2. Build and test (macOS, roughly 10–15 minutes)
+### 2. Build and test (macOS, about 3 minutes)
 
 Generates the Xcode project from `project.yml`, resolves the Swift packages,
 builds the app and the `inchill` CLI, and runs the whole test suite.
@@ -113,10 +113,18 @@ run. Worth doing deliberately, some day; not worth bolting onto CI.
 ## What it costs
 
 This repository is private, and GitHub bills private-repo Actions minutes
-against a monthly allowance. **macOS minutes count as ten.** A ten-minute build
-spends a hundred minutes of allowance. On the Pro plan's 3,000 free minutes,
-that's roughly 30 pull-request builds a month before it starts costing real
-money.
+against a monthly allowance. **macOS minutes count as ten** — a four-minute
+macOS job spends forty minutes of allowance.
+
+Measured on the first green run (2026-08-21), a full pull request costs about
+**42 minutes of allowance**: the macOS job took 3m18s (billed as 4 × 10), the
+shell job 17s, the secret scan about a minute. On the Pro plan's 3,000 free
+minutes that is roughly **70 pull requests a month** before it costs real
+money. A run that skips the Release audit is nearer 2 minutes, and a warm
+Swift-package cache saves another 25 seconds.
+
+Those are real numbers, not estimates — but they will drift as the app grows,
+and the macOS job is the only one worth watching.
 
 Three things in the setup exist because of that:
 
@@ -155,10 +163,14 @@ Two things will eventually go red without anyone having changed the app:
   underneath it.
 
   So the job now lists every Xcode on the image, picks one deliberately, and
-  prints it. Set `XCODE_VERSION` at the top of the `macos` job (e.g. `"26.1"`)
+  prints it. Set `XCODE_VERSION` at the top of the `macos` job (e.g. `"26.4"`)
   to pin an exact one; leave it empty and it takes the newest installed. Pinning
   is the more reproducible choice once your Mac and CI are known to agree —
   empty drifts silently when GitHub updates the image.
+
+  As of 2026-08-21 the `macos-26` image carries Xcode 26.0 through 26.6, and
+  the job selected **Xcode 26.6 / Swift 6.3.3** on macOS 26.5.2. Every Xcode on
+  that image is a 26.x, so the drift the empty setting allows is bounded.
 
   The general lesson: **a runner's Xcode is usually older than yours, not
   newer.** GitHub images lag Apple by months. If CI fails on code that builds
