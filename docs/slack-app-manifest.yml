@@ -3,11 +3,12 @@
 # Create the app: https://api.slack.com/apps → "Create New App" →
 # "From an app manifest" → pick the Buffer workspace → switch to the YAML
 # tab → paste this file.
-# Then: Install to Workspace (this may trigger an admin approval request).
+# Then: open OAuth & Permissions in the left panel, and under OAuth Tokens
+# click Install to <workspace> (this may trigger an admin approval request).
 #
 # After install, collect the token(s) for the app's Slack source settings:
-#   1. User OAuth Token (xoxp-…): OAuth & Permissions page, under "OAuth
-#      Tokens for Your Workspace". REQUIRED.
+#   1. User OAuth Token (xoxp-…): the same OAuth & Permissions page, under
+#      "OAuth Tokens for Your Workspace". REQUIRED.
 #      NOT the "xoxe.xoxp-" App Configuration Token offered on the apps
 #      list — that one drives the Manifest API only and dies after 12 hours.
 #   2. App-Level Token (xapp-…): Basic Information → App-Level Tokens →

@@ -42,9 +42,9 @@ Two things follow from it:
 Slack setup has more steps because you're creating your own Slack app rather than pasting in a single key.
 
 1. Go to **https://api.slack.com/apps → Create New App → From an app manifest**, pick your workspace, switch to the **YAML** tab, and paste in the contents of [`docs/slack-app-manifest.yml`](slack-app-manifest.yml).
-2. Click **Install to Workspace**. If your workspace has "Require App Approval" turned on, this queues an approval request instead of installing immediately — a workspace admin will need to approve it before the app can be used. (It's a read-only app that only ever acts on your own account, which tends to be an easy approval to ask for.)
-3. Once installed, collect your tokens:
-   - **User OAuth Token** (`xoxp-…`) — on the app's **OAuth & Permissions** page, under "OAuth Tokens for Your Workspace". **Required.**
+2. Open **OAuth & Permissions** in the left panel. Under **OAuth Tokens**, click **Install to &lt;your workspace&gt;**. If your workspace has "Require App Approval" turned on, this queues an approval request instead of installing immediately — a workspace admin will need to approve it before the app can be used. (It's a read-only app that only ever acts on your own account, which tends to be an easy approval to ask for.)
+3. Once installed, the same **OAuth & Permissions** page lists your tokens:
+   - **User OAuth Token** (`xoxp-…`) — under "OAuth Tokens for Your Workspace". **Required.**
 
      **Not the token at the top of the apps list.** `api.slack.com/apps` also offers **App Configuration Tokens**, which look like `xoxe.xoxp-…`. Those drive the App Manifest API only, expire 12 hours after you generate them, and cannot call the Web API at all — easy to grab by mistake, since "generate a token" is right there. The app checks the prefix and tells you which one you've pasted rather than failing with a Slack error that explains nothing.
 
