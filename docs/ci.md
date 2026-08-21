@@ -147,11 +147,24 @@ merge this first, then go set them.
 
 Two things will eventually go red without anyone having changed the app:
 
-- **The runner image moved to a new Xcode.** The job prints `xcodebuild
-  -version` first, so the log says which one. If a new Swift version breaks the
-  build, the fix is either to fix the code or to pin the Xcode version in
-  `ci.yml`.
-- **`macos-15` was retired.** GitHub retires runner images a couple of years
+- **The Xcode version moved.** This one has already happened once: the first
+  CI run used `macos-15`, whose Xcode 16.4 / Swift 6.1.2 is old enough that
+  `AppState.swift` doesn't compile under it — `UNNotificationSettings` isn't
+  marked as safe to hand between concurrency domains in that SDK, and newer
+  ones fix it. Nobody had touched that code; the compiler simply changed
+  underneath it.
+
+  So the job now lists every Xcode on the image, picks one deliberately, and
+  prints it. Set `XCODE_VERSION` at the top of the `macos` job (e.g. `"26.1"`)
+  to pin an exact one; leave it empty and it takes the newest installed. Pinning
+  is the more reproducible choice once your Mac and CI are known to agree —
+  empty drifts silently when GitHub updates the image.
+
+  The general lesson: **a runner's Xcode is usually older than yours, not
+  newer.** GitHub images lag Apple by months. If CI fails on code that builds
+  fine locally, compare the two Swift versions before assuming the code is
+  wrong.
+- **The runner image was retired.** GitHub retires images a couple of years
   after release. The label is in `ci.yml`; bumping it is a one-line change, but
   do it as its own pull request so the build failures it causes are attributable.
 
