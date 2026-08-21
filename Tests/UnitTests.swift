@@ -2180,7 +2180,29 @@ struct NtfyConnectorTests {
 // MARK: - Journal export (Sources/App/Journal/JournalWriter.swift)
 
 struct JournalWriterTests {
-    private let noon = Date(timeIntervalSince1970: 1787068800)  // 2026-08-18
+    /// 2026-08-18, 12:00 **UTC**.
+    ///
+    /// It was 16:00 UTC — noon in US Eastern, where it was written — until CI
+    /// ran the suite on a UTC machine for the first time on 2026-08-21 and two
+    /// tests failed. Midday UTC keeps the calendar date the same everywhere
+    /// from UTC-11 to UTC+11, so the `{{YYYY}}-{{MM}}-{{DD}}` path assertions
+    /// below hold wherever the suite runs. (UTC+12 lands on midnight of the
+    /// 19th; nothing here runs in Auckland yet.)
+    private let noon = Date(timeIntervalSince1970: 1787054400)
+
+    /// `JournalWriter.line` renders the time in the machine's own time zone,
+    /// which is right for a journal — an entry made at noon should read 12:00
+    /// in the file, not whatever that was in UTC. So the expected time cannot
+    /// be a string literal: the same instant is a different wall clock in
+    /// every zone, and hardcoding one made these tests pass on exactly one
+    /// machine. Derive the field the way the code does, and assert its
+    /// *shape* separately in `lineTimeIsMachineStable`.
+    private var noonTime: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: noon)
+    }
 
     private func entry(
         action: JournalAction = .done, sourceName: String = "Linear",
@@ -2249,14 +2271,30 @@ struct JournalWriterTests {
         let line = JournalWriter.line(for: entry(detail: "waited 11m"))
         #expect(
             line
-                == "- 12:00 · **done** · Linear · [Fix the flaky sync test](https://linear.app/x/ISS-1) · waited 11m"
+                == "- \(noonTime) · **done** · Linear · [Fix the flaky sync test](https://linear.app/x/ISS-1) · waited 11m"
         )
+    }
+
+    /// The field order test above derives the time, so this is what still
+    /// pins the format itself: `HH:mm`, zero-padded, 24-hour, no locale
+    /// leaking in. A journal that reads `09:41` for one user and `9:41 AM`
+    /// for another is a journal nothing can parse.
+    @Test("The time field is zero-padded 24-hour, whatever the machine's locale")
+    func lineTimeIsMachineStable() {
+        let line = JournalWriter.line(for: entry())
+        // Past the "- " bullet, the time is the first field.
+        let time = String(line.dropFirst(2).prefix(5))
+        let parts = time.components(separatedBy: ":")
+        #expect(parts.count == 2)
+        #expect(parts.allSatisfy { part in
+            part.count == 2 && part.allSatisfy { $0.isNumber }
+        })
     }
 
     @Test("With no URL the title stays plain text rather than a broken link")
     func lineWithoutURL() {
         let line = JournalWriter.line(for: entry(url: nil))
-        #expect(line == "- 12:00 · **done** · Linear · Fix the flaky sync test")
+        #expect(line == "- \(noonTime) · **done** · Linear · Fix the flaky sync test")
         #expect(!line.contains("]("))
 
         // An all-whitespace URL is the same case.
