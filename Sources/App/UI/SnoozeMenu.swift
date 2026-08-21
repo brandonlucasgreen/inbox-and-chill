@@ -84,13 +84,13 @@ struct SnoozeMenu: View {
             Divider()
             Button("Pick Date…") { pickDate() }
         } label: {
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 13))
+                    .font(.system(size: 11))
                 KeyCap("S")
             }
-            .padding(.horizontal, 4)
-            .frame(height: 24)
+            .padding(.horizontal, 2)
+            .frame(height: 22)
             .contentShape(.rect)
         }
         .menuStyle(.borderlessButton)
