@@ -1,0 +1,243 @@
+name: CI
+
+# Runs on every pull request, and on main after a merge. `main` is included
+# deliberately: the repo's rule is that work lands via PR, so a green main is
+# what makes "rebase on origin/main before you push" safe advice.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Read-only, and nothing here holds a secret. CI never sees the Developer ID
+# certificate or the notarization credentials — it builds ad-hoc signed, which
+# is enough to compile, test and inspect a bundle. Signing for real stays a
+# thing that happens on Brandon's Mac, so a compromised workflow cannot
+# produce something a user's Gatekeeper would trust.
+permissions:
+  contents: read
+
+# Supersede a run when new commits arrive on the same PR. macOS minutes bill
+# at ten times the Linux rate on a private repo, so an abandoned run is real
+# money. Pushes to main are left alone — every commit on main should have its
+# own recorded result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Cheap checks first, on Linux. These need no Xcode, finish in under a
+  # minute, and cost a tenth of what a macOS minute costs.
+  # ---------------------------------------------------------------------
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Lint scripts/
+        run: scripts/check-shell.sh
+
+  # ---------------------------------------------------------------------
+  # The real one: does it build, and do the tests pass.
+  # ---------------------------------------------------------------------
+  macos:
+    name: Build and test
+    # macos-15 was the first choice and it shipped Xcode 16.4 / Swift 6.1.2,
+    # which is old enough that AppState.swift no longer compiles under it:
+    # `UNNotificationSettings` is not Sendable there, and returning it into
+    # AppState's MainActor is a hard error. Newer SDKs annotate it and the
+    # same code is fine. Runner images lag, so "the latest image" is the
+    # floor, not the ceiling — see the Xcode selection step below.
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      # Pin an exact Xcode by setting this to a version installed on the
+      # image, e.g. "26.1". Empty means "use the newest one there is", which
+      # is right while the local and CI toolchains are still being lined up
+      # but does drift silently when GitHub updates the image. The selection
+      # step logs what it picked either way.
+      XCODE_VERSION: ""
+    steps:
+      # Full history: the Release-audit decision below diffs against the
+      # base branch, and a shallow clone has no merge base to diff from.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Which Xcode a runner image ships changes over time, and a Swift
+      # version difference between here and a contributor's Mac shows up as a
+      # compile error in code nobody touched. So: choose deliberately, and
+      # print what was chosen. A build that breaks under a new Xcode is worth
+      # knowing about, but only if the log says which one it was.
+      - name: Select Xcode
+        run: |
+          echo "Installed:"
+          ls -d /Applications/Xcode*.app | sed 's/^/    /'
+          if [ -n "$XCODE_VERSION" ]; then
+            SELECTED="/Applications/Xcode_${XCODE_VERSION}.app"
+            [ -d "$SELECTED" ] || {
+              echo "XCODE_VERSION=$XCODE_VERSION is not installed on this image." >&2
+              exit 1
+            }
+          else
+            # Newest by version, not by name order: sort -V puts Xcode_16.10
+            # after Xcode_16.9, which a plain sort does not.
+            SELECTED=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          fi
+          echo "Selected: $SELECTED"
+          sudo xcode-select -s "$SELECTED/Contents/Developer"
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+
+      - name: Install build tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install xcodegen xcbeautify
+
+      # The .xcodeproj is gitignored — project.yml is the source of truth and
+      # this is what turns one into the other.
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      # Swift packages are fetched from the network on a cold runner. Caching
+      # the clones keeps a rerun from re-downloading Sparkle and
+      # KeyboardShortcuts every time. Keyed on project.yml because that is
+      # where the dependency versions are declared.
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .spm
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild -project InboxAndChill.xcodeproj \
+            -scheme InboxAndChill \
+            -clonedSourcePackagesDirPath .spm \
+            -resolvePackageDependencies
+
+      # Records exactly which upstream commits went into this build. Nothing
+      # enforces it — project.yml pins minimum versions, not exact ones — but
+      # when a build starts failing for no local reason, this is the first
+      # place to look.
+      - name: Record resolved dependency versions
+        run: |
+          RESOLVED="InboxAndChill.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+          if [ -f "$RESOLVED" ]; then
+            cat "$RESOLVED"
+          else
+            echo "No Package.resolved found at $RESOLVED"
+          fi
+
+      # Signing overrides, and why each one is here:
+      #
+      #   CODE_SIGN_IDENTITY=-        ad-hoc. No runner has the Developer ID
+      #                               certificate, and none should.
+      #   CODE_SIGNING_ALLOWED=YES    still sign, rather than skipping it. An
+      #                               unsigned bundle carries no entitlements,
+      #                               so the audit below would have nothing to
+      #                               look at.
+      #   ENABLE_HARDENED_RUNTIME=NO  test builds only. The hardened runtime
+      #                               enforces library validation, which
+      #                               requires every loaded framework to share
+      #                               the app's team identifier — and an
+      #                               ad-hoc signature has no team identifier,
+      #                               so Sparkle.framework would refuse to
+      #                               load and the app would die on launch.
+      #   OTHER_CODE_SIGN_FLAGS       the Release config asks Apple's
+      #                               timestamp server for a secure timestamp.
+      #                               Ad-hoc signatures cannot carry one.
+      - name: Build and test (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project InboxAndChill.xcodeproj \
+            -scheme InboxAndChill \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -clonedSourcePackagesDirPath .spm \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM= \
+            ENABLE_HARDENED_RUNTIME=NO \
+            OTHER_CODE_SIGN_FLAGS=--timestamp=none \
+            test | xcbeautify
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ------------------------------------------------------------------
+      # Release-shaped build, audited for the traps that produce no build
+      # failure: a missing SUFeedURL, a version pinned to 1.0, an injected
+      # get-task-allow, Sparkle moving its nested helpers.
+      #
+      # Not run on every pull request. It is a second full build of the same
+      # code, and the things it catches all live in project.yml, the
+      # entitlements file, or the signing scripts — so it runs when one of
+      # those changes, and on every merge to main.
+      # ------------------------------------------------------------------
+      - name: Does this change need a Release audit?
+        id: audit
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "Not a pull request — auditing."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --quiet origin "$BASE_REF"
+          CHANGED=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          echo "Changed files:"
+          echo "$CHANGED" | sed 's/^/    /'
+          if echo "$CHANGED" | grep -qE '^(project\.yml|InboxAndChill\.entitlements|scripts/|\.github/workflows/)'; then
+            echo "Touches the build or signing configuration — auditing."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No build-configuration changes — skipping the Release audit."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build (Release)
+        if: steps.audit.outputs.run == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project InboxAndChill.xcodeproj \
+            -scheme InboxAndChill \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -clonedSourcePackagesDirPath .spm \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM= \
+            OTHER_CODE_SIGN_FLAGS=--timestamp=none \
+            build | xcbeautify
+
+      - name: Audit the built bundle
+        if: steps.audit.outputs.run == 'true'
+        run: scripts/verify-bundle.sh --configuration Release

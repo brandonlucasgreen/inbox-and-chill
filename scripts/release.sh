@@ -140,6 +140,8 @@ NOTES_FLAG=(--generate-notes)
 if PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null); then
   NOTES_FLAG=(--generate-notes --notes-start-tag "$PREV")
 fi
+# bash32-ok: NOTES_FLAG always carries --generate-notes, so it is never empty
+# and cannot hit bash 3.2's unbound-variable behaviour. See scripts/check-shell.sh.
 gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" "${NOTES_FLAG[@]}"
 
 # --- Publish the update feed ---------------------------------------------

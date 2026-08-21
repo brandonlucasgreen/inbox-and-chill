@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Keeps the actions used by the workflows current. Actions are third-party
+  # code that runs with access to the checkout, so a stale one is a supply
+  # chain question rather than a housekeeping one.
+  #
+  # Swift packages are deliberately absent: Dependabot reads Package.swift,
+  # and this project declares its dependencies in project.yml for XcodeGen.
+  # Sparkle and KeyboardShortcuts are bumped by hand — see docs/ci.md.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"

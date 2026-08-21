@@ -118,6 +118,16 @@ You will also need somewhere to serve an `appcast.xml` your build can reach, and
 `SUFeedURL` in `project.yml` pointed at it. None of this is needed just to use
 the app.
 
+## Contributing
+
+Work lands via pull request. Every one gets built and tested from scratch on a
+clean Mac by GitHub Actions, alongside a shell-script lint and a full-history
+secret scan — see [docs/ci.md](docs/ci.md) for what each check is for, what it
+deliberately doesn't do, and what it costs.
+
+CI holds no signing credentials of any kind. Real signing, notarization and
+releases happen on a person's Mac, via `scripts/release.sh`.
+
 ## Status
 
 This is a personal tool, built for one person's daily use, and pre-release. Expect rough edges, and expect the shape of things (especially per-source setup) to shift.
