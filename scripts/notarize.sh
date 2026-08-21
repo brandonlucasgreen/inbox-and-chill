@@ -192,7 +192,7 @@ if [ -d "$APP/Contents/Frameworks/Sparkle.framework" ]; then
   )
 fi
 
-for ITEM in "${NESTED[@]}"; do
+for ITEM in ${NESTED[@]+"${NESTED[@]}"}; do
   [ -e "$ITEM" ] || continue
   LABEL="${ITEM#"$APP/Contents/"}"
   ITEM_INFO=$(codesign -dvv "$ITEM" 2>&1 || true)

@@ -203,22 +203,21 @@ targets:
         # CDN caches for ~5 minutes, which is why a release you just cut is
         # not offered instantly.
         SUFeedURL: https://raw.githubusercontent.com/brandonlucasgreen/inbox-and-chill/main/appcast.xml
+        SUPublicEDKey: B7RS84O0N7JK6Fv3uqBMuD6+1Qo7mg8o9nbYMp1FLnc=
         #
-        # SUPublicEDKey is deliberately ABSENT until you generate the signing
-        # keypair — one command, once, ever:
+        # The public half of the EdDSA keypair Sparkle verifies every download
+        # against. Generated 2026-08-21 by scripts/sparkle-keys.sh, which found
+        # a key already in the login keychain and reused it — one key covers
+        # every app you ship, and replacing it would strand anyone running a
+        # build that trusts the old one.
         #
-        #     scripts/sparkle-keys.sh
+        # The PRIVATE half stays in the login keychain and must never reach this
+        # repo. Lose it and you cannot ship an update existing installs accept.
         #
-        # It prints the line to paste right here:
-        #
-        #     SUPublicEDKey: <44-character base64 key>
-        #
-        # then run `xcodegen generate`. A placeholder is not used on purpose:
-        # Sparkle would accept it, fetch a real update, fail the EdDSA check
-        # and report a signature error — which reads like a corrupted download
-        # rather than "you never made a key". Absent, the Updates section in
-        # Settings names the actual problem instead (rule 5, and see
-        # UpdateController.configurationProblem).
+        # A clone without the matching private key can still build and run; it
+        # just cannot *publish* updates. A clone that removes this line gets an
+        # app that says so in Settings rather than one that fails mid-install
+        # (UpdateController.configurationProblem).
   inchill:
     type: tool
     platform: macOS

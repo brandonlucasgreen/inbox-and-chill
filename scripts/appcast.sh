@@ -40,6 +40,11 @@ KEY_ARGS=()
 if [ -n "${SPARKLE_ED_KEY_FILE:-}" ]; then
   KEY_ARGS=(--ed-key-file "$SPARKLE_ED_KEY_FILE")
 fi
+# Expanded below as "${KEY_ARGS[@]+"${KEY_ARGS[@]}"}" rather than
+# "${KEY_ARGS[@]}". macOS ships bash 3.2, where expanding an EMPTY array under
+# `set -u` is an "unbound variable" error — and empty is the normal case here
+# (no env override means read the key from the Keychain), so the plain form
+# broke every real release while the env-var path used in testing worked fine.
 
 echo "==> Generating appcast from $ARCHIVES/"
 # --maximum-deltas 0: delta files would have to be uploaded and hosted
@@ -48,16 +53,46 @@ echo "==> Generating appcast from $ARCHIVES/"
 # --maximum-versions 0: keep every entry. Costs a few lines of XML and means
 #   the feed still describes older releases.
 "$BIN/generate_appcast" \
-  "${KEY_ARGS[@]}" \
+  ${KEY_ARGS[@]+"${KEY_ARGS[@]}"} \
   --download-url-prefix "$DOWNLOAD_PREFIX" \
   --maximum-deltas 0 \
   --maximum-versions 0 \
   --link "$PROJECT_URL" \
   --full-release-notes-url "$PROJECT_URL/releases" \
   "$ARCHIVES" \
-  || die "generate_appcast failed.
-    If it could not find a signing key, you have not created one yet:
-      scripts/sparkle-keys.sh"
+  || {
+    # "Not found" and "could not read it" are the SAME message from Sparkle,
+    # and this repo has twice lost time to that exact ambiguity with the
+    # notary credentials. So ask the tool that owns the answer before
+    # asserting anything: generate_keys -p reads the public half out of the
+    # item's comment attribute, which needs no authorization, so it answers
+    # "does a key exist" without touching the secret.
+    #
+    # Observed 2026-08-21: generate_appcast failed once with -60008 on a key
+    # that plainly existed, then succeeded unchanged on the next run — while
+    # sign_update read the same key fine throughout. So a first failure here
+    # is worth simply retrying.
+    if "$BIN/generate_keys" -p >/dev/null 2>&1; then
+      cat >&2 <<'EOF'
+error: generate_appcast failed, but a signing key DOES exist in your keychain.
+
+This is not a missing key. Most likely macOS wanted to authorize a new binary
+against that keychain item. Run this again — and if a Keychain dialog appears,
+choose "Always Allow" so releases stop asking.
+
+If it keeps failing, check that the key is readable at all:
+
+    .sparkle/*/bin/sign_update <any-file>
+EOF
+    else
+      cat >&2 <<'EOF'
+error: generate_appcast failed and no signing key was found. Create one:
+
+    scripts/sparkle-keys.sh
+EOF
+    fi
+    exit 1
+  }
 
 [ -f "$ARCHIVES/appcast.xml" ] || die "generate_appcast wrote no appcast.xml."
 
