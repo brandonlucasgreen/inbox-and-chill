@@ -132,7 +132,7 @@ releases happen on a person's Mac, via `scripts/release.sh`.
 
 This is a personal tool, built for one person's daily use, and pre-release. Expect rough edges, and expect the shape of things (especially per-source setup) to shift.
 
-The code is MIT licensed, but the repository is **still private** — so its GitHub releases are visible only to collaborators, and in-app updates are dormant until that changes (Sparkle has to be able to fetch the feed and the download with no credentials at all). If you're reading this from a clone, you're early.
+The code is MIT licensed and the repository is public as of 2026-08-21. In-app updates are wired up but not live yet: the only published release predates the Sparkle integration, so it carries no updater, and the next release is a manual download for anyone already running 0.3.2. After that, updates arrive in the app. See [docs/releasing.md](docs/releasing.md).
 
 ## License
 
