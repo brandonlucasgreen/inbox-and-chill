@@ -17,12 +17,19 @@ on:
 permissions:
   contents: read
 
-# Supersede a run when new commits arrive on the same PR. macOS minutes bill
-# at ten times the Linux rate on a private repo, so an abandoned run is real
-# money. Pushes to main are left alone — every commit on main should have its
-# own recorded result.
+# Supersede a run when new commits arrive on the same PULL REQUEST, and never
+# on a push. The group key is what makes that work: pull requests group by PR
+# number, pushes group by commit SHA, so two commits landing on main within a
+# minute of each other never share a group.
+#
+# Keyed on `github.ref` this was wrong in a way that looked right. Pushes to
+# main all shared one group, and while `cancel-in-progress: false` stops the
+# RUNNING one being killed, GitHub only holds ONE pending run per group — a
+# third arrival evicts the second. Three Dependabot merges landed together on
+# 2026-08-21 and commit 900d40f was cancelled with no result recorded, which
+# looks identical to a commit that passed.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

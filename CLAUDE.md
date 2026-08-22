@@ -72,9 +72,24 @@ work here:
   grepping. An array that provably can never be empty is excused with a
   `# bash32-ok` comment above the line, saying why — `release.sh` has the one
   example.
-- **macOS runner minutes bill at 10× on a private repo.** That is why the cheap
-  checks are on Linux, why superseded PR runs cancel, and why the Release
-  audit is conditional. Adding a second macOS job is a real cost decision.
+- **Actions is free now the repo is public** (since 2026-08-21). It was not:
+  macOS minutes billed at 10×, which is why the cheap checks are on Linux and
+  why the Release audit is conditional. Those two stay — Linux is faster
+  regardless, and the audit is a second full build whose findings all live in
+  `project.yml`, the entitlements file or `scripts/`. Adding a second macOS
+  job is no longer a cost decision, just a time one.
+
+- **A shallow clone moves gitleaks findings, it does not just hide them.**
+  Cost an hour on 2026-08-22. gitleaks attributes a finding to the commit
+  whose *diff* introduces it. Truncate history and the oldest commit you kept
+  looks like a root commit that added the whole tree, so every secret in it is
+  re-attributed to *that* commit — which then misses the commit-scoped
+  allowlist in `.gitleaks.toml`, and the exemptions look stale when they are
+  perfectly fine. The two SHAs in there are correct and reachable from `main`;
+  verified in a full clone. Claude Code web sessions get shallow clones, so if
+  a local scan disagrees with CI, run
+  `git rev-parse --is-shallow-repository` before concluding anything about the
+  repo.
 
 Releases are still cut from `main`, after merge: `release.sh` refuses to run from
 any other branch, on a dirty tree, or out of sync with `origin`.
