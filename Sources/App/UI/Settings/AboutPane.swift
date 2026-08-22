@@ -50,21 +50,6 @@ struct AboutPane: View {
                 }
             }
 
-            Section("Support") {
-                Text(
-                    "This is free, and it's staying that way. If it saves you some time, a dollar or two a month keeps me building things like it."
-                )
-                .font(.system(size: 13))
-                .fixedSize(horizontal: false, vertical: true)
-
-                Link(destination: URL(string: "https://liberapay.com/brandonlucasgreen/donate")!) {
-                    Label("Donate on Liberapay", systemImage: "heart")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.top, 2)
-            }
-
             Section("Thanks") {
                 LabeledContent("Keyboard shortcut recording") {
                     Link(

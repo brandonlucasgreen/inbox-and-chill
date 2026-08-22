@@ -21,6 +21,12 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
     var displayName: String
     var systemImage: String
     var fields: [Field]
+    /// False when a second source of this kind would just be a duplicate
+    /// view of the same underlying account — a Mac has exactly one Mail.app
+    /// database, unlike a GitHub or Linear token, which can name any of
+    /// several accounts. The add-source picker disables the kind once one
+    /// exists.
+    var allowsMultiple: Bool = true
     /// Defaults for new sources of this kind (decision §2.1.4: local
     /// sources banner by default).
     var bannersDefaultOn: Bool = false
@@ -164,6 +170,7 @@ enum ConnectorCatalog {
                     placeholder: "INBOX",
                     help: "Optional. Blank watches Mail's unified inbox across every account. Name one mailbox to narrow it."),
             ],
+            allowsMultiple: false,
             setupSteps: [
                 "Nothing to paste — this source reads the Mail app that's already on this Mac.",
                 "macOS will ask once for permission to control Mail. **Allow it**, or the source stays permanently empty.",

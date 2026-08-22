@@ -14,6 +14,7 @@ struct SourceEditorSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Query private var allSources: [SourceConfig]
 
     /// nil = adding a new source; non-nil = editing this one in place.
     var existing: SourceConfig?
@@ -45,6 +46,13 @@ struct SourceEditorSheet: View {
         ConnectorCatalog.descriptor(for: selectedKindID) ?? ConnectorCatalog.all[0]
     }
 
+    /// Kinds already configured — only matters for `!allowsMultiple` kinds
+    /// (Apple Mail: one Mac has one Mail.app database, so a second source
+    /// would just watch the same account twice).
+    private var existingKinds: Set<String> {
+        Set(allSources.map(\.kind))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(existing == nil ? "Add Source" : "Edit Source")
@@ -60,6 +68,9 @@ struct SourceEditorSheet: View {
                             ForEach(ConnectorCatalog.all) { kind in
                                 Label(kind.displayName, systemImage: kind.systemImage)
                                     .tag(kind.id)
+                                    .disabled(
+                                        !kind.allowsMultiple
+                                            && existingKinds.contains(kind.id))
                             }
                         }
                         .onChange(of: selectedKindID) { _, newValue in
