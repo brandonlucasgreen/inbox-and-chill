@@ -109,10 +109,16 @@ That's a security decision, not a gap. A CI system that can sign your app is a
 CI system that can ship malware under your name if it's ever compromised. This
 one can't.
 
-**It doesn't run CodeQL** (GitHub's static security analyser). CodeQL on a
-private repository requires GitHub Advanced Security, which is a paid add-on.
-If the repo is ever made public — which is the plan, to make Sparkle updates
-work at all — CodeQL for Swift becomes free and is worth turning on then.
+**It doesn't run CodeQL** (GitHub's static security analyser) — but the reason
+has changed. It used to be unavailable: CodeQL on a private repo needs GitHub
+Advanced Security, a paid add-on. Since 2026-08-21 the repo is public, so
+CodeQL for Swift is free and available.
+
+It is still not wired up, and that is now a choice rather than a constraint.
+Swift analysis needs a real build, so it means a second macOS job with its own
+failure modes, and nobody has run one here yet. Worth adding deliberately —
+scheduled weekly rather than per-PR, so a flaky first outing doesn't block
+merges — not worth bolting on unexamined.
 
 **It doesn't check code style.** There's no SwiftLint or swift-format config in
 this repo, and adding one would flag hundreds of existing lines on the first
@@ -120,39 +126,27 @@ run. Worth doing deliberately, some day; not worth bolting onto CI.
 
 ## What it costs
 
-This repository is private, and GitHub bills private-repo Actions minutes
-against a monthly allowance. **macOS minutes count as ten** — a four-minute
-macOS job spends forty minutes of allowance.
+**Nothing, as of 2026-08-21.** GitHub Actions is free for public repositories,
+and this repo went public that day. Everything below is what it *used* to
+cost, kept because it explains why the workflows are shaped the way they are.
 
-Measured over the first two green runs (2026-08-21), a full pull request costs
-about **42–45 minutes of allowance**: the macOS job took 3m18s and 3m42s
-(billed as 4 × 10), the shell job under 20s, the secret scan about a minute. On
-the Pro plan's 3,000 free minutes that is roughly **65–70 pull requests a
-month** before it costs real money.
+While the repo was private, minutes billed against a monthly allowance and
+**macOS counted as ten**. Measured over the first green runs: the macOS job
+took 3m18s and 3m42s with the Release audit, and 1m25s without it — so a full
+pull request was 42–45 minutes of allowance, or roughly 65–70 pull requests a
+month on the Pro plan's 3,000 free minutes.
 
-Both of those runs included the Release audit, so a run without it has not been
-timed — the Release build alone was about 70 seconds of the total, which is the
-most that skipping it could save.
+Three things in the setup came from that, and two are worth keeping anyway:
 
-One measurement worth recording because it is not what you would guess: the
-Swift-package cache saved essentially nothing on time. Resolution took 24s
-cold and 23s warm. It stays because it removes a network fetch from
-github.com on every run, which is a reliability argument rather than a speed
-one — but don't expect it to make anything faster.
-
-Those are real numbers, not estimates. They will drift as the app grows, and
-the macOS job is the only one worth watching.
-
-Three things in the setup exist because of that:
-
-- The cheap checks (shell, secrets) run on Linux, which bills at 1×.
-- A new push to the same pull request cancels the run it superseded.
-- The Release audit doesn't run on every pull request.
-
-If it does start costing more than you like, the first lever is to change the
-macOS job's trigger from `pull_request` to only `push: [main]` — you'd find out
-after merging instead of before, which is worse but cheaper. Making the repo
-public removes the cost entirely: Actions is free for public repositories.
+- **The cheap checks run on Linux.** Still right: they need no Xcode and
+  finish in under a minute either way.
+- **A new push to the same pull request cancels the run it superseded.** Still
+  right: an abandoned run tells you nothing, free or not.
+- **The Release audit is conditional.** This one was half cost and half
+  substance. The cost half is gone; the substance half stands — it is a second
+  full build, and everything it catches lives in `project.yml`, the
+  entitlements file, or `scripts/`. A Swift-only change cannot move
+  `SUFeedURL`. Left conditional deliberately, not by inertia.
 
 ## Making CI actually enforce anything
 
