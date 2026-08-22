@@ -1,0 +1,36 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Inbox &amp; Chill</title>
+        <item>
+            <title>0.3.3</title>
+            <pubDate>Sat, 22 Aug 2026 11:36:06 -0400</pubDate>
+            <link>https://github.com/brandonlucasgreen/inbox-and-chill</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/brandonlucasgreen/inbox-and-chill/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/brandonlucasgreen/inbox-and-chill/releases/download/v0.3.3/InboxAndChill-0.3.3.zip" length="3945108" type="application/octet-stream" sparkle:edSignature="/JgizapzKJY4aTXRVCnZos2DVAdG29PlBL4dg1lQbJ1hsGrvRKtDWz1E+r/+oDxPm6dSVUIbUXah71WUQjXhDg=="/>
+        </item>
+        <item>
+            <title>0.3.2</title>
+            <pubDate>Fri, 21 Aug 2026 06:34:59 -0400</pubDate>
+            <link>https://github.com/brandonlucasgreen/inbox-and-chill</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/brandonlucasgreen/inbox-and-chill/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>0.3.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/brandonlucasgreen/inbox-and-chill/releases/download/v0.3.2/InboxAndChill-0.3.2.zip" length="2835254" type="application/octet-stream"/>
+        </item>
+        <item>
+            <title>0.3.1</title>
+            <pubDate>Thu, 20 Aug 2026 12:52:01 -0400</pubDate>
+            <link>https://github.com/brandonlucasgreen/inbox-and-chill</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/brandonlucasgreen/inbox-and-chill/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/brandonlucasgreen/inbox-and-chill/releases/download/v0.3.1/InboxAndChill-0.3.1.zip" length="2824317" type="application/octet-stream"/>
+        </item>
+    </channel>
+</rss>
