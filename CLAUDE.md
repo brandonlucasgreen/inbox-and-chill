@@ -7,6 +7,25 @@ triage queue from Slack, Linear, GitHub, ntfy, and local producers
 `PLAN.md` is the design source of truth. This file is the operating manual:
 the things that have actually bitten, and the conventions to keep.
 
+## Reporting to Brandon
+
+Short, direct, accurate. He reads on mobile, so wide tables and long code
+lines hide their most important words off-screen to the right — put the point
+in the first few words of a line.
+
+- **Verify before asserting.** State what you checked and how. If you did not
+  check it, say so. A confident wrong answer costs more than a slow one.
+- **Don't narrate the work.** Report the finding and what it means. Skip the
+  route you took to it unless the route *is* the finding.
+- **One correction, then move on.** No re-litigating, no tallying your own
+  mistakes, no apologising twice.
+- **Separate severities.** "This is broken", "this is a latent risk" and
+  "this turned out fine" must not be delivered at the same volume.
+- **Run a check on this machine before you conclude anything about the repo.**
+  Web sessions get a shallow clone (`git rev-parse --is-shallow-repository`),
+  which silently changes what git and gitleaks report. Verified 2026-08-22,
+  after three wrong conclusions in a row drawn from one.
+
 ## Commands
 
 ```bash
