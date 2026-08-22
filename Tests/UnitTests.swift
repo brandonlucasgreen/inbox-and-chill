@@ -1400,6 +1400,17 @@ struct NewSourceCatalogTests {
             #expect(!descriptor.authNote.isEmpty)
         }
     }
+
+    @Test("Apple Mail is the one kind that can't be added twice")
+    func appleMailIsSingleton() throws {
+        // A Mac has exactly one Mail.app database, unlike GitHub or Linear,
+        // where multiple accounts are legitimately different sources.
+        let mail = try #require(ConnectorCatalog.descriptor(for: "appleMail"))
+        #expect(!mail.allowsMultiple)
+        for kind in ConnectorCatalog.all where kind.id != "appleMail" {
+            #expect(kind.allowsMultiple, "\(kind.displayName) should allow multiple sources")
+        }
+    }
 }
 
 // MARK: - Sparkle updates (Sources/App/Support/UpdateController.swift)
