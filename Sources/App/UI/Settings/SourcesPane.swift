@@ -29,7 +29,7 @@ struct SourcesPane: View {
             MailPermissionNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
-            ClaudeCodeHooksNotice()
+            AgentHooksNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
             HStack {

@@ -102,11 +102,11 @@ struct SourceEditorSheet: View {
                 }
 
                 // Same placement argument as Mail's: the local source can
-                // receive nothing until Claude Code is told where to post,
-                // so the setup belongs with the source rather than in
+                // receive nothing until each coding agent is told where to
+                // post, so the setup belongs with the source rather than in
                 // General, where it used to sit.
                 if descriptor.id == "local" {
-                    ClaudeCodeSection()
+                    AgentHooksSection()
                 }
 
                 if !descriptor.fields.isEmpty {

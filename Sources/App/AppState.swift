@@ -355,9 +355,12 @@ final class AppState {
         #endif
     }
 
-    /// Why the app couldn't write the Claude Code hooks, if it tried and
-    /// failed. Surfaced in Sources and in the local source's editor.
-    private(set) var claudeHooksProblem: String?
+    /// Why the app couldn't write an agent's hooks, keyed by harness id.
+    /// Surfaced in Sources and in the local source's editor.
+    private(set) var hookProblems: [String: String] = [:]
+
+    /// Back-compat accessor for the Claude Code row.
+    var claudeHooksProblem: String? { hookProblems["claude"] }
 
     /// Writes the Claude Code hooks on the app's own initiative.
     ///
@@ -372,54 +375,74 @@ final class AppState {
     /// is reported instead of leaving a source that quietly receives nothing.
     private func ensureClaudeCodeHooks(configs: [SourceConfig]) {
         let hasLocal = configs.contains { $0.kind == "local" && $0.isEnabled }
-        let state = ClaudeCodeIntegration.installState
-        let declined = ClaudeCodeIntegration.userDeclinedHooks
+        // Every agent CLI the user actually has. A harness with no config
+        // directory is skipped entirely rather than reported as unconfigured
+        // — the app must not create `~/.codex` for someone who has never run
+        // Codex.
+        for installer in AgentHooks.all {
+            ensureHooks(installer, hasEnabledLocalSource: hasLocal)
+        }
+    }
+
+    private func ensureHooks(
+        _ installer: AgentHookInstaller, hasEnabledLocalSource: Bool
+    ) {
+        let state = installer.installState
+        let declined = installer.userDeclined
+        let present = installer.isPresent
         // The app editing a file it does not own is worth a log line saying
         // exactly why it decided to.
         Self.hooksLog.notice(
             """
-            claude hooks check: state=\(String(describing: state), privacy: .public) \
+            \(installer.id, privacy: .public) hooks check: \
+            state=\(String(describing: state), privacy: .public) \
             declined=\(declined, privacy: .public) \
-            localSource=\(hasLocal, privacy: .public)
+            present=\(present, privacy: .public) \
+            localSource=\(hasEnabledLocalSource, privacy: .public)
             """)
-        guard ClaudeCodeIntegration.shouldAutoInstall(
-            state: state, userDeclined: declined,
-            hasEnabledLocalSource: hasLocal)
+        guard AgentHookInstaller.shouldAutoInstall(
+            state: state, userDeclined: declined, harnessIsPresent: present,
+            hasEnabledLocalSource: hasEnabledLocalSource)
         else {
-            claudeHooksProblem = nil
+            hookProblems[installer.id] = nil
             return
         }
         do {
-            try ClaudeCodeIntegration.installHooks()
-            claudeHooksProblem = nil
-            Self.hooksLog.notice("claude code hooks installed automatically")
+            try installer.installHooks()
+            hookProblems[installer.id] = nil
+            Self.hooksLog.notice(
+                "\(installer.id, privacy: .public) hooks installed automatically"
+            )
         } catch {
-            claudeHooksProblem =
-                ClaudeCodeIntegration.explainAutoInstallFailure(error)
+            hookProblems[installer.id] =
+                AgentHookInstaller.explainAutoInstallFailure(
+                    error, displayName: installer.displayName,
+                    settingsLabel: installer.settingsLabel)
             Self.hooksLog.error(
-                "claude code hook auto-install failed: \(String(describing: error), privacy: .public)"
+                "\(installer.id, privacy: .public) hook auto-install failed: \(String(describing: error), privacy: .public)"
             )
         }
     }
 
     /// Clears the opt-out and installs, for the "Turn On" button.
-    func enableClaudeCodeHooks() {
-        ClaudeCodeIntegration.userDeclinedHooks = false
+    func enableHooks(_ installer: AgentHookInstaller) {
+        installer.userDeclined = false
         let configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []
-        ensureClaudeCodeHooks(configs: configs)
+        let hasLocal = configs.contains { $0.kind == "local" && $0.isEnabled }
+        ensureHooks(installer, hasEnabledLocalSource: hasLocal)
     }
 
     /// Removes the hooks and records that the user meant it.
-    func disableClaudeCodeHooks() {
+    func disableHooks(_ installer: AgentHookInstaller) {
         do {
-            try ClaudeCodeIntegration.uninstallHooks()
-            ClaudeCodeIntegration.userDeclinedHooks = true
-            claudeHooksProblem = nil
+            try installer.uninstallHooks()
+            installer.userDeclined = true
+            hookProblems[installer.id] = nil
         } catch {
-            claudeHooksProblem =
-                "Couldn't remove the Claude Code hooks from ~/.claude/settings.json: \(String(describing: error))"
+            hookProblems[installer.id] =
+                "Couldn't remove the \(installer.displayName) hooks from \(installer.settingsLabel): \(String(describing: error))"
         }
     }
 
