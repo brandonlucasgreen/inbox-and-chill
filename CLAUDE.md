@@ -491,7 +491,10 @@ re-queues it forever.
   "…" that says there is more. Connector snippet caps
   (`SlackConnector.snippetLimit`, `LinearConnector.snippetLimit`) exist to
   keep something behind that ellipsis — a cap at the visible line makes the
-  expansion reveal whitespace.
+  expansion reveal whitespace. **Since D (below) the target changed from "a
+  paragraph" to "the message": Slack's cap is 4,000, and Linear's is still
+  320, which means D on a long Linear comment still stops at an ellipsis it
+  cannot get past.**
 - **D on the selected row shows the whole message** — a third state on the
   same view (`ExpandingText.isFull`), owned by one `isFullyExpanded` flag on
   `PanelView` so it can only ever be true of one row and closes whenever the
@@ -508,6 +511,31 @@ re-queues it forever.
     it is what closes the expansion. Resetting from an `onChange` observer
     instead breaks the row's own D button: the click selects and expands in
     one event, and the observer runs after both.
+
+  **A connector that stores no body makes D look broken, and that is the
+  first thing to check.** Reported 2026-08-23 as "expansion doesn't work for
+  Slack saved messages"; it was not the UI. `makeSaveItem` put the *message*
+  in the title, cut to 80 characters, and left `snippet` nil — so there was
+  no body to reveal and the rest of the message never reached the store. Two
+  general lessons:
+
+  - **The title is not a place to put a preview.** Every other kind titles
+    the row with what happened and puts the text in `snippet`; the one kind
+    that didn't was the one kind D could not open. `Store.update` refreshes
+    `title` and `snippet` like every other field, so fixing a shape like
+    this repairs existing rows on the next poll — nothing to re-save.
+  - **`ExpandingText.clampedPrefix` is why a 4,000-char cap is affordable.**
+    The two clamped copies are laid out for *every row on screen* and `Text`
+    lays out whatever string it is handed, so they get a prefix with enough
+    headroom that the clamp is still what truncates. Only the unlimited copy
+    — the selected row alone — is handed the whole string. Raise a connector
+    cap without this and every row pays for text that is clipped away.
+
+  Known and deliberate: `truncate` flattens newlines to spaces, so a
+  multi-paragraph message opens as one run of text. Fixing that is a real
+  design tradeoff, not an oversight — the flattening is what keeps a closed
+  one-line row scannable, and per-copy newline handling would reflow the
+  glyphs mid-animation, which is the thing `ExpandingText` exists to avoid.
 - **Journaling to Obsidian** (`Journal/JournalWriter.swift`) — an output, not a
   source; needs Full Disk Access for iCloud vault paths.
 - Saving a source in the editor already calls `bootstrapConnectors()`, so

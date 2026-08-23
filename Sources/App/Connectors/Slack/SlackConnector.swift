@@ -628,6 +628,19 @@ actor SlackConnector: Connector {
         )
     }
 
+    /// What a saved row is called. `channelName` falls back to the raw
+    /// channel id when `conversations.info` has no `name` — which is every
+    /// DM — so the id has to be described rather than printed, exactly as
+    /// `watchHit` already does. Pure, so both cases are testable without a
+    /// workspace.
+    nonisolated static func saveTitle(channelLabel: String?) -> String {
+        guard let label = channelLabel, !label.isEmpty else {
+            return "Saved message"
+        }
+        if isRawChannelID(label) { return "Saved from a direct message" }
+        return "Saved in #\(label)"
+    }
+
     /// Periodically re-checks Slack's read state for channels that currently
     /// hold items, because Socket Mode does not deliver `*_marked` events.
     /// Deliberately non-throwing: a hiccup here must not tear down the socket.
@@ -818,8 +831,9 @@ actor SlackConnector: Connector {
                         "chat.getPermalink", ["channel": channel, "message_ts": ts]
                     )?["permalink"].nonEmptyString
                 }
-                let item = makeSaveItem(
+                let item = await makeSaveItem(
                     channel: channel, ts: ts, text: message["text"].string,
+                    author: message["user"].nonEmptyString,
                     permalink: permalink)
                 saves[item.externalID] = item
                 items.append(item)
@@ -937,6 +951,7 @@ actor SlackConnector: Connector {
 
         // The reaction event carries no message text; fetch just that message.
         var text: String?
+        var author: String?
         if let history = await api.tryCall(
             "conversations.history",
             [
@@ -944,9 +959,12 @@ actor SlackConnector: Connector {
                 "inclusive": "true", "limit": "1",
             ]) {
             text = history["messages"][0]["text"].string
+            author = history["messages"][0]["user"].nonEmptyString
         }
 
-        let item = makeSaveItem(channel: channel, ts: ts, text: text, permalink: permalink)
+        let item = await makeSaveItem(
+            channel: channel, ts: ts, text: text, author: author,
+            permalink: permalink)
         saves[item.externalID] = item
         emit(.upsert([item]))
     }
@@ -1045,22 +1063,36 @@ actor SlackConnector: Connector {
             payload: Self.payload(channel: channel, ts: ts))
     }
 
+    /// A saved message.
+    ///
+    /// Until 2026-08-23 this put the *message* in the title, cut to 80
+    /// characters, and left `snippet` nil — so a saved message had no body
+    /// at all, D had nothing to reveal, and the 80 characters were gone
+    /// before the store ever saw them. The text now goes where every other
+    /// kind puts it, and the title says what the row *is*.
     private func makeSaveItem(
-        channel: String, ts: String, text: String?, permalink: String?
-    ) -> RemoteItem {
-        let body = Self.truncate(renderText(text), 80) ?? "message"
+        channel: String, ts: String, text: String?, author: String?,
+        permalink: String?
+    ) async -> RemoteItem {
+        // Ids are resolved before rendering here and not for DMs or
+        // mentions, because this is the body D opens: an unresolved
+        // `<@U056HVBKTSA>` two paragraphs in is the reason to have bothered.
+        if let text { await resolveReferences(in: text) }
+        var who: String?
+        if let author { who = await displayName(userID: author) }
         return RemoteItem(
             externalID: "save-\(channel)-\(ts)",
             kind: "emoji_save",
-            title: "Saved: \(body)",
-            snippet: nil,
+            title: Self.saveTitle(
+                channelLabel: await channelName(channel)),
+            snippet: Self.truncate(renderText(text), Self.snippetLimit),
             // Prefer a native deep link built from the permalink; the
             // permalink itself rides along in the payload as the fallback
             // for a Mac with no Slack app (see `AppState.open`).
             url: permalink.flatMap {
                 Self.nativeLink(fromPermalink: $0, teamID: teamID)
             } ?? permalink ?? deepLink(channel: channel, message: ts),
-            actorName: nil,
+            actorName: who,
             occurredAt: SlackTS.date(ts) ?? .now,
             highSignal: false,
             payload: Self.payload(channel: channel, ts: ts, permalink: permalink))
@@ -1243,11 +1275,26 @@ actor SlackConnector: Connector {
 
     /// How much message text a row carries.
     ///
-    /// This used to be 100 — one panel line, with nothing behind it. The row
-    /// now opens to a paragraph while it holds the selection, so the snippet
-    /// has to be long enough to fill one; a cap that stops at the visible
-    /// line makes the expansion reveal nothing but whitespace.
-    static let snippetLimit = 320
+    /// How much of a message is stored. Twice revised, and each revision
+    /// tracked what the row could actually show:
+    ///
+    /// - **100** — one panel line, with nothing behind it.
+    /// - **320** — enough to fill the paragraph a selected row opens to,
+    ///   because a cap that stops at the visible line makes the expansion
+    ///   reveal nothing but whitespace.
+    /// - **4,000** — D drops the clamp entirely, so the target is no longer
+    ///   "a paragraph" but "the message". At 320 that keypress revealed a
+    ///   line and a half and then an ellipsis it could not get past, which
+    ///   read as a broken feature rather than as a cap.
+    ///
+    /// So this is now a *storage* bound rather than a display one, and it is
+    /// the only one left: the panel bounds its own layout work with
+    /// `ExpandingText.clampedPrefix`, so a long body costs a row nothing
+    /// until it is the selected row. 4,000 covers any message Slack's
+    /// composer sends inline — a longer paste becomes a file snippet, which
+    /// carries no inline text for us to store anyway. (That composer limit
+    /// is from Slack's documentation; it has not been probed here.)
+    static let snippetLimit = 4_000
 
     private static func truncate(_ text: String?, _ limit: Int) -> String? {
         guard let text, !text.isEmpty else { return nil }

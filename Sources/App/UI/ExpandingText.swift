@@ -61,7 +61,8 @@ struct ExpandingText: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            label(lines: collapsedLines)
+            label(lines: collapsedLines, of: Self.clampedPrefix(
+                text, lines: collapsedLines))
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     collapsedHeight = $0
                 }
@@ -69,7 +70,8 @@ struct ExpandingText: View {
                 // The open copy carries the same string; without this
                 // VoiceOver reads every row twice.
                 .accessibilityHidden(true)
-            label(lines: expandedLines)
+            label(lines: expandedLines, of: Self.clampedPrefix(
+                text, lines: expandedLines))
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     expandedHeight = $0
                 }
@@ -89,7 +91,7 @@ struct ExpandingText: View {
             // that scrolls in already selected would paint its whole
             // message for a frame and then snap back to four lines.
             if isExpanded && (isFull || expandedHeight != nil) {
-                label(lines: nil)
+                label(lines: nil, of: text)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height }
                         action: { fullHeight = $0 }
                     .opacity(isFull ? 1 : 0)
@@ -105,11 +107,34 @@ struct ExpandingText: View {
     /// `fixedSize` is what makes this ignore the height it is offered and
     /// lay itself out at its own — the clamp above can then be any height at
     /// all without the text re-wrapping to fit it.
-    private func label(lines: Int?) -> some View {
-        Text(text)
+    private func label(lines: Int?, of string: String) -> some View {
+        Text(string)
             .font(.system(size: size, weight: weight))
             .lineLimit(lines)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The most a clamped copy is ever allowed to see.
+    ///
+    /// A copy clamped to N lines can only *show* a few hundred characters,
+    /// but `Text` lays out whatever string it is handed regardless — and the
+    /// two clamped copies are laid out for **every row on screen**. Once a
+    /// connector is allowed to store a whole Slack message, that becomes
+    /// thousands of characters laid out per row per pass to render four
+    /// lines. Only the unlimited copy — which exists for the selected row
+    /// alone — is handed the entire string.
+    ///
+    /// `charsPerLine` is deliberately several times the ~55 characters that
+    /// actually fit a 420pt panel row: the clamp has to stay the thing that
+    /// truncates, so that the "…" still appears and still means "there is
+    /// more". A prefix tight enough to become the truncation point would put
+    /// an ellipsis on text that had already ended.
+    nonisolated static func clampedPrefix(
+        _ text: String, lines: Int, charsPerLine: Int = 240
+    ) -> String {
+        let budget = max(lines, 1) * charsPerLine
+        guard text.count > budget else { return text }
+        return String(text.prefix(budget))
     }
 
     private var clamp: CGFloat? {

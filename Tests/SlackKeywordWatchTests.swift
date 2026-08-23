@@ -244,6 +244,43 @@ struct SlackKeywordWatchTests {
                 from: noTS, term: "x", selfUserID: "U001", notBefore: cutoff) == nil)
     }
 
+    // MARK: Saved messages
+
+    /// The bug this replaced: the message went into the *title*, cut to 80
+    /// characters, with `snippet` left nil. So a saved row had no body,
+    /// pressing D revealed nothing, and the rest of the message never
+    /// reached the store to be revealed. The title now says what the row is
+    /// and the text goes where every other kind puts it.
+    @Test func aSavedRowIsTitledForItsChannelNotItsText() {
+        #expect(
+            SlackConnector.saveTitle(channelLabel: "growth")
+                == "Saved in #growth")
+    }
+
+    /// `channelName` answers with the raw channel id whenever
+    /// `conversations.info` has no `name` — which is every DM — so a save on
+    /// a DM would otherwise be titled "Saved in #D04ABCDEF".
+    @Test func aSaveInADMIsDescribedRatherThanPrintingAnID() {
+        #expect(
+            SlackConnector.saveTitle(channelLabel: "D04ABCDEF")
+                == "Saved from a direct message")
+        #expect(
+            SlackConnector.saveTitle(channelLabel: "C08NKQZ7T")
+                == "Saved from a direct message")
+    }
+
+    @Test func aSaveWithNoResolvableChannelStillReadsAsSomething() {
+        #expect(SlackConnector.saveTitle(channelLabel: nil) == "Saved message")
+        #expect(SlackConnector.saveTitle(channelLabel: "") == "Saved message")
+    }
+
+    /// The cap is what D can reach. At 320 a long message stopped a line and
+    /// a half past the paragraph and could not be got past, which read as a
+    /// broken feature rather than as a cap.
+    @Test func theSnippetCapIsLongEnoughForAWholeMessage() {
+        #expect(SlackConnector.snippetLimit >= 4_000)
+    }
+
     // MARK: Muted channels
 
     /// The field has to accept what a person types, which is a Slack channel
