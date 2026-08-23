@@ -40,11 +40,57 @@ enum ClaudeHook {
     /// The two original spellings (`notification`, `stop`) are load-bearing:
     /// they are what existing installs already have on disk, and changing
     /// them would strand every hook installed before this version.
+    ///
+    /// These four are **semantic, not harness-specific**: every agent CLI we
+    /// support maps its own event names onto them (Codex's
+    /// `PermissionRequest` and Gemini's `Notification` both arrive as
+    /// `notification`), so the CLI keeps one vocabulary and only the
+    /// installer's mapping table changes per harness.
     enum Event: String, CaseIterable {
         case notification = "notification"
         case stop = "stop"
         case userPromptSubmit = "user-prompt-submit"
         case sessionEnd = "session-end"
+    }
+
+    /// Which agent CLI a hook fired from.
+    ///
+    /// Only three things actually vary: the queue id prefix (so two harnesses
+    /// running in the same folder can never collide on one row), the item
+    /// `kind` prefix, and the words a row shows. Everything else — one row
+    /// per session, the clear-on-reply rule, signal escalation — is identical,
+    /// because it is a property of *agent sessions*, not of any one vendor.
+    struct Harness: Equatable {
+        /// Prefixes both the queue id (`codex-<session>`) and the item kind
+        /// (`codex_waiting`).
+        var id: String
+        /// What a row calls the agent mid-sentence: "Claude finished in …".
+        var agentName: String
+        /// What a row calls the product when naming it outright: "Claude Code
+        /// needs your input". Distinct from `agentName` because Claude Code's
+        /// two existing strings already used both spellings, and rewording
+        /// shipped rows is not what this change is for.
+        var productName: String
+        /// The `source` field on the posted JSON.
+        var sourceName: String
+        /// The `inchill` sub-command that carries this harness's events.
+        var subcommand: String
+
+        static let claudeCode = Harness(
+            id: "claude", agentName: "Claude", productName: "Claude Code",
+            sourceName: "claude-code", subcommand: "claude-hook")
+        static let codex = Harness(
+            id: "codex", agentName: "Codex", productName: "Codex",
+            sourceName: "codex-cli", subcommand: "codex-hook")
+        static let gemini = Harness(
+            id: "gemini", agentName: "Gemini", productName: "Gemini CLI",
+            sourceName: "gemini-cli", subcommand: "gemini-hook")
+
+        static let all: [Harness] = [.claudeCode, .codex, .gemini]
+
+        static func named(_ subcommand: String) -> Harness? {
+            all.first { $0.subcommand == subcommand }
+        }
     }
 
     /// One request to the app's local listener.
@@ -60,7 +106,14 @@ enum ClaudeHook {
 
     /// The queue id for a session. Stable for the session's whole life —
     /// this is the entire consolidation mechanism.
-    static func itemID(sessionID: String) -> String { "claude-\(sessionID)" }
+    ///
+    /// Prefixed per harness so a Codex session and a Claude Code session can
+    /// never land on the same row, even in the same folder.
+    static func itemID(sessionID: String, harness: Harness = .claudeCode)
+        -> String
+    {
+        "\(harness.id)-\(sessionID)"
+    }
 
     /// What the app calls the source. Decorative today (LocalConnector uses
     /// its own source id), but it is what a human sees in a payload dump.
@@ -68,24 +121,26 @@ enum ClaudeHook {
 
     static func request(
         for event: Event, sessionID: String, cwd: String? = nil,
-        message: String? = nil, lastAssistantMessage: String? = nil
+        message: String? = nil, lastAssistantMessage: String? = nil,
+        harness: Harness = .claudeCode
     ) -> Request {
-        let id = itemID(sessionID: sessionID)
+        let id = itemID(sessionID: sessionID, harness: harness)
         switch event {
         case .notification:
             return Request(
                 path: "/notify", itemID: id,
                 title: message?.isEmpty == false
-                    ? message! : "Claude Code needs your input",
-                kind: "claude_waiting",
+                    ? message! : "\(harness.productName) needs your input",
+                kind: "\(harness.id)_waiting",
                 body: "in \(directoryName(for: cwd))",
                 highSignal: true)
 
         case .stop:
             return Request(
                 path: "/notify", itemID: id,
-                title: "Claude finished in \(directoryName(for: cwd))",
-                kind: "claude_done",
+                title:
+                    "\(harness.agentName) finished in \(directoryName(for: cwd))",
+                kind: "\(harness.id)_done",
                 // What it actually said beats a bare "finished" when you are
                 // scanning several sessions at once.
                 body: firstLine(of: lastAssistantMessage),

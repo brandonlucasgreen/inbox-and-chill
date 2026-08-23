@@ -186,6 +186,10 @@ private func runClear(id: String, source: String? = nil) {
 
 /// Claude Code's hook JSON on stdin. Only the fields this convention needs
 /// are declared; other keys Claude Code sends are ignored.
+/// Codex CLI and Gemini CLI send the same three fields under the same names
+/// (`session_id`, `cwd`, `hook_event_name`), which is why one struct serves
+/// all three harnesses. Only the *event names* differ, and those are mapped
+/// to our four semantic arguments by the installer, not here.
 private struct ClaudeHookPayload: Decodable {
     var session_id: String
     var cwd: String?
@@ -254,25 +258,29 @@ private func controllingTTY() -> String? {
     return path == "/dev/tty" ? nil : path
 }
 
-private func runClaudeHook(_ rawEvent: String) {
+private func runClaudeHook(
+    _ rawEvent: String, harness: ClaudeHook.Harness = .claudeCode
+) {
+    let name = harness.subcommand
     guard let event = ClaudeHook.Event(rawValue: rawEvent) else {
         let known = ClaudeHook.Event.allCases.map(\.rawValue).joined(separator: "|")
-        fail("inchill claude-hook: unknown hook kind '\(rawEvent)' (expected \(known)).")
+        fail("inchill \(name): unknown hook kind '\(rawEvent)' (expected \(known)).")
     }
     guard let stdinData = try? FileHandle.standardInput.readToEnd(), !stdinData.isEmpty else {
-        fail("inchill claude-hook: expected a JSON hook payload on stdin.")
+        fail("inchill \(name): expected a JSON hook payload on stdin.")
     }
     guard let payload = try? JSONDecoder().decode(ClaudeHookPayload.self, from: stdinData) else {
-        fail("inchill claude-hook: could not parse hook JSON from stdin.")
+        fail("inchill \(name): could not parse hook JSON from stdin.")
     }
 
     let request = ClaudeHook.request(
         for: event, sessionID: payload.session_id, cwd: payload.cwd,
         message: payload.message,
-        lastAssistantMessage: payload.last_assistant_message)
+        lastAssistantMessage: payload.last_assistant_message,
+        harness: harness)
 
     var json: [String: Any] = [
-        "id": request.itemID, "source": ClaudeHook.sourceName,
+        "id": request.itemID, "source": harness.sourceName,
     ]
     if let title = request.title { json["title"] = title }
     if let kind = request.kind { json["kind"] = kind }
@@ -299,10 +307,13 @@ private let usage = """
       inchill done <id>
       inchill clear <id>
       inchill claude-hook <notification|stop|user-prompt-submit|session-end>
+      inchill codex-hook  <notification|stop|user-prompt-submit|session-end>
+      inchill gemini-hook <notification|stop|user-prompt-submit|session-end>
 
-    The claude-hook sub-commands are driven by ~/.claude/settings.json (see
-    Settings \u{2192} Claude Code in the app); they read a hook payload on stdin
-    and keep exactly one queue row per Claude Code session.
+    The *-hook sub-commands are driven by each agent's own config
+    (~/.claude/settings.json, ~/.codex/hooks.json, ~/.gemini/settings.json —
+    see the Terminal & Claude Code source in the app). They read a hook
+    payload on stdin and keep exactly one queue row per session.
     """
 
 let arguments = CommandLine.arguments
@@ -322,11 +333,16 @@ case "done":
 case "clear":
     guard let id = rest.first else { fail("inchill clear: missing <id>.") }
     runClear(id: id)
-case "claude-hook":
+// One sub-command per agent CLI. They share an implementation and a
+// vocabulary — each harness's installer maps its own event names onto these
+// four arguments — and differ only in the queue id prefix and the wording of
+// a row, so a Codex session and a Claude Code session can never collide.
+case _ where ClaudeHook.Harness.named(command) != nil:
+    let harness = ClaudeHook.Harness.named(command)!
     guard let event = rest.first else {
-        fail("inchill claude-hook: missing <\(ClaudeHook.Event.allCases.map(\.rawValue).joined(separator: "|"))>.")
+        fail("inchill \(command): missing <\(ClaudeHook.Event.allCases.map(\.rawValue).joined(separator: "|"))>.")
     }
-    runClaudeHook(event)
+    runClaudeHook(event, harness: harness)
 case "-h", "--help", "help":
     print(usage)
 default:

@@ -1,14 +1,68 @@
 import KeyboardShortcuts
 import SwiftUI
 
-/// Settings shell (M0). Real panes land with their features.
+/// Settings shell.
+///
+/// Four tabs, split by *what the setting is about* rather than by when it was
+/// added: General is the app itself (how you open it, how it updates, what
+/// you paid), Notifications is everything that decides how loudly it reaches
+/// you, Sources is per-connector — including each source's own setup, which
+/// is why the Claude Code hooks now live in the local source's editor rather
+/// than in General.
 struct SettingsView: View {
+    var body: some View {
+        TabView {
+            GeneralPane()
+                .tabItem { Label("General", systemImage: "gearshape") }
+
+            NotificationsPane()
+                .tabItem { Label("Notifications", systemImage: "bell") }
+
+            SourcesPane()
+                .tabItem { Label("Sources", systemImage: "tray.2") }
+
+            AboutPane()
+                .tabItem { Label("About", systemImage: "info.circle") }
+        }
+        .frame(width: 640, height: 480)
+    }
+}
+
+/// The app itself: how you summon it, whether it starts with the Mac, how it
+/// updates, and what you paid for it.
+struct GeneralPane: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
         @Bindable var state = appState
-        TabView {
-            Form {
+        Form {
+            Section {
+                KeyboardShortcuts.Recorder("Show panel:", name: .togglePanel)
+                Toggle("Launch at login", isOn: $state.launchAtLogin)
+                if let error = appState.launchAtLoginError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+            }
+            UpdatesSection()
+            // Hidden while the mechanic is off, so an alpha build shows no
+            // trace of a product that isn't for sale yet.
+            if Licensing.isEnforced {
+                LicenseSection()
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Everything that decides how loudly the queue reaches you: the menu bar
+/// count, banners, and the written record.
+struct NotificationsPane: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        @Bindable var state = appState
+        Form {
+            Section("Menu Bar Badge") {
                 Toggle("Badge: total waiting", isOn: $state.badgeShowsTotal)
                 Toggle(
                     "Badge: high-signal only",
@@ -23,31 +77,21 @@ struct SettingsView: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-                KeyboardShortcuts.Recorder(
-                    "Show panel:", name: .togglePanel)
-                Toggle("Launch at login", isOn: $state.launchAtLogin)
-                if let error = appState.launchAtLoginError {
-                    Text(error).font(.caption).foregroundStyle(.red)
-                }
-                Toggle("Play sound with banners", isOn: $state.bannerSound)
-                BannerPermissionNotice()
-                Section {
-                    ClaudeCodeIntegrationRow()
-                }
-                JournalSettingsSection()
-                UpdatesSection()
             }
-            .formStyle(.grouped)
-            .tabItem { Label("General", systemImage: "gearshape") }
 
-            SourcesPane()
-                .tabItem { Label("Sources", systemImage: "tray.2") }
+            Section("Banners") {
+                Toggle("Play sound with banners", isOn: $state.bannerSound)
+                Text(
+                    "Banners are off until you switch them on for a source, in the Sources tab."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                BannerPermissionNotice()
+            }
 
-            AboutPane()
-                .tabItem { Label("About", systemImage: "info.circle") }
+            JournalSettingsSection()
         }
-        .frame(width: 640, height: 480)
+        .formStyle(.grouped)
     }
 }
 
@@ -93,71 +137,6 @@ struct BannerPermissionNotice: View {
         }
     }
 }
-
-/// One-click Claude Code hooks install (decision §2.1: local sources are a
-/// first-class feature; hooks make Claude-waiting items appear automatically).
-struct ClaudeCodeIntegrationRow: View {
-    @State private var state = ClaudeCodeIntegration.installState
-    @State private var errorText: String?
-
-    var body: some View {
-        LabeledContent("Claude Code") {
-            HStack(spacing: 8) {
-                Button(actionTitle) {
-                    perform(removing: false)
-                }
-                .help(actionHelp)
-
-                if state != .notInstalled {
-                    Button("Remove") { perform(removing: true) }
-                        .help("Remove the inchill hooks from ~/.claude/settings.json")
-                }
-            }
-        }
-        if state == .outdated {
-            Text(
-                "Hooks from an older version are installed. Update them to get one queue row per session instead of one per turn."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        if let errorText {
-            Text(errorText).font(.caption).foregroundStyle(.red)
-        }
-    }
-
-    private var actionTitle: String {
-        switch state {
-        case .notInstalled: "Set Up Integration"
-        case .outdated: "Update Integration"
-        case .installed: "Reinstall"
-        }
-    }
-
-    private var actionHelp: String {
-        switch state {
-        case .installed:
-            "Rewrite the hooks in ~/.claude/settings.json (a backup is made first)"
-        default:
-            "Add Notification/Stop/UserPromptSubmit/SessionEnd hooks to ~/.claude/settings.json (a backup is made first)"
-        }
-    }
-
-    private func perform(removing: Bool) {
-        do {
-            if removing {
-                try ClaudeCodeIntegration.uninstallHooks()
-            } else {
-                try ClaudeCodeIntegration.installHooks()
-            }
-            errorText = nil
-        } catch {
-            errorText = String(describing: error)
-        }
-        state = ClaudeCodeIntegration.installState
-    }
-}
-
 
 /// Journal export: append arrivals and triage actions to a Markdown file,
 /// typically an Obsidian daily note, so an agent (or you) can reflect on what

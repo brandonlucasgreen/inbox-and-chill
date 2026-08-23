@@ -97,7 +97,12 @@ struct MainWindowView: View {
             // eating characters typed into the search field.
             .searchFocused($isSearchFocused)
             .toolbar(id: "mainWindow") { toolbarContent }
-            .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    LicenseNotice()
+                    statusBar
+                }
+            }
     }
 
     private func table(_ index: SourceIndex) -> some View {

@@ -19,6 +19,7 @@ extension KeyboardShortcuts.Name {
 final class AppState {
     let container: ModelContainer
     let store: Store
+    let license: LicenseController
     private(set) var engine: SyncEngine!
 
     /// Bumped whenever the queue changes so views can re-query.
@@ -156,8 +157,23 @@ final class AppState {
             fatalError("Cannot open store: \(error)")
         }
         store = Store(modelContainer: container)
+        license = LicenseController()
         engine = SyncEngine(store: store) { [weak self] change in
             Task { @MainActor in self?.handle(change) }
+        }
+        // Trial expiry and activation both land mid-run — a menu bar app
+        // lives for weeks, so launch-time gating alone would keep syncing
+        // for days past the end of a trial.
+        license.onSyncPermissionChange = { [weak self] allowed in
+            guard let self else { return }
+            Task { @MainActor in
+                if allowed {
+                    await self.bootstrapConnectors()
+                    await self.engine.refreshNow()
+                } else {
+                    await self.engine.unregisterAll()
+                }
+            }
         }
         // Permission is requested lazily, right before the first banner —
         // not at launch (banners are opt-in; don't alert before the UI).
@@ -308,6 +324,10 @@ final class AppState {
     // MARK: Connector bootstrap
 
     func bootstrapConnectors() async {
+        // An ended trial pauses syncing — loudly, in the panel and Settings
+        // (`LicenseNotice`) — and gates nothing else: the queue, the archive
+        // and every triage action keep working on what's already here.
+        guard license.state.allowsSync else { return }
         var configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []
@@ -321,6 +341,7 @@ final class AppState {
             try? container.mainContext.save()
             configs.append(local)
         }
+        ensureClaudeCodeHooks(configs: configs)
         for config in configs where config.isEnabled {
             if let connector = ConnectorFactory.make(config: config) {
                 await engine.register(connector)
@@ -333,6 +354,100 @@ final class AppState {
             }
         #endif
     }
+
+    /// Why the app couldn't write an agent's hooks, keyed by harness id.
+    /// Surfaced in Sources and in the local source's editor.
+    private(set) var hookProblems: [String: String] = [:]
+
+    /// Back-compat accessor for the Claude Code row.
+    var claudeHooksProblem: String? { hookProblems["claude"] }
+
+    /// Writes the Claude Code hooks on the app's own initiative.
+    ///
+    /// The local source is created on first run, and a source that can
+    /// receive nothing until you find a button is a setup step masquerading
+    /// as a feature — every other app that watches Claude Code (Vibe Island,
+    /// Bartender's NotchBar) installs its hooks without asking, which is why
+    /// theirs feel like they just work. So this does the same.
+    ///
+    /// Two things keep that honest rather than presumptuous: pressing Remove
+    /// sets `userDeclinedHooks` and is never silently undone, and a failure
+    /// is reported instead of leaving a source that quietly receives nothing.
+    private func ensureClaudeCodeHooks(configs: [SourceConfig]) {
+        let hasLocal = configs.contains { $0.kind == "local" && $0.isEnabled }
+        // Every agent CLI the user actually has. A harness with no config
+        // directory is skipped entirely rather than reported as unconfigured
+        // — the app must not create `~/.codex` for someone who has never run
+        // Codex.
+        for installer in AgentHooks.all {
+            ensureHooks(installer, hasEnabledLocalSource: hasLocal)
+        }
+    }
+
+    private func ensureHooks(
+        _ installer: AgentHookInstaller, hasEnabledLocalSource: Bool
+    ) {
+        let state = installer.installState
+        let declined = installer.userDeclined
+        let present = installer.isPresent
+        // The app editing a file it does not own is worth a log line saying
+        // exactly why it decided to.
+        Self.hooksLog.notice(
+            """
+            \(installer.id, privacy: .public) hooks check: \
+            state=\(String(describing: state), privacy: .public) \
+            declined=\(declined, privacy: .public) \
+            present=\(present, privacy: .public) \
+            localSource=\(hasEnabledLocalSource, privacy: .public)
+            """)
+        guard AgentHookInstaller.shouldAutoInstall(
+            state: state, userDeclined: declined, harnessIsPresent: present,
+            hasEnabledLocalSource: hasEnabledLocalSource)
+        else {
+            hookProblems[installer.id] = nil
+            return
+        }
+        do {
+            try installer.installHooks()
+            hookProblems[installer.id] = nil
+            Self.hooksLog.notice(
+                "\(installer.id, privacy: .public) hooks installed automatically"
+            )
+        } catch {
+            hookProblems[installer.id] =
+                AgentHookInstaller.explainAutoInstallFailure(
+                    error, displayName: installer.displayName,
+                    settingsLabel: installer.settingsLabel)
+            Self.hooksLog.error(
+                "\(installer.id, privacy: .public) hook auto-install failed: \(String(describing: error), privacy: .public)"
+            )
+        }
+    }
+
+    /// Clears the opt-out and installs, for the "Turn On" button.
+    func enableHooks(_ installer: AgentHookInstaller) {
+        installer.userDeclined = false
+        let configs =
+            (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
+            ?? []
+        let hasLocal = configs.contains { $0.kind == "local" && $0.isEnabled }
+        ensureHooks(installer, hasEnabledLocalSource: hasLocal)
+    }
+
+    /// Removes the hooks and records that the user meant it.
+    func disableHooks(_ installer: AgentHookInstaller) {
+        do {
+            try installer.uninstallHooks()
+            installer.userDeclined = true
+            hookProblems[installer.id] = nil
+        } catch {
+            hookProblems[installer.id] =
+                "Couldn't remove the \(installer.displayName) hooks from \(installer.settingsLabel): \(String(describing: error))"
+        }
+    }
+
+    private static let hooksLog = Logger(
+        subsystem: "lol.bgreen.inboxandchill", category: "claude-hooks")
 
     // MARK: Queue change handling
 
@@ -462,6 +577,15 @@ final class AppState {
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []
         return configs.contains { $0.kind == "appleMail" && $0.isEnabled }
+    }
+
+    /// Whether any enabled source depends on the Claude Code hooks. Same
+    /// contract as `hasEnabledMailSource`: no local source, no notice.
+    var hasEnabledLocalSource: Bool {
+        let configs =
+            (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
+            ?? []
+        return configs.contains { $0.kind == "local" && $0.isEnabled }
     }
 
     /// Requests permission on first use (if undetermined), then posts.
