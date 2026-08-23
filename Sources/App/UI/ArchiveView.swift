@@ -18,6 +18,7 @@ struct ArchiveView: View {
 
     let index: SourceIndex
     var restore: (Item) -> Void
+    var open: (Item) -> Void
     var onClose: () -> Void
 
     @State private var search = ""
@@ -48,7 +49,8 @@ struct ArchiveView: View {
                         ForEach(matches) { item in
                             ArchiveRow(
                                 item: item, display: index.display(for: item),
-                                restore: { restore(item) })
+                                restore: { restore(item) },
+                                open: { open(item) })
                         }
                     }
                     .padding(.horizontal, 6)
@@ -111,6 +113,7 @@ private struct ArchiveRow: View {
     let item: Item
     let display: SourceDisplay
     var restore: () -> Void
+    var open: () -> Void
 
     @State private var isHovering = false
 
@@ -144,7 +147,7 @@ private struct ArchiveRow: View {
                     : AnyShapeStyle(Color.clear)))
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button("Open") { if let url = item.url { NSWorkspace.shared.open(url) } }
+            Button("Open", action: open)
             Button("Restore", action: restore)
             Button("Copy") {
                 PanelPasteboard.copy(title: item.title, url: item.url)

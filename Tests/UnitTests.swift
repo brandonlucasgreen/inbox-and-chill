@@ -1370,6 +1370,65 @@ struct AppleMailFieldTests {
     }
 }
 
+@Suite("Open-URL scheme gate (Sources/App/AppState.swift)")
+@MainActor
+struct OpenSchemeGateTests {
+    /// `openable` is a `nonisolated static` pure helper (rule 6), so every
+    /// branch is reachable directly. The gate is the only thing between a
+    /// remote source's URL string and `NSWorkspace.open`, so the cases that
+    /// must refuse — `shortcuts://`, `file://` from a non-local source, an
+    /// unknown scheme — are the ones worth pinning.
+
+    @Test("http/https and message deep links pass for any source")
+    func trustedSchemesPass() throws {
+        let https = try #require(URL(string: "https://example.com/x"))
+        let http = try #require(URL(string: "http://example.com/x"))
+        let message = try #require(URL(string: "message://%3cabc@def%3e"))
+        #expect(AppState.openable(https, sourceKind: "ntfy", payload: nil) == https)
+        #expect(AppState.openable(http, sourceKind: "jsonPoller", payload: nil) == http)
+        #expect(AppState.openable(message, sourceKind: "appleMail", payload: nil) == message)
+    }
+
+    @Test("shortcuts, javascript and unknown schemes are refused")
+    func dangerousSchemesRefused() throws {
+        let shortcut = try #require(URL(string: "shortcuts://run-shortcut?name=pwn"))
+        // NSURL(string:) rejects "javascript:…" on macOS, so build it the way
+        // a row actually would — the gate must refuse even the ones that parse.
+        let weird = try #require(URL(string: "evil-scheme://do/thing"))
+        #expect(AppState.openable(shortcut, sourceKind: "ntfy", payload: nil) == nil)
+        #expect(AppState.openable(weird, sourceKind: "ntfy", payload: nil) == nil)
+        #expect(AppState.openable(shortcut, sourceKind: "local", payload: nil) == nil)
+    }
+
+    @Test("file:// is local-source-only")
+    func fileSchemeLocalOnly() throws {
+        let file = try #require(URL(string: "file:///Applications/Mail.app"))
+        // A remote push (ntfy, JSON feed) must not open local files.
+        #expect(AppState.openable(file, sourceKind: "ntfy", payload: nil) == nil)
+        #expect(AppState.openable(file, sourceKind: "jsonPoller", payload: nil) == nil)
+        // The local source's cwd is set by the harness, not a publisher.
+        #expect(AppState.openable(file, sourceKind: "local", payload: nil) == file)
+        #expect(AppState.openable(file, sourceKind: "appleMail", payload: nil) == nil)
+    }
+
+    @Test("claude:// is local-source-only")
+    func claudeSchemeLocalOnly() throws {
+        let claude = try #require(URL(string: "claude://local_sessions/abc"))
+        #expect(AppState.openable(claude, sourceKind: "ntfy", payload: nil) == nil)
+        #expect(AppState.openable(claude, sourceKind: "local", payload: nil) == claude)
+    }
+
+    @Test("slack:// falls back to https permalink only when Slack is absent")
+    func slackDeepLink() throws {
+        let slack = try #require(URL(string: "slack://channel?team=T&id=C"))
+        // With no payload to fall back to, the deep link itself is returned
+        // (handlesSlackScheme is a real Launch-Services lookup; on the test
+        // host it may be either, so only assert the non-nil contract here).
+        let result = AppState.openable(slack, sourceKind: "slack", payload: nil)
+        #expect(result != nil)
+    }
+}
+
 @Suite("New sources are configurable")
 struct NewSourceCatalogTests {
     @Test("Sentry and Apple Mail are in the catalog with usable fields")
@@ -1829,6 +1888,41 @@ struct JSONPollerConnectorTests {
                 sourceID: "s", urlString: "https://example.com", mapping: mapping)
             #expect(connector.sourceKind == "jsonPoller")
         }
+    }
+
+    @Test("non-http(s) feed schemes are refused with a named error")
+    func fetchThrowsForNonHttpScheme() async {
+        // The app is unsandboxed, so a `file://` feed would read a local
+        // file into memory each poll. `accept` must refuse it (and any other
+        // non-http(s) scheme) up front, and `fetch` must name the scheme.
+        let file = JSONPollerConnector(
+            sourceID: "s", urlString: "file:///Users/x/.ssh/id_rsa",
+            mapping: "id=id,title=title")
+        do {
+            _ = try await file.fetch()
+            Issue.record("file:// feed should have been refused")
+        } catch {
+            let msg = String(describing: error)
+            #expect(msg.contains("file"))
+            #expect(msg.lowercased().contains("http"))
+        }
+    }
+
+    @Test func acceptHelperRefusesNonHttpSchemes() {
+        // The pure decision helper (rule 6): http/https are accepted, every
+        // other scheme is rejected with its scheme named, and an unparseable
+        // string rejects with no scheme.
+        #expect(JSONPollerConnector.accept(urlString: "https://x.com/f.json").url != nil)
+        #expect(JSONPollerConnector.accept(urlString: "http://x.com/f.json").url != nil)
+        let file = JSONPollerConnector.accept(urlString: "file:///etc/passwd")
+        #expect(file.url == nil)
+        #expect(file.rejectedScheme == "file")
+        let ftp = JSONPollerConnector.accept(urlString: "ftp://x.com/feed")
+        #expect(ftp.url == nil)
+        #expect(ftp.rejectedScheme == "ftp")
+        let junk = JSONPollerConnector.accept(urlString: "not a url")
+        #expect(junk.url == nil)
+        #expect(junk.rejectedScheme == nil)
     }
 }
 

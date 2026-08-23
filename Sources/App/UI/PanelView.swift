@@ -47,6 +47,7 @@ struct PanelView: View {
                 ArchiveView(
                     index: queue.index,
                     restore: { restoreFromArchive($0) },
+                    open: { appState.open($0) },
                     onClose: { showArchive = false })
             } else {
                 FilterBar(

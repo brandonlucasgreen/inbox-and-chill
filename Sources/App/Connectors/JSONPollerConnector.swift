@@ -11,6 +11,10 @@ actor JSONPollerConnector: Connector {
     nonisolated let pollInterval: TimeInterval = 120
 
     private let url: URL?
+    /// The scheme of a URL that parsed but was refused (anything other than
+    /// http/https). Surfaced in `fetch()` as a named, actionable error rather
+    /// than the generic "Invalid feed URL" a nil `url` produces.
+    private let rejectedScheme: String?
     private let mapping: [String: String]
 
     /// Both ISO-8601 shapes a feed may send. `nil` means neither matched —
@@ -19,9 +23,32 @@ actor JSONPollerConnector: Connector {
         ISO8601Timestamp.date(from: string)
     }
 
+    /// The schemes a JSON feed URL may use. Non-http(s) is refused up front:
+    /// the app is unsandboxed, so `file://` would read a local file into
+    /// memory on every poll, and no other scheme is useful to a JSON poller.
+    /// (The HTTP-status guard below already stops a `file://` response from
+    /// being parsed — `URLSession` returns `NSURLResponse`, not
+    /// `HTTPURLResponse` — but rejecting the scheme gives a named error
+    /// instead of a confusing "Feed returned HTTP -1".)
+    nonisolated static func accept(
+        urlString: String
+    ) -> (url: URL?, rejectedScheme: String?) {
+        guard let parsed = URL(string: urlString) else {
+            return (nil, nil)
+        }
+        if let scheme = parsed.scheme?.lowercased(),
+            scheme == "http" || scheme == "https"
+        {
+            return (parsed, nil)
+        }
+        return (nil, parsed.scheme)
+    }
+
     init(sourceID: String, urlString: String, mapping: String) {
         self.sourceID = sourceID
-        self.url = URL(string: urlString)
+        let decision = Self.accept(urlString: urlString)
+        self.url = decision.url
+        self.rejectedScheme = decision.rejectedScheme
         var map: [String: String] = [:]
         for pair in mapping.split(separator: ",") {
             let parts = pair.split(separator: "=", maxSplits: 1)
@@ -34,6 +61,12 @@ actor JSONPollerConnector: Connector {
     }
 
     func fetch() async throws -> [RemoteItem] {
+        if let scheme = rejectedScheme {
+            throw ConnectorError(
+                "Feed URL uses the \"\(scheme)\" scheme, but a JSON poller " +
+                "only supports http and https. Use a URL starting with " +
+                "http:// or https://.")
+        }
         guard let url else {
             throw ConnectorError("Invalid feed URL")
         }
