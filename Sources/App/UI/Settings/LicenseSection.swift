@@ -36,11 +36,6 @@ struct LicenseSection: View {
                             || keyField.trimmingCharacters(in: .whitespaces)
                                 .isEmpty)
                 }
-                Text(
-                    "Building from source is always free — the license covers the signed, auto-updating download and supports development."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             } else {
                 LabeledContent("Move to another Mac") {
                     Button("Deactivate on This Mac") {
