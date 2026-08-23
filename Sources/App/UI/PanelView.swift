@@ -25,6 +25,10 @@ struct PanelView: View {
     private var sourceConfigs: [SourceConfig]
 
     @State private var selectedUID: String?
+    /// Whether the selected row is showing its whole message (D). One flag
+    /// for the panel, not one per row: only the selected row can be open at
+    /// all, and a row that loses the selection closes back to a line.
+    @State private var isFullyExpanded = false
     @State private var filterText = ""
     @State private var isFiltering = false
     @AppStorage("panel.showSnoozed") private var showSnoozed = false
@@ -69,7 +73,7 @@ struct PanelView: View {
         .onKeyPress(phases: .down) { handleKey($0) }
         .onAppear {
             focus = .list
-            if selectedUID == nil { selectedUID = queue.visibleUIDs.first }
+            if selectedUID == nil { select(queue.visibleUIDs.first) }
         }
         .onChange(of: queue.visibleUIDs) { old, new in
             reconcileSelection(old: old, new: new)
@@ -139,6 +143,9 @@ struct PanelView: View {
                     .animation(
                         PanelMotion.queue(reduceMotion: reduceMotion),
                         value: selectedUID)
+                    .animation(
+                        PanelMotion.queue(reduceMotion: reduceMotion),
+                        value: isFullyExpanded)
                 }
                 .onChange(of: selectedUID) { _, new in
                     guard let new else { return }
@@ -149,6 +156,20 @@ struct PanelView: View {
                         PanelMotion.queue(reduceMotion: reduceMotion)
                     ) {
                         proxy.scrollTo(new, anchor: .center)
+                    }
+                }
+                // A message long enough to be worth D is often longer than
+                // the panel, so the row is anchored to the top rather than
+                // centred: the text has to start where you can read it, and
+                // scrolling down from there is the rest of the message.
+                // Closing it puts the row back where the selection lives.
+                .onChange(of: isFullyExpanded) { _, isFull in
+                    guard let selectedUID else { return }
+                    withAnimation(
+                        PanelMotion.queue(reduceMotion: reduceMotion)
+                    ) {
+                        proxy.scrollTo(
+                            selectedUID, anchor: isFull ? .top : .center)
                     }
                 }
             }
@@ -162,11 +183,13 @@ struct PanelView: View {
             ItemRowView(
                 item: item, display: index.display(for: item),
                 isSelected: selectedUID == item.uid,
+                isFullyExpanded: isFullyExpanded,
                 snoozeTargetUID: $snoozeTargetUID,
                 onSelect: {
-                    selectedUID = item.uid
+                    select(item.uid)
                     focus = .list
-                })
+                },
+                onToggleFull: { toggleFull(item.uid) })
                 .id(item.uid)
                 .transition(PanelMotion.row)
         }
@@ -415,6 +438,12 @@ struct PanelView: View {
         if input == .escape {
             if snoozeTargetUID != nil {
                 snoozeTargetUID = nil
+            // Esc peels back one layer at a time, and a row showing its
+            // whole message is the layer most recently added — closing the
+            // panel out from under it would lose the filter and the
+            // selection to undo one press of D.
+            } else if isFullyExpanded {
+                isFullyExpanded = false
             } else if isFiltering || !filterText.isEmpty {
                 clearFilter()
             } else if showArchive {
@@ -482,6 +511,10 @@ struct PanelView: View {
             "U" where filterText.isEmpty && !isFiltering:
             unreadSelected()
             return true
+        case "d" where filterText.isEmpty && !isFiltering,
+            "D" where filterText.isEmpty && !isFiltering:
+            expandSelected()
+            return true
         default:
             guard character.isLetter || character.isNumber
                 || character.isPunctuation || character == " "
@@ -525,26 +558,58 @@ struct PanelView: View {
             let next = PanelSelection.next(
                 from: selectedUID, in: queue.visibleUIDs, by: delta)
         else { return }
-        selectedUID = next
+        select(next)
         focus = .list
+    }
+
+    /// The one way the selection moves, because moving it always closes a
+    /// full expansion (D). Remembering the expansion per row instead would
+    /// leave a screenful of full-height rows behind after a few presses, in
+    /// a panel whose whole job is to fit the queue on one screen.
+    ///
+    /// Reset here rather than in an `onChange`: a click on a row's D button
+    /// selects and expands in the same event, and an `onChange` observer
+    /// would run after both and close what the click just opened.
+    private func select(_ uid: String?) {
+        guard uid != selectedUID else { return }
+        selectedUID = uid
+        isFullyExpanded = false
+    }
+
+    /// D, and the row's own expand button. Takes the selection first when
+    /// the click landed on some other row, so the thing that opens is the
+    /// thing that was clicked.
+    private func toggleFull(_ uid: String) {
+        if uid != selectedUID {
+            select(uid)
+            focus = .list
+        }
+        isFullyExpanded.toggle()
+    }
+
+    /// D against whatever holds the selection — nothing to open on an
+    /// empty queue.
+    private func expandSelected() {
+        guard let selectedUID else { return }
+        toggleFull(selectedUID)
     }
 
     /// Keeps the selection meaningful when a row leaves the queue (done,
     /// snoozed, filtered away): step to the next surviving row.
     private func reconcileSelection(old: [String], new: [String]) {
         guard let current = selectedUID else {
-            selectedUID = new.first
+            select(new.first)
             return
         }
         guard !new.contains(current) else { return }
         guard let position = old.firstIndex(of: current) else {
-            selectedUID = new.first
+            select(new.first)
             return
         }
-        selectedUID =
+        select(
             old[(position + 1)...].first { new.contains($0) }
-            ?? old[..<position].last { new.contains($0) }
-            ?? new.first
+                ?? old[..<position].last { new.contains($0) }
+                ?? new.first)
     }
 
     // MARK: Actions

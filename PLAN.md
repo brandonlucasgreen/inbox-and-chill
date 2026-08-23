@@ -383,7 +383,7 @@ Two complementary mechanisms:
 - Panel anatomy top-to-bottom: **Pinned** section (if any) → active queue → collapsed **Snoozed** section → footer.
 - Each row: source icon, title (e.g. "Maria mentioned you in #growth"), snippet, relative time. Hover reveals quick actions: **Open**, **Done**, **Snooze ▾**, **Pin**.
 - Footer: "Refresh", per-source sync status/last-sync, Archive, Settings gear.
-- **Keyboard-first**: arrows to move, ⏎ open, ⌘⏎ open + done, E done, S snooze, ⌘P pin, ⌘Z undo-done, ⌘1…⌘9 source filter, type-to-filter. Esc closes.
+- **Keyboard-first**: arrows to move, ⏎ open, ⌘⏎ open + done, E done, S snooze, D show the selected item's whole message, ⌘P pin, ⌘Z undo-done, ⌘1…⌘9 source filter, type-to-filter. Esc closes.
 - **Copy behavior**: ⌘C on a row copies a rich representation (URL + title as RTF/HTML, plain text fallback). Rows are draggable — dragging a row out yields a URL (drop into Notes, a Slack message, a Linear comment).
 
 ### 5.2 Windows and app structure

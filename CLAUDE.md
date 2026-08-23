@@ -492,6 +492,22 @@ re-queues it forever.
   (`SlackConnector.snippetLimit`, `LinearConnector.snippetLimit`) exist to
   keep something behind that ellipsis — a cap at the visible line makes the
   expansion reveal whitespace.
+- **D on the selected row shows the whole message** — a third state on the
+  same view (`ExpandingText.isFull`), owned by one `isFullyExpanded` flag on
+  `PanelView` so it can only ever be true of one row and closes whenever the
+  selection moves. Three things it deliberately does:
+  - The unlimited copy is laid out for the **selected row only**, and only
+    once the 4-line copy has been measured. Always laying it out means laying
+    out every character of every body on screen; laying it out before the
+    paragraph is measured makes it the clamp's natural-height fallback, so a
+    row scrolling in already selected paints its whole message for a frame.
+  - It is **measured before the press**, not after. A height that arrives
+    from a geometry callback lands on the pass *after* the transaction, so
+    the row jumps open instead of animating.
+  - `select(_:)` in `PanelView` is the only way the selection moves, because
+    it is what closes the expansion. Resetting from an `onChange` observer
+    instead breaks the row's own D button: the click selects and expands in
+    one event, and the observer runs after both.
 - **Journaling to Obsidian** (`Journal/JournalWriter.swift`) — an output, not a
   source; needs Full Disk Access for iCloud vault paths.
 - Saving a source in the editor already calls `bootstrapConnectors()`, so

@@ -83,8 +83,9 @@ whole triage loop:
 
 - **⌥⌘I** (or click the tray icon) — open the panel
 - **↑/↓** select · **⏎** open · **E** done · **⌘Z** undo · **S** snooze
-  (presets popover) · **⌘P** pin · **⌘C** copy · type to filter ·
-  **⌘1…⌘9** source chips · **Esc** peels back one layer at a time
+  (presets popover) · **D** show the whole message (**Esc** closes it again) · **⌘P** pin · **⌘C** copy ·
+  type to filter · **⌘1…⌘9** source chips · **Esc** peels back one layer at a
+  time
 - Watch the fake "remote" behave: marking the mention done tells the fake
   connector, so it stays gone on the next poll (write-through, same code
   path real connectors use).

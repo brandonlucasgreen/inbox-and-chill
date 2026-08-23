@@ -1618,6 +1618,46 @@ struct ExpandingTextClampTests {
                 estimate: estimate) == 15)
     }
 
+    @Test("D opens the row to the whole message")
+    func fullOpensToTheWholeMessage() {
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, isFull: true, collapsed: 15, expanded: 62,
+                full: 210, estimate: estimate) == 210)
+    }
+
+    @Test("Closing the full view returns to the four-line height")
+    func fullClosesBackToTheParagraph() {
+        // Both numbers exist before either press, which is the whole reason
+        // the toggle animates in both directions rather than snapping.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, isFull: false, collapsed: 15, expanded: 62,
+                full: 210, estimate: estimate) == 62)
+    }
+
+    @Test("An unmeasured full row takes its natural height, not four lines")
+    func unmeasuredFullIsUnclamped() {
+        // A row that scrolls in already full paints before its ruler lands.
+        // Clamping it to the paragraph height would crop the message and
+        // then jump — the same bug the open case above already records.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, isFull: true, collapsed: 15, expanded: 62,
+                full: nil, estimate: estimate) == nil)
+    }
+
+    @Test("An unselected row stays on one line however D was left")
+    func fullNeverEscapesTheSelection() {
+        // The panel closes the expansion whenever the selection moves, but
+        // the clamp must not depend on that having happened: a row without
+        // the selection is on its one line, full flag or not.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: false, isFull: true, collapsed: 15, expanded: 62,
+                full: 210, estimate: estimate) == 15)
+    }
+
     @Test("A single line is never cropped by a stale estimate")
     func closedHeightNeverCropsTheMeasuredLine() {
         // Estimate too tall: the measured line wins, so no gap.

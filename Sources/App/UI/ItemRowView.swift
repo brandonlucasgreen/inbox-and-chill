@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// One queue row: source glyph, title, snippet/actor, relative time, and
-/// hover-revealed quick actions (Open · Done · Snooze ▾ · Pin).
+/// hover-revealed quick actions (Expand · Open · Done · Snooze ▾ · Read ·
+/// Pin).
 struct ItemRowView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.controlActiveState) private var controlActiveState
@@ -9,9 +10,19 @@ struct ItemRowView: View {
     let item: Item
     let display: SourceDisplay
     let isSelected: Bool
+    /// Whether the selected row is showing its whole message (D). Lives in
+    /// the panel rather than here so it can only ever be true of one row,
+    /// and so moving the selection puts it back.
+    var isFullyExpanded: Bool = false
     /// Which row currently owns the snooze popover (S key or "Pick Date…").
     @Binding var snoozeTargetUID: String?
     var onSelect: () -> Void
+    /// Flips this row between the 4-line paragraph and the whole message,
+    /// taking the selection first if it doesn't already hold it. Selecting
+    /// here rather than at the call sites is what keeps the two out of one
+    /// event — the panel closes a full expansion whenever the selection
+    /// moves, so a separate `onSelect()` first would undo the toggle.
+    var onToggleFull: () -> Void = {}
 
     @State private var isHovering = false
 
@@ -50,6 +61,9 @@ struct ItemRowView: View {
             ) {
                 appState.toggleSeen(item)
             }
+            .accessibilityAction(
+                named: isShowingFull ? "Show less" : "Show full message"
+            ) { onToggleFull() }
     }
 
     // MARK: Layout
@@ -84,12 +98,14 @@ struct ItemRowView: View {
                         text: item.title, size: 13,
                         weight: item.highSignal ? .semibold : .regular,
                         expandedLines: RowExpansion.titleLines,
-                        isExpanded: isSelected, animation: expansion)
+                        isExpanded: isSelected, isFull: isShowingFull,
+                        animation: expansion)
                     if let secondary {
                         ExpandingText(
                             text: secondary, size: 12,
                             expandedLines: RowExpansion.bodyLines,
-                            isExpanded: isSelected, animation: expansion)
+                            isExpanded: isSelected, isFull: isShowingFull,
+                            animation: expansion)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -126,6 +142,17 @@ struct ItemRowView: View {
     private var actionsRow: some View {
         HStack(spacing: 1) {
             Spacer(minLength: 0)
+            // First, so adding it left the four triage verbs and the pin
+            // exactly where they already were in this right-aligned stack.
+            actionButton(
+                isShowingFull
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right",
+                key: "D",
+                isShowingFull
+                    ? "Show less (D)" : "Show the whole message (D)",
+                isShowingFull ? "Show less" : "Show full message"
+            ) { onToggleFull() }
             actionButton(
                 "arrow.up.forward.app", key: "⏎", "Open (⏎)", "Open"
             ) {
@@ -197,6 +224,9 @@ struct ItemRowView: View {
             Divider()
             Button("Pick Date…") { snoozeTargetUID = item.uid }
         }
+        Button(
+            isShowingFull ? "Show Less" : "Show Full Message"
+        ) { onToggleFull() }
         Button(item.isSeen ? "Mark as Unread" : "Mark as Read") {
             appState.toggleSeen(item)
         }
@@ -235,6 +265,12 @@ struct ItemRowView: View {
     private var expansion: Animation? {
         PanelMotion.queue(reduceMotion: reduceMotion)
     }
+
+    /// `isFullyExpanded` only means anything on the row that holds the
+    /// selection — an unselected row is on its one line whatever the panel
+    /// last had open, and the hover actions and context menu read this so
+    /// they never offer "Show less" on a row that is showing one line.
+    private var isShowingFull: Bool { isSelected && isFullyExpanded }
 
     private var secondary: String? {
         let parts = [item.actorName, item.snippet]
