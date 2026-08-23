@@ -19,6 +19,7 @@ extension KeyboardShortcuts.Name {
 final class AppState {
     let container: ModelContainer
     let store: Store
+    let license: LicenseController
     private(set) var engine: SyncEngine!
 
     /// Bumped whenever the queue changes so views can re-query.
@@ -156,8 +157,23 @@ final class AppState {
             fatalError("Cannot open store: \(error)")
         }
         store = Store(modelContainer: container)
+        license = LicenseController()
         engine = SyncEngine(store: store) { [weak self] change in
             Task { @MainActor in self?.handle(change) }
+        }
+        // Trial expiry and activation both land mid-run — a menu bar app
+        // lives for weeks, so launch-time gating alone would keep syncing
+        // for days past the end of a trial.
+        license.onSyncPermissionChange = { [weak self] allowed in
+            guard let self else { return }
+            Task { @MainActor in
+                if allowed {
+                    await self.bootstrapConnectors()
+                    await self.engine.refreshNow()
+                } else {
+                    await self.engine.unregisterAll()
+                }
+            }
         }
         // Permission is requested lazily, right before the first banner —
         // not at launch (banners are opt-in; don't alert before the UI).
@@ -308,6 +324,10 @@ final class AppState {
     // MARK: Connector bootstrap
 
     func bootstrapConnectors() async {
+        // An ended trial pauses syncing — loudly, in the panel and Settings
+        // (`LicenseNotice`) — and gates nothing else: the queue, the archive
+        // and every triage action keep working on what's already here.
+        guard license.state.allowsSync else { return }
         var configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []

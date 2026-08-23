@@ -55,6 +55,7 @@ struct PanelView: View {
                 queueList(queue)
             }
             Divider()
+            LicenseNotice()
             openProblemNotice
             footer(queue.index)
         }

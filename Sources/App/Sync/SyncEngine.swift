@@ -44,6 +44,15 @@ actor SyncEngine {
         connectors[sourceID] = nil
     }
 
+    /// Stops every connector (trial expiry pauses syncing). Maintenance
+    /// stays up on purpose: snooze wakes and the daily purge act on items
+    /// already here, and an expired trial gates syncing, not triage.
+    func unregisterAll() async {
+        for sourceID in Array(tasks.keys) {
+            await unregister(sourceID: sourceID)
+        }
+    }
+
     func refreshNow() async {
         for (id, connector) in connectors {
             let caps = connector.capabilities

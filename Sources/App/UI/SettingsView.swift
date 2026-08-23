@@ -37,6 +37,7 @@ struct SettingsView: View {
                 }
                 JournalSettingsSection()
                 UpdatesSection()
+                LicenseSection()
             }
             .formStyle(.grouped)
             .tabItem { Label("General", systemImage: "gearshape") }
