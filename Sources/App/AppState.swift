@@ -645,23 +645,69 @@ final class AppState {
             }
         }
         guard let url = item.url else { return }
-        NSWorkspace.shared.open(Self.openable(url, payload: item.payload))
+        // A remote source can put any string in a row's URL: ntfy topics
+        // are public by default, and a JSON feed is whatever its publisher
+        // serves. `NSWorkspace.open` honours every registered handler, so
+        // `shortcuts://run-shortcut?…` would run a Shortcut and
+        // `file:///Applications/…` would launch an app. `openable` is the
+        // gate — only http/https and the deep-links this app itself emits
+        // reach Launch Services, and `file://`/`claude://` are local-source-
+        // only. A refused scheme is named here rather than silently dropped
+        // (rule 5): a row that won't open is the project's recurring bug
+        // class, and "nothing happened" is the one outcome this must avoid.
+        guard let resolved = Self.openable(
+            url, sourceKind: item.sourceKind, payload: item.payload)
+        else {
+            openProblem = "Inbox & Chill won't open this link — its "
+                + "\(url.scheme ?? "unknown") scheme isn't one the queue "
+                + "trusts. The row may have come from a remote push; copy "
+                + "the link if you know where it goes."
+            return
+        }
+        NSWorkspace.shared.open(resolved)
         // Open ≠ done (decision §2.1.2).
     }
 
-    /// Which of an item's links to actually open.
+    /// Which of an item's links to actually open, or `nil` if the scheme
+    /// isn't trusted enough to hand to `NSWorkspace.open`.
     ///
-    /// Slack rows carry a `slack://` deep link so they land in the Slack app
-    /// rather than bouncing through a browser. That link is dead on a Mac
-    /// without Slack installed, so the https permalink rides along in the
-    /// payload and is used instead when nothing handles the scheme.
-    static func openable(_ url: URL, payload: Data?) -> URL {
-        guard url.scheme == "slack", !handlesSlackScheme() else { return url }
-        guard let payload,
-            let fallback = SlackConnector.permalink(in: payload),
-            let web = URL(string: fallback)
-        else { return url }
-        return web
+    /// Two jobs, in order:
+    ///
+    /// 1. **Scheme gate.** Remote sources can put any string in a row's URL
+    ///    — ntfy topics are public by default, and a JSON feed is whatever
+    ///    its publisher serves. `NSWorkspace.open` honours every registered
+    ///    handler, so `shortcuts://run-shortcut?…` would run a Shortcut and
+    ///    `file:///Applications/…` would launch an app. Only `http`/`https`
+    ///    and the deep-links this app itself emits (`slack`, `message`) are
+    ///    opened unconditionally; `file` and `claude` are local-source-only
+    ///    — the `inchill` CLI / agent hooks set the cwd and session id, not
+    ///    a remote publisher. Everything else is refused; the caller names
+    ///    the scheme in `openProblem` rather than silently dropping it.
+    /// 2. **Slack fallback.** A `slack://` deep link is dead on a Mac
+    ///    without Slack installed, so the https permalink rides along in
+    ///    the payload and is used instead when nothing handles the scheme.
+    static func openable(
+        _ url: URL, sourceKind: String, payload: Data?
+    ) -> URL? {
+        let scheme = url.scheme?.lowercased() ?? ""
+        switch scheme {
+        case "http", "https", "message":
+            return url
+        case "slack":
+            // Deep link, with the https permalink as the fallback when no
+            // app on this Mac registers the `slack` scheme.
+            guard !handlesSlackScheme(),
+                let payload,
+                let fallback = SlackConnector.permalink(in: payload),
+                let web = URL(string: fallback)
+            else { return url }
+            return web
+        case "file", "claude":
+            // A remote push must not open local files or session URIs.
+            return sourceKind == "local" ? url : nil
+        default:
+            return nil
+        }
     }
 
     /// Cached: it's a Launch Services round trip, and the answer only
