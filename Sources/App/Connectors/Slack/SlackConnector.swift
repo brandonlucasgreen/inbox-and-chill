@@ -395,6 +395,14 @@ actor SlackConnector: Connector {
     private static let searchLog = Logger(
         subsystem: "lol.bgreen.inboxandchill", category: "keyword-watch")
 
+    /// The seed had no logging at all until 2026-08-23, which is how "I
+    /// pasted the token and nothing happened" became unanswerable: the save
+    /// re-seed sits at the end of a multi-minute conversation walk, and
+    /// `tryCall` swallowed whatever `reactions.list` said. Every stage of
+    /// the seed now says where it got to.
+    private static let seedLog = Logger(
+        subsystem: "lol.bgreen.inboxandchill", category: "slack-seed")
+
     private func searchLoop(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
         Self.searchLog.info(
             "keyword watch started, terms=\(self.searchTerms.count, privacy: .public)")
@@ -628,6 +636,19 @@ actor SlackConnector: Connector {
         )
     }
 
+    /// What a saved row is called. `channelName` falls back to the raw
+    /// channel id when `conversations.info` has no `name` — which is every
+    /// DM — so the id has to be described rather than printed, exactly as
+    /// `watchHit` already does. Pure, so both cases are testable without a
+    /// workspace.
+    nonisolated static func saveTitle(channelLabel: String?) -> String {
+        guard let label = channelLabel, !label.isEmpty else {
+            return "Saved message"
+        }
+        if isRawChannelID(label) { return "Saved from a direct message" }
+        return "Saved in #\(label)"
+    }
+
     /// Periodically re-checks Slack's read state for channels that currently
     /// hold items, because Socket Mode does not deliver `*_marked` events.
     /// Deliberately non-throwing: a hiccup here must not tear down the socket.
@@ -651,6 +672,32 @@ actor SlackConnector: Connector {
     /// pre-warms the cache mention titles need.
     private func seed(emit: @escaping @Sendable (ConnectorEvent) -> Void) async throws {
         guard let api else { return }
+        let startedAt = ContinuousClock.now
+        Self.seedLog.info("seed started")
+
+        // Saves are seeded FIRST, before the conversation walk, and that
+        // ordering is the whole point rather than a tidy-up.
+        //
+        // Measured 2026-08-23 on a real workspace: `listConversations`
+        // returned **377** DM refs, and `unreadStates` then spends one
+        // `conversations.info` on each at five concurrent, against a Slack
+        // tier that allows ~50 a minute. So the DM walk takes the better
+        // part of ten minutes, and every 429 it earns sleeps for the
+        // `Retry-After` on top. `seedEmojiSaves` used to sit *after* all of
+        // that — one cheap call stuck behind several hundred expensive ones.
+        //
+        // Which made it effectively unreachable, because a re-register
+        // starts `seed()` over from zero: saving the source in Settings to
+        // "make it pick up my saves" restarted the walk instead, so the more
+        // times you asked, the further away the answer got. This is the same
+        // trap CLAUDE.md already records for the keyword watch — independent
+        // work must not be downstream of `seed()` — and saves were the
+        // second instance of it.
+        //
+        // It costs the DM seed one round trip, plus a `conversations.info`
+        // per distinct channel a save lives in (the name cache is empty this
+        // early). Against 377, that is noise.
+        await seedEmojiSaves(api: api, emit: emit)
 
         var dmRefs: [DMRef] = []
         for conversation in try await listConversations(api: api) {
@@ -667,6 +714,13 @@ actor SlackConnector: Connector {
                 channelNames[id] = name
             }
         }
+
+        Self.seedLog.info(
+            """
+            conversations walked in \
+            \(startedAt.duration(to: .now).components.seconds, privacy: .public)s, \
+            dms=\(dmRefs.count, privacy: .public)
+            """)
 
         var upserts: [RemoteItem] = []
         var clears: [String] = []
@@ -690,8 +744,15 @@ actor SlackConnector: Connector {
 
         if !upserts.isEmpty { emit(.upsert(upserts)) }
         if !clears.isEmpty { emit(.clear(clears)) }
+        Self.seedLog.info(
+            """
+            dm state done in \
+            \(startedAt.duration(to: .now).components.seconds, privacy: .public)s, \
+            unread=\(upserts.count, privacy: .public)
+            """)
 
-        await seedEmojiSaves(api: api, emit: emit)
+        Self.seedLog.info(
+            "seed finished in \(startedAt.duration(to: .now).components.seconds, privacy: .public)s")
     }
 
     private func listConversations(api: SlackAPI) async throws -> [SlackJSON] {
@@ -787,19 +848,60 @@ actor SlackConnector: Connector {
     }
 
     /// Re-derives emoji-saves from `reactions.list` so saves made while the app
-    /// was closed still land in the queue. Best-effort: needs `reactions:read`,
-    /// and silently does nothing if the app wasn't granted it.
+    /// was closed still land in the queue — and, since 2026-08-23, so that a
+    /// change to an item's *shape* reaches rows that already exist.
+    ///
+    /// It needs `reactions:read`. It used to need it silently: `tryCall`
+    /// swallows the error, so a missing scope, a revoked token and an empty
+    /// account were one indistinguishable no-op. That is the rule-5 failure
+    /// this app exists to prevent, and it is exactly what made "I pasted the
+    /// token and nothing happened" impossible to answer. Permanent failures
+    /// now name themselves in Settings; transient ones log and move on.
     private func seedEmojiSaves(
         api: SlackAPI, emit: @escaping @Sendable (ConnectorEvent) -> Void
     ) async {
         var cursor: String?
         var items: [RemoteItem] = []
-        for _ in 0..<5 {
-            var params = ["user": selfUserID, "limit": "100", "full": "true"]
+        var scanned = 0
+        for page in 0..<Self.savePageBudget {
+            var params = [
+                "user": selfUserID, "limit": String(Self.savePageSize),
+                "full": "true",
+            ]
             if let cursor, !cursor.isEmpty { params["cursor"] = cursor }
-            guard let response = await api.tryCall("reactions.list", params) else { return }
+            let response: SlackJSON
+            do {
+                response = try await api.call("reactions.list", params)
+            } catch {
+                let code = (error as? SlackError)?.slackCode ?? ""
+                Self.seedLog.error(
+                    """
+                    reactions.list failed on page \(page, privacy: .public): \
+                    code=\(code, privacy: .public) \
+                    keeping \(items.count, privacy: .public) already read — \
+                    \(error.localizedDescription, privacy: .public)
+                    """)
+                if Self.permanentSearchFailures.contains(code) {
+                    emit(.status(.error(Self.savedScopeAdvice(code: code))))
+                }
+                // `break`, not `return`. This used to bail with a bare
+                // `return`, which threw away every save read from every
+                // earlier page — and that is what made saves look
+                // permanently broken rather than occasionally short.
+                //
+                // Observed 2026-08-23: page 0 succeeded, page 1 came back
+                // `internal_error` (Slack's own transient fault, nothing to
+                // do with scopes), and a hundred saves went in the bin on
+                // every single connect. Emitting a short list is right here
+                // because saves are only ever `.upsert`ed — this connector
+                // deliberately never emits `.snapshot`, so a partial read
+                // can never be mistaken for "the rest were handled
+                // remotely" and cannot archive anything.
+                break
+            }
 
             for entry in response["items"].array ?? [] {
+                scanned += 1
                 guard entry["type"].string == "message",
                     let channel = entry["channel"].nonEmptyString
                 else { continue }
@@ -818,8 +920,9 @@ actor SlackConnector: Connector {
                         "chat.getPermalink", ["channel": channel, "message_ts": ts]
                     )?["permalink"].nonEmptyString
                 }
-                let item = makeSaveItem(
+                let item = await makeSaveItem(
                     channel: channel, ts: ts, text: message["text"].string,
+                    author: message["user"].nonEmptyString,
                     permalink: permalink)
                 saves[item.externalID] = item
                 items.append(item)
@@ -828,7 +931,61 @@ actor SlackConnector: Connector {
             cursor = response["response_metadata"]["next_cursor"].nonEmptyString
             if cursor == nil { break }
         }
+        // `scanned` vs `items` is the distinction that matters when a user
+        // says saves aren't arriving: a big `scanned` with zero `items` means
+        // the save emoji doesn't match what they actually reacted with, which
+        // is a different problem from a rejected call or an empty account.
+        Self.seedLog.info(
+            """
+            reactions.list scanned=\(scanned, privacy: .public) \
+            saves=\(items.count, privacy: .public) \
+            emoji=\(self.saveEmoji, privacy: .public)
+            """)
+
         if !items.isEmpty { emit(.upsert(items)) }
+    }
+
+    /// **`reactions.list` stops dead after 100 items, whatever you ask for.**
+    ///
+    /// Measured against a real workspace, 2026-08-23. At `limit=100` Slack
+    /// served page 0 and failed page 1 with `internal_error`; at `limit=25`
+    /// it served pages 0–3 and failed page 4. Both had scanned **exactly
+    /// 100 reactions** when they died, so the wall is an offset, not a
+    /// response size, and paging more finely just buys more round trips to
+    /// reach the same place. `internal_error` is Slack's own fault code and
+    /// says nothing about scopes or the token — which is precisely why this
+    /// needed measuring rather than reasoning about.
+    ///
+    /// The consequence is worth being straight about: **the backfill can
+    /// only ever see your 100 most recent reactions.** A save older than
+    /// that is unreachable, and no amount of reconnecting will find it —
+    /// re-applying the emoji is the only way, because that fires
+    /// `reaction_added` and takes the live path instead.
+    ///
+    /// So `limit` stays at 100: the fewest calls to reach the only 100
+    /// items obtainable. The page budget is what it always was, and now
+    /// `break`s with its partial list rather than discarding it.
+    private static let savePageSize = 100
+    private static let savePageBudget = 5
+
+    /// Why the saved-message lookup was refused, and what to do about it.
+    /// Separate from `searchScopeAdvice` because it names a different scope
+    /// and a different consequence — saves you make while the app is running
+    /// still arrive over Socket Mode; it is the backfill that stops.
+    nonisolated static func savedScopeAdvice(code: String) -> String {
+        switch code {
+        case "missing_scope", "not_allowed_token_type":
+            return """
+                Slack saved messages need the `reactions:read` scope, which \
+                this token doesn't have (\(code)). Add it under OAuth & \
+                Permissions, reinstall the app to your workspace, then paste \
+                the new user token here. Saves you make from now on still \
+                arrive; it's the ones made earlier that can't be read back.
+                """
+        default:
+            return
+                "Slack refused the saved-messages lookup (\(code)). Re-check the user token."
+        }
     }
 
     // MARK: - Events
@@ -937,6 +1094,7 @@ actor SlackConnector: Connector {
 
         // The reaction event carries no message text; fetch just that message.
         var text: String?
+        var author: String?
         if let history = await api.tryCall(
             "conversations.history",
             [
@@ -944,9 +1102,12 @@ actor SlackConnector: Connector {
                 "inclusive": "true", "limit": "1",
             ]) {
             text = history["messages"][0]["text"].string
+            author = history["messages"][0]["user"].nonEmptyString
         }
 
-        let item = makeSaveItem(channel: channel, ts: ts, text: text, permalink: permalink)
+        let item = await makeSaveItem(
+            channel: channel, ts: ts, text: text, author: author,
+            permalink: permalink)
         saves[item.externalID] = item
         emit(.upsert([item]))
     }
@@ -1045,22 +1206,36 @@ actor SlackConnector: Connector {
             payload: Self.payload(channel: channel, ts: ts))
     }
 
+    /// A saved message.
+    ///
+    /// Until 2026-08-23 this put the *message* in the title, cut to 80
+    /// characters, and left `snippet` nil — so a saved message had no body
+    /// at all, D had nothing to reveal, and the 80 characters were gone
+    /// before the store ever saw them. The text now goes where every other
+    /// kind puts it, and the title says what the row *is*.
     private func makeSaveItem(
-        channel: String, ts: String, text: String?, permalink: String?
-    ) -> RemoteItem {
-        let body = Self.truncate(renderText(text), 80) ?? "message"
+        channel: String, ts: String, text: String?, author: String?,
+        permalink: String?
+    ) async -> RemoteItem {
+        // Ids are resolved before rendering here and not for DMs or
+        // mentions, because this is the body D opens: an unresolved
+        // `<@U056HVBKTSA>` two paragraphs in is the reason to have bothered.
+        if let text { await resolveReferences(in: text) }
+        var who: String?
+        if let author { who = await displayName(userID: author) }
         return RemoteItem(
             externalID: "save-\(channel)-\(ts)",
             kind: "emoji_save",
-            title: "Saved: \(body)",
-            snippet: nil,
+            title: Self.saveTitle(
+                channelLabel: await channelName(channel)),
+            snippet: Self.truncate(renderText(text), Self.snippetLimit),
             // Prefer a native deep link built from the permalink; the
             // permalink itself rides along in the payload as the fallback
             // for a Mac with no Slack app (see `AppState.open`).
             url: permalink.flatMap {
                 Self.nativeLink(fromPermalink: $0, teamID: teamID)
             } ?? permalink ?? deepLink(channel: channel, message: ts),
-            actorName: nil,
+            actorName: who,
             occurredAt: SlackTS.date(ts) ?? .now,
             highSignal: false,
             payload: Self.payload(channel: channel, ts: ts, permalink: permalink))
@@ -1243,11 +1418,26 @@ actor SlackConnector: Connector {
 
     /// How much message text a row carries.
     ///
-    /// This used to be 100 — one panel line, with nothing behind it. The row
-    /// now opens to a paragraph while it holds the selection, so the snippet
-    /// has to be long enough to fill one; a cap that stops at the visible
-    /// line makes the expansion reveal nothing but whitespace.
-    static let snippetLimit = 320
+    /// How much of a message is stored. Twice revised, and each revision
+    /// tracked what the row could actually show:
+    ///
+    /// - **100** — one panel line, with nothing behind it.
+    /// - **320** — enough to fill the paragraph a selected row opens to,
+    ///   because a cap that stops at the visible line makes the expansion
+    ///   reveal nothing but whitespace.
+    /// - **4,000** — D drops the clamp entirely, so the target is no longer
+    ///   "a paragraph" but "the message". At 320 that keypress revealed a
+    ///   line and a half and then an ellipsis it could not get past, which
+    ///   read as a broken feature rather than as a cap.
+    ///
+    /// So this is now a *storage* bound rather than a display one, and it is
+    /// the only one left: the panel bounds its own layout work with
+    /// `ExpandingText.clampedPrefix`, so a long body costs a row nothing
+    /// until it is the selected row. 4,000 covers any message Slack's
+    /// composer sends inline — a longer paste becomes a file snippet, which
+    /// carries no inline text for us to store anyway. (That composer limit
+    /// is from Slack's documentation; it has not been probed here.)
+    static let snippetLimit = 4_000
 
     private static func truncate(_ text: String?, _ limit: Int) -> String? {
         guard let text, !text.isEmpty else { return nil }

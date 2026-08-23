@@ -59,6 +59,15 @@ Slack setup has more steps because you're creating your own Slack app rather tha
 
 **If you skip the app-level token,** the source still works — you get DM and group-DM unreads, emoji saves, and read-state auto-clear, all by polling. What you lose is **channel mentions**, and that's not a shortcut we chose: Slack publishes no API for "messages that mention me". Its search API has no mention modifier at all (`from:`, `in:`, `has:`, `with:` — but nothing for mentions), and the Mentions & reactions view in Slack's own client runs on a private endpoint. Socket Mode's event stream is the only supported way to learn that you were mentioned, which is the one thing the second token unlocks.
 
+**Backfilling old saves only reaches your 100 most recent reactions.** On
+connect, Inbox & Chill re-reads `reactions.list` so saves made while the app
+was closed still show up. Slack refuses to paginate that endpoint past 100
+items — it answers `internal_error`, whatever page size you ask for (measured
+2026-08-23). So a save buried under 100 newer reactions of any kind will not
+be found by reconnecting, and reconnecting again won't help. Re-apply the
+emoji to the message: that fires a live `reaction_added` and takes the other
+path entirely. Saves made while the app is running are unaffected.
+
 **What you don't get: Slack's "Saved for Later."** There is no API for it — `stars.list` is deprecated and frozen, and Slack has said outright that Later APIs aren't available. The emoji-save feature is the replacement: react to any message with your Save Emoji and it shows up as an item in Inbox & Chill (with a link back to the message); remove the reaction and it clears. It needs no extra setup beyond the emoji field above, since the same Socket Mode connection that watches for mentions also watches for `reaction_added`/`reaction_removed`.
 
 **One thing to expect:** channel mentions only appear for activity happening *after* you set the source up — they arrive as events, and there's no history API to backfill them from (see above). DM unreads and emoji saves *are* backfilled, because both have real polling endpoints (`conversations.info` and `reactions.list`).

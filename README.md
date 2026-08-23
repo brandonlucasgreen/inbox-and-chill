@@ -49,6 +49,7 @@ The menu bar icon can show a total count, a high-signal-only count (the default)
 | `E` | Done |
 | `S` | Snooze |
 | `U` | Toggle read / unread |
+| `D` | Show the selected item's whole message, or close it again |
 | `⌘P` | Pin / unpin |
 | `⌘Z` | Undo last done |
 | `⌘C` | Copy (title + URL) |

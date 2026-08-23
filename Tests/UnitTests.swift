@@ -1618,6 +1618,73 @@ struct ExpandingTextClampTests {
                 estimate: estimate) == 15)
     }
 
+    @Test("D opens the row to the whole message")
+    func fullOpensToTheWholeMessage() {
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, isFull: true, collapsed: 15, expanded: 62,
+                full: 210, estimate: estimate) == 210)
+    }
+
+    @Test("Closing the full view returns to the four-line height")
+    func fullClosesBackToTheParagraph() {
+        // Both numbers exist before either press, which is the whole reason
+        // the toggle animates in both directions rather than snapping.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, isFull: false, collapsed: 15, expanded: 62,
+                full: 210, estimate: estimate) == 62)
+    }
+
+    @Test("An unmeasured full row takes its natural height, not four lines")
+    func unmeasuredFullIsUnclamped() {
+        // A row that scrolls in already full paints before its ruler lands.
+        // Clamping it to the paragraph height would crop the message and
+        // then jump — the same bug the open case above already records.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: true, isFull: true, collapsed: 15, expanded: 62,
+                full: nil, estimate: estimate) == nil)
+    }
+
+    @Test("An unselected row stays on one line however D was left")
+    func fullNeverEscapesTheSelection() {
+        // The panel closes the expansion whenever the selection moves, but
+        // the clamp must not depend on that having happened: a row without
+        // the selection is on its one line, full flag or not.
+        #expect(
+            ExpandingText.clamp(
+                isExpanded: false, isFull: true, collapsed: 15, expanded: 62,
+                full: 210, estimate: estimate) == 15)
+    }
+
+    @Test("A clamped copy is handed a prefix, not a whole Slack message")
+    func clampedCopiesAreBounded() {
+        // Both clamped copies are laid out for every row on screen, so what
+        // they are *handed* is the cost — not what they end up showing.
+        let long = String(repeating: "a", count: 4_000)
+        #expect(
+            ExpandingText.clampedPrefix(long, lines: 1, charsPerLine: 240)
+                .count == 240)
+        #expect(
+            ExpandingText.clampedPrefix(long, lines: 4, charsPerLine: 240)
+                .count == 960)
+    }
+
+    @Test("The prefix never becomes the thing that truncates")
+    func prefixLeavesTheClampInCharge() {
+        // If the prefix were tight enough to cut the text itself, the "…"
+        // would sit on text that had already ended — the row would claim
+        // there is more when there is not. The budget is several times the
+        // ~55 characters a 420pt row actually fits, so the clamp wins.
+        let fourLinesOfPanel = String(repeating: "a ", count: 130)  // ~260
+        #expect(
+            ExpandingText.clampedPrefix(fourLinesOfPanel, lines: 4)
+                == fourLinesOfPanel)
+        // Short text is passed through untouched.
+        #expect(ExpandingText.clampedPrefix("hi", lines: 4) == "hi")
+    }
+
     @Test("A single line is never cropped by a stale estimate")
     func closedHeightNeverCropsTheMeasuredLine() {
         // Estimate too tall: the measured line wins, so no gap.

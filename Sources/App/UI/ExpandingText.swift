@@ -36,6 +36,12 @@ enum RowExpansion {
 /// concrete numbers — until it is known the frame takes the text's natural
 /// height, so a row that appears already open is the right size on its
 /// first frame rather than jumping a beat later.
+///
+/// `isFull` is the third state, and the reason the 4-line clamp is allowed
+/// to stay tight: D drops the clamp entirely, so the paragraph a row opens
+/// to never has to be the whole message. It follows the same rule as the
+/// other two — the unlimited copy is laid out and measured before the press,
+/// so the frame still animates between two concrete numbers.
 struct ExpandingText: View {
     let text: String
     let size: CGFloat
@@ -43,14 +49,20 @@ struct ExpandingText: View {
     var collapsedLines: Int = 1
     let expandedLines: Int
     let isExpanded: Bool
+    /// The selected row, opened the rest of the way with D: no clamp at all.
+    /// Only meaningful while `isExpanded` — an unselected row is always on
+    /// its one line.
+    var isFull: Bool = false
     let animation: Animation?
 
     @State private var collapsedHeight: CGFloat?
     @State private var expandedHeight: CGFloat?
+    @State private var fullHeight: CGFloat?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            label(lines: collapsedLines)
+            label(lines: collapsedLines, of: Self.clampedPrefix(
+                text, lines: collapsedLines))
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     collapsedHeight = $0
                 }
@@ -58,31 +70,78 @@ struct ExpandingText: View {
                 // The open copy carries the same string; without this
                 // VoiceOver reads every row twice.
                 .accessibilityHidden(true)
-            label(lines: expandedLines)
+            label(lines: expandedLines, of: Self.clampedPrefix(
+                text, lines: expandedLines))
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     expandedHeight = $0
                 }
-                .opacity(isExpanded ? 1 : 0)
+                .opacity(isExpanded && !isFull ? 1 : 0)
+                .accessibilityHidden(isFull)
+            // The unlimited copy, and the only one that is conditional.
+            //
+            // It joins the layout for the selected row alone, because it is
+            // the one copy with no line limit — laying it out for every row
+            // would mean laying out every character of every body in the
+            // queue, and a 4-line clamp is exactly what keeps that cost
+            // proportional to what is on screen.
+            //
+            // And not until `expandedHeight` exists, which is subtler: with
+            // nothing measured the clamp falls through to the stack's
+            // natural height, and this copy would *be* that height. A row
+            // that scrolls in already selected would paint its whole
+            // message for a frame and then snap back to four lines.
+            if isExpanded && (isFull || expandedHeight != nil) {
+                label(lines: nil, of: text)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height }
+                        action: { fullHeight = $0 }
+                    .opacity(isFull ? 1 : 0)
+                    .accessibilityHidden(!isFull)
+            }
         }
         .frame(height: clamp, alignment: .topLeading)
         .clipped()
         .animation(animation, value: isExpanded)
+        .animation(animation, value: isFull)
     }
 
     /// `fixedSize` is what makes this ignore the height it is offered and
     /// lay itself out at its own — the clamp above can then be any height at
     /// all without the text re-wrapping to fit it.
-    private func label(lines: Int) -> some View {
-        Text(text)
+    private func label(lines: Int?, of string: String) -> some View {
+        Text(string)
             .font(.system(size: size, weight: weight))
             .lineLimit(lines)
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// The most a clamped copy is ever allowed to see.
+    ///
+    /// A copy clamped to N lines can only *show* a few hundred characters,
+    /// but `Text` lays out whatever string it is handed regardless — and the
+    /// two clamped copies are laid out for **every row on screen**. Once a
+    /// connector is allowed to store a whole Slack message, that becomes
+    /// thousands of characters laid out per row per pass to render four
+    /// lines. Only the unlimited copy — which exists for the selected row
+    /// alone — is handed the entire string.
+    ///
+    /// `charsPerLine` is deliberately several times the ~55 characters that
+    /// actually fit a 420pt panel row: the clamp has to stay the thing that
+    /// truncates, so that the "…" still appears and still means "there is
+    /// more". A prefix tight enough to become the truncation point would put
+    /// an ellipsis on text that had already ended.
+    nonisolated static func clampedPrefix(
+        _ text: String, lines: Int, charsPerLine: Int = 240
+    ) -> String {
+        let budget = max(lines, 1) * charsPerLine
+        guard text.count > budget else { return text }
+        return String(text.prefix(budget))
+    }
+
     private var clamp: CGFloat? {
         Self.clamp(
-            isExpanded: isExpanded, collapsed: collapsedHeight,
-            expanded: expandedHeight,
+            isExpanded: isExpanded, isFull: isFull,
+            collapsed: collapsedHeight, expanded: expandedHeight,
+            full: fullHeight,
             estimate: Self.estimatedLineHeight(size: size)
                 * CGFloat(collapsedLines))
     }
@@ -99,10 +158,22 @@ struct ExpandingText: View {
     ///   estimate. Clamping it early made it paint one line tall and then
     ///   jump to four, with no animation to explain the jump.
     /// - A closed row falls back to the estimate, not to zero.
+    /// - A full row falls back to its natural height too, on the same
+    ///   argument: the unlimited copy is in the stack by then, so natural
+    ///   *is* full.
+    ///
+    /// `full` is measured ahead of the press rather than after it, which is
+    /// what makes D animate rather than jump. The unlimited copy is laid out
+    /// (invisibly) as soon as the row takes the selection, so both heights
+    /// are already concrete numbers when the flag flips and the frame has
+    /// something to interpolate. A height that only arrived from a geometry
+    /// callback would land on the pass *after* the transaction, by which
+    /// time there is no animation left to join.
     nonisolated static func clamp(
-        isExpanded: Bool, collapsed: CGFloat?, expanded: CGFloat?,
-        estimate: CGFloat
+        isExpanded: Bool, isFull: Bool = false, collapsed: CGFloat?,
+        expanded: CGFloat?, full: CGFloat? = nil, estimate: CGFloat
     ) -> CGFloat? {
+        if isExpanded && isFull { return full }
         guard !isExpanded else { return expanded }
         let closed = collapsed ?? estimate
         guard let expanded else { return closed }
