@@ -45,6 +45,9 @@ struct AboutPane: View {
                 LabeledContent("Also mine") {
                     Link("unstream.stream", destination: URL(string: "https://unstream.stream")!)
                 }
+                LabeledContent("Also mine") {
+                    Link("socialsindy.com", destination: URL(string: "https://socialsindy.com")!)
+                }
                 LabeledContent("Found a bug, or want to say hi?") {
                     Link("hi@bgreen.lol", destination: URL(string: "mailto:hi@bgreen.lol")!)
                 }
