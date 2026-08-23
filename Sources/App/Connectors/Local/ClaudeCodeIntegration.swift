@@ -66,6 +66,48 @@ enum ClaudeCodeIntegration {
         case installed
     }
 
+    // MARK: - Automatic installation
+
+    /// Whether the user has explicitly turned the hooks off.
+    ///
+    /// This is the whole safety of auto-installing: the app writes the hooks
+    /// for you on first run, but pressing Remove has to *stay* pressed.
+    /// Without this flag every launch would silently undo the one action the
+    /// user took to say they didn't want it.
+    static var userDeclinedHooks: Bool {
+        get { UserDefaults.standard.bool(forKey: "claudeHooks.userDeclined") }
+        set {
+            UserDefaults.standard.set(
+                newValue, forKey: "claudeHooks.userDeclined")
+        }
+    }
+
+    /// Whether the app should write the hooks itself, right now.
+    ///
+    /// Pure so the policy is testable without touching `~/.claude` (rule 6).
+    /// `.outdated` counts: those are *our* entries pointing at a command we
+    /// no longer write (usually the app moved), so rewriting them repairs
+    /// something already broken rather than adding anything new.
+    nonisolated static func shouldAutoInstall(
+        state: InstallState, userDeclined: Bool, hasEnabledLocalSource: Bool
+    ) -> Bool {
+        guard hasEnabledLocalSource, !userDeclined else { return false }
+        return state != .installed
+    }
+
+    /// What to say when the app tried to write the hooks and could not.
+    ///
+    /// Auto-installation fails silently by nature — nobody pressed anything,
+    /// so there is no sheet to keep open and no button to turn red. This
+    /// sentence is the only account the user gets, so it names the file and
+    /// the way out (rule 5).
+    nonisolated static func explainAutoInstallFailure(_ error: Error) -> String {
+        "Couldn't set up the Claude Code hooks in ~/.claude/settings.json, so "
+            + "Claude Code sessions won't reach the queue: "
+            + "\(String(describing: error)) You can retry below, or add them "
+            + "by hand from the same file."
+    }
+
     static var installState: InstallState {
         guard let settings = try? readSettings() else { return .notInstalled }
         let current = hookEvents.filter { event, argument in

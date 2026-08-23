@@ -16,18 +16,18 @@ import SwiftUI
 /// four lines to `~/.claude/settings.json` (backed up first, unknown keys
 /// preserved) and removing them puts the file back.
 
-/// Setup for the Claude Code half of the local source.
+/// The Claude Code half of the local source: what it does, and the switch.
 struct ClaudeCodeSection: View {
     var body: some View {
         Section("Claude Code") {
             VStack(alignment: .leading, spacing: 10) {
                 Text(
-                    "Claude Code sessions can post to this queue, so a session waiting on your reply shows up like any other item — and opening it jumps back to that session."
+                    "Claude Code sessions post to this queue, so a session waiting on your reply shows up like any other item — and opening it jumps back to that session."
                 )
                 .fixedSize(horizontal: false, vertical: true)
 
                 Text(
-                    "That needs four hooks in ~/.claude/settings.json, because hooks are the only way Claude Code can tell another app what's happening. Nothing is installed on your Mac — the inchill command already lives inside this app. Your settings file is backed up first, and anything else in it is left alone."
+                    "This is set up for you. It works through four hooks in ~/.claude/settings.json, because hooks are the only way Claude Code can tell another app what's happening. Nothing is installed on your Mac — the inchill command already lives inside this app — and your settings file is backed up first, with everything else in it left alone."
                 )
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -45,105 +45,92 @@ struct ClaudeCodeSection: View {
 /// The state line plus whatever action that state affords. Shared by the
 /// editor section and the Sources-list notice so the two can never disagree
 /// about what is actually in `~/.claude/settings.json`.
+///
+/// Three states now that installation is automatic, and the middle one is
+/// the point: **off, because you turned it off** is not the same as **not
+/// working**, and only the second is a problem to report.
 struct ClaudeCodeIntegrationControl: View {
+    @Environment(AppState.self) private var appState
     @State private var state = ClaudeCodeIntegration.installState
-    @State private var errorText: String?
+    @State private var declined = ClaudeCodeIntegration.userDeclinedHooks
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            switch state {
-            case .installed:
+            if declined {
+                Text(
+                    "Turned off, so Claude Code sessions won't appear in the queue."
+                )
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                Button("Turn On") {
+                    appState.enableClaudeCodeHooks()
+                    refresh()
+                }
+                .help("Add the hooks back to ~/.claude/settings.json")
+            } else if state == .installed {
                 Label(
-                    "Claude Code hooks are installed.",
-                    systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
-            case .outdated:
-                Text(
-                    "Hooks from an older version are installed. Update them to get one queue row per session instead of one per turn."
+                    "Connected to Claude Code.", systemImage: "checkmark.circle"
                 )
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            case .notInstalled:
+                .foregroundStyle(.green)
+                Button("Turn Off") {
+                    appState.disableClaudeCodeHooks()
+                    refresh()
+                }
+                .help("Remove the inchill hooks from ~/.claude/settings.json")
+            } else {
+                // Not declined and not installed means the automatic write
+                // failed — the app already tried, so the honest thing is the
+                // reason plus a retry, not a "Set Up" button implying nobody
+                // has tried yet.
                 Text(
-                    "Not set up yet, so Claude Code sessions won't appear in the queue."
+                    appState.claudeHooksProblem
+                        ?? "Claude Code isn't connected, so its sessions won't appear in the queue."
                 )
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: 8) {
-                Button(actionTitle) { perform(removing: false) }
-                    .help(actionHelp)
-                if state != .notInstalled {
-                    Button("Remove") { perform(removing: true) }
-                        .help(
-                            "Remove the inchill hooks from ~/.claude/settings.json"
-                        )
+                Button("Try Again") {
+                    appState.enableClaudeCodeHooks()
+                    refresh()
                 }
             }
-
-            if let errorText {
-                Text(errorText)
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
-        // Another session (or the user) can edit settings.json underneath a
+        // Another app (or the user) can edit settings.json underneath a
         // long-lived Settings window, so re-read rather than trusting the
         // value this view was created with.
-        .onAppear { state = ClaudeCodeIntegration.installState }
+        .onAppear(perform: refresh)
     }
 
-    private var actionTitle: String {
-        switch state {
-        case .notInstalled: "Set Up Integration"
-        case .outdated: "Update Integration"
-        case .installed: "Reinstall"
-        }
-    }
-
-    private var actionHelp: String {
-        switch state {
-        case .installed:
-            "Rewrite the hooks in ~/.claude/settings.json (a backup is made first)"
-        default:
-            "Add Notification/Stop/UserPromptSubmit/SessionEnd hooks to ~/.claude/settings.json (a backup is made first)"
-        }
-    }
-
-    private func perform(removing: Bool) {
-        do {
-            if removing {
-                try ClaudeCodeIntegration.uninstallHooks()
-            } else {
-                try ClaudeCodeIntegration.installHooks()
-            }
-            errorText = nil
-        } catch {
-            errorText = String(describing: error)
-        }
+    private func refresh() {
         state = ClaudeCodeIntegration.installState
+        declined = ClaudeCodeIntegration.userDeclinedHooks
     }
 }
 
-/// Missing hooks, said out loud in the Sources list.
+/// Hooks that should be there and aren't, said out loud in the Sources list.
 ///
 /// The counterpart to `MailPermissionNotice`, and the same failure class: an
 /// enabled local source with no hooks receives nothing, which looks exactly
-/// like nobody having run Claude Code today (rule 5). Silent once the hooks
-/// are current, and silent entirely when no local source is enabled.
+/// like nobody having run Claude Code today (rule 5).
+///
+/// **Silent when the user turned the hooks off.** That state is a choice,
+/// not a fault, and a banner about it would be nagging — the switch stays in
+/// the source's editor for whenever they want it back.
 struct ClaudeCodeHooksNotice: View {
     @Environment(AppState.self) private var appState
     @State private var state = ClaudeCodeIntegration.installState
+    @State private var declined = ClaudeCodeIntegration.userDeclinedHooks
 
     var body: some View {
         Group {
-            if appState.hasEnabledLocalSource, state != .installed {
+            if appState.hasEnabledLocalSource, !declined, state != .installed {
                 ClaudeCodeIntegrationControl()
                     .font(.caption)
             }
         }
-        .onAppear { state = ClaudeCodeIntegration.installState }
+        .onAppear {
+            state = ClaudeCodeIntegration.installState
+            declined = ClaudeCodeIntegration.userDeclinedHooks
+        }
     }
 }

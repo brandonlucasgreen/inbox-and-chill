@@ -341,6 +341,7 @@ final class AppState {
             try? container.mainContext.save()
             configs.append(local)
         }
+        ensureClaudeCodeHooks(configs: configs)
         for config in configs where config.isEnabled {
             if let connector = ConnectorFactory.make(config: config) {
                 await engine.register(connector)
@@ -353,6 +354,77 @@ final class AppState {
             }
         #endif
     }
+
+    /// Why the app couldn't write the Claude Code hooks, if it tried and
+    /// failed. Surfaced in Sources and in the local source's editor.
+    private(set) var claudeHooksProblem: String?
+
+    /// Writes the Claude Code hooks on the app's own initiative.
+    ///
+    /// The local source is created on first run, and a source that can
+    /// receive nothing until you find a button is a setup step masquerading
+    /// as a feature — every other app that watches Claude Code (Vibe Island,
+    /// Bartender's NotchBar) installs its hooks without asking, which is why
+    /// theirs feel like they just work. So this does the same.
+    ///
+    /// Two things keep that honest rather than presumptuous: pressing Remove
+    /// sets `userDeclinedHooks` and is never silently undone, and a failure
+    /// is reported instead of leaving a source that quietly receives nothing.
+    private func ensureClaudeCodeHooks(configs: [SourceConfig]) {
+        let hasLocal = configs.contains { $0.kind == "local" && $0.isEnabled }
+        let state = ClaudeCodeIntegration.installState
+        let declined = ClaudeCodeIntegration.userDeclinedHooks
+        // The app editing a file it does not own is worth a log line saying
+        // exactly why it decided to.
+        Self.hooksLog.notice(
+            """
+            claude hooks check: state=\(String(describing: state), privacy: .public) \
+            declined=\(declined, privacy: .public) \
+            localSource=\(hasLocal, privacy: .public)
+            """)
+        guard ClaudeCodeIntegration.shouldAutoInstall(
+            state: state, userDeclined: declined,
+            hasEnabledLocalSource: hasLocal)
+        else {
+            claudeHooksProblem = nil
+            return
+        }
+        do {
+            try ClaudeCodeIntegration.installHooks()
+            claudeHooksProblem = nil
+            Self.hooksLog.notice("claude code hooks installed automatically")
+        } catch {
+            claudeHooksProblem =
+                ClaudeCodeIntegration.explainAutoInstallFailure(error)
+            Self.hooksLog.error(
+                "claude code hook auto-install failed: \(String(describing: error), privacy: .public)"
+            )
+        }
+    }
+
+    /// Clears the opt-out and installs, for the "Turn On" button.
+    func enableClaudeCodeHooks() {
+        ClaudeCodeIntegration.userDeclinedHooks = false
+        let configs =
+            (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
+            ?? []
+        ensureClaudeCodeHooks(configs: configs)
+    }
+
+    /// Removes the hooks and records that the user meant it.
+    func disableClaudeCodeHooks() {
+        do {
+            try ClaudeCodeIntegration.uninstallHooks()
+            ClaudeCodeIntegration.userDeclinedHooks = true
+            claudeHooksProblem = nil
+        } catch {
+            claudeHooksProblem =
+                "Couldn't remove the Claude Code hooks from ~/.claude/settings.json: \(String(describing: error))"
+        }
+    }
+
+    private static let hooksLog = Logger(
+        subsystem: "lol.bgreen.inboxandchill", category: "claude-hooks")
 
     // MARK: Queue change handling
 
