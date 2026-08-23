@@ -395,6 +395,14 @@ actor SlackConnector: Connector {
     private static let searchLog = Logger(
         subsystem: "lol.bgreen.inboxandchill", category: "keyword-watch")
 
+    /// The seed had no logging at all until 2026-08-23, which is how "I
+    /// pasted the token and nothing happened" became unanswerable: the save
+    /// re-seed sits at the end of a multi-minute conversation walk, and
+    /// `tryCall` swallowed whatever `reactions.list` said. Every stage of
+    /// the seed now says where it got to.
+    private static let seedLog = Logger(
+        subsystem: "lol.bgreen.inboxandchill", category: "slack-seed")
+
     private func searchLoop(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
         Self.searchLog.info(
             "keyword watch started, terms=\(self.searchTerms.count, privacy: .public)")
@@ -664,6 +672,32 @@ actor SlackConnector: Connector {
     /// pre-warms the cache mention titles need.
     private func seed(emit: @escaping @Sendable (ConnectorEvent) -> Void) async throws {
         guard let api else { return }
+        let startedAt = ContinuousClock.now
+        Self.seedLog.info("seed started")
+
+        // Saves are seeded FIRST, before the conversation walk, and that
+        // ordering is the whole point rather than a tidy-up.
+        //
+        // Measured 2026-08-23 on a real workspace: `listConversations`
+        // returned **377** DM refs, and `unreadStates` then spends one
+        // `conversations.info` on each at five concurrent, against a Slack
+        // tier that allows ~50 a minute. So the DM walk takes the better
+        // part of ten minutes, and every 429 it earns sleeps for the
+        // `Retry-After` on top. `seedEmojiSaves` used to sit *after* all of
+        // that — one cheap call stuck behind several hundred expensive ones.
+        //
+        // Which made it effectively unreachable, because a re-register
+        // starts `seed()` over from zero: saving the source in Settings to
+        // "make it pick up my saves" restarted the walk instead, so the more
+        // times you asked, the further away the answer got. This is the same
+        // trap CLAUDE.md already records for the keyword watch — independent
+        // work must not be downstream of `seed()` — and saves were the
+        // second instance of it.
+        //
+        // It costs the DM seed one round trip, plus a `conversations.info`
+        // per distinct channel a save lives in (the name cache is empty this
+        // early). Against 377, that is noise.
+        await seedEmojiSaves(api: api, emit: emit)
 
         var dmRefs: [DMRef] = []
         for conversation in try await listConversations(api: api) {
@@ -680,6 +714,13 @@ actor SlackConnector: Connector {
                 channelNames[id] = name
             }
         }
+
+        Self.seedLog.info(
+            """
+            conversations walked in \
+            \(startedAt.duration(to: .now).components.seconds, privacy: .public)s, \
+            dms=\(dmRefs.count, privacy: .public)
+            """)
 
         var upserts: [RemoteItem] = []
         var clears: [String] = []
@@ -703,8 +744,15 @@ actor SlackConnector: Connector {
 
         if !upserts.isEmpty { emit(.upsert(upserts)) }
         if !clears.isEmpty { emit(.clear(clears)) }
+        Self.seedLog.info(
+            """
+            dm state done in \
+            \(startedAt.duration(to: .now).components.seconds, privacy: .public)s, \
+            unread=\(upserts.count, privacy: .public)
+            """)
 
-        await seedEmojiSaves(api: api, emit: emit)
+        Self.seedLog.info(
+            "seed finished in \(startedAt.duration(to: .now).components.seconds, privacy: .public)s")
     }
 
     private func listConversations(api: SlackAPI) async throws -> [SlackJSON] {
@@ -800,19 +848,60 @@ actor SlackConnector: Connector {
     }
 
     /// Re-derives emoji-saves from `reactions.list` so saves made while the app
-    /// was closed still land in the queue. Best-effort: needs `reactions:read`,
-    /// and silently does nothing if the app wasn't granted it.
+    /// was closed still land in the queue — and, since 2026-08-23, so that a
+    /// change to an item's *shape* reaches rows that already exist.
+    ///
+    /// It needs `reactions:read`. It used to need it silently: `tryCall`
+    /// swallows the error, so a missing scope, a revoked token and an empty
+    /// account were one indistinguishable no-op. That is the rule-5 failure
+    /// this app exists to prevent, and it is exactly what made "I pasted the
+    /// token and nothing happened" impossible to answer. Permanent failures
+    /// now name themselves in Settings; transient ones log and move on.
     private func seedEmojiSaves(
         api: SlackAPI, emit: @escaping @Sendable (ConnectorEvent) -> Void
     ) async {
         var cursor: String?
         var items: [RemoteItem] = []
-        for _ in 0..<5 {
-            var params = ["user": selfUserID, "limit": "100", "full": "true"]
+        var scanned = 0
+        for page in 0..<Self.savePageBudget {
+            var params = [
+                "user": selfUserID, "limit": String(Self.savePageSize),
+                "full": "true",
+            ]
             if let cursor, !cursor.isEmpty { params["cursor"] = cursor }
-            guard let response = await api.tryCall("reactions.list", params) else { return }
+            let response: SlackJSON
+            do {
+                response = try await api.call("reactions.list", params)
+            } catch {
+                let code = (error as? SlackError)?.slackCode ?? ""
+                Self.seedLog.error(
+                    """
+                    reactions.list failed on page \(page, privacy: .public): \
+                    code=\(code, privacy: .public) \
+                    keeping \(items.count, privacy: .public) already read — \
+                    \(error.localizedDescription, privacy: .public)
+                    """)
+                if Self.permanentSearchFailures.contains(code) {
+                    emit(.status(.error(Self.savedScopeAdvice(code: code))))
+                }
+                // `break`, not `return`. This used to bail with a bare
+                // `return`, which threw away every save read from every
+                // earlier page — and that is what made saves look
+                // permanently broken rather than occasionally short.
+                //
+                // Observed 2026-08-23: page 0 succeeded, page 1 came back
+                // `internal_error` (Slack's own transient fault, nothing to
+                // do with scopes), and a hundred saves went in the bin on
+                // every single connect. Emitting a short list is right here
+                // because saves are only ever `.upsert`ed — this connector
+                // deliberately never emits `.snapshot`, so a partial read
+                // can never be mistaken for "the rest were handled
+                // remotely" and cannot archive anything.
+                break
+            }
 
             for entry in response["items"].array ?? [] {
+                scanned += 1
                 guard entry["type"].string == "message",
                     let channel = entry["channel"].nonEmptyString
                 else { continue }
@@ -842,7 +931,61 @@ actor SlackConnector: Connector {
             cursor = response["response_metadata"]["next_cursor"].nonEmptyString
             if cursor == nil { break }
         }
+        // `scanned` vs `items` is the distinction that matters when a user
+        // says saves aren't arriving: a big `scanned` with zero `items` means
+        // the save emoji doesn't match what they actually reacted with, which
+        // is a different problem from a rejected call or an empty account.
+        Self.seedLog.info(
+            """
+            reactions.list scanned=\(scanned, privacy: .public) \
+            saves=\(items.count, privacy: .public) \
+            emoji=\(self.saveEmoji, privacy: .public)
+            """)
+
         if !items.isEmpty { emit(.upsert(items)) }
+    }
+
+    /// **`reactions.list` stops dead after 100 items, whatever you ask for.**
+    ///
+    /// Measured against a real workspace, 2026-08-23. At `limit=100` Slack
+    /// served page 0 and failed page 1 with `internal_error`; at `limit=25`
+    /// it served pages 0–3 and failed page 4. Both had scanned **exactly
+    /// 100 reactions** when they died, so the wall is an offset, not a
+    /// response size, and paging more finely just buys more round trips to
+    /// reach the same place. `internal_error` is Slack's own fault code and
+    /// says nothing about scopes or the token — which is precisely why this
+    /// needed measuring rather than reasoning about.
+    ///
+    /// The consequence is worth being straight about: **the backfill can
+    /// only ever see your 100 most recent reactions.** A save older than
+    /// that is unreachable, and no amount of reconnecting will find it —
+    /// re-applying the emoji is the only way, because that fires
+    /// `reaction_added` and takes the live path instead.
+    ///
+    /// So `limit` stays at 100: the fewest calls to reach the only 100
+    /// items obtainable. The page budget is what it always was, and now
+    /// `break`s with its partial list rather than discarding it.
+    private static let savePageSize = 100
+    private static let savePageBudget = 5
+
+    /// Why the saved-message lookup was refused, and what to do about it.
+    /// Separate from `searchScopeAdvice` because it names a different scope
+    /// and a different consequence — saves you make while the app is running
+    /// still arrive over Socket Mode; it is the backfill that stops.
+    nonisolated static func savedScopeAdvice(code: String) -> String {
+        switch code {
+        case "missing_scope", "not_allowed_token_type":
+            return """
+                Slack saved messages need the `reactions:read` scope, which \
+                this token doesn't have (\(code)). Add it under OAuth & \
+                Permissions, reinstall the app to your workspace, then paste \
+                the new user token here. Saves you make from now on still \
+                arrive; it's the ones made earlier that can't be read back.
+                """
+        default:
+            return
+                "Slack refused the saved-messages lookup (\(code)). Re-check the user token."
+        }
     }
 
     // MARK: - Events

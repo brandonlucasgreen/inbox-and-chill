@@ -531,6 +531,30 @@ re-queues it forever.
     — the selected row alone — is handed the whole string. Raise a connector
     cap without this and every row pays for text that is clipped away.
 
+  **Two Slack seeding facts, both measured 2026-08-23 after "I pasted the
+  token and nothing happened":**
+
+  - **`reactions.list` will not paginate past 100 items.** `limit=100` failed
+    on page 1; `limit=25` failed on page 4; both had scanned exactly 100. The
+    error is `internal_error` — Slack's own fault code, saying nothing about
+    scopes — so this had to be measured, not reasoned about. The backfill can
+    only ever see the 100 most recent reactions; re-applying the emoji is the
+    only way to reach an older save, because that takes the live
+    `reaction_added` path.
+  - **A paged loop must `break`, not `return`.** `seedEmojiSaves` bailed with
+    a bare `return`, discarding every save read from earlier pages — so a
+    transient failure on page 2 threw away page 1 on *every* connect, and the
+    feature looked permanently dead rather than occasionally short. Emitting
+    a partial list is safe here only because this connector never emits
+    `.snapshot`; check that before doing the same elsewhere.
+
+  **And `seedEmojiSaves` was the second instance of the downstream-of-`seed()`
+  trap.** It sat after a walk of 377 DM conversations at ~50 `conversations.info`
+  per minute — so one cheap call was stuck behind ten minutes of expensive
+  ones, and re-registering the source to "pick up my saves" restarted the walk
+  and made it *further* away. It now runs first. When a user says a Slack
+  feature does nothing, check where in `seed()` it lives before anything else.
+
   Known and deliberate: `truncate` flattens newlines to spaces, so a
   multi-paragraph message opens as one run of text. Fixing that is a real
   design tradeoff, not an oversight — the flattening is what keeps a closed
