@@ -59,6 +59,15 @@ final class LicenseController {
             state = forcedState
             return
         }
+        // Switched off (`Licensing.isEnforced`): behave as though licensing
+        // does not exist. In particular **do not stamp the trial start date**
+        // — see the comment on that flag. Nothing reads `state` while the
+        // mechanic is off (every gate and every view checks the flag first),
+        // so the initial value is only a placeholder.
+        guard Licensing.isEnforced else {
+            state = .licensed
+            return
+        }
         // First launch of a trial-carrying build starts the clock — including
         // for anyone upgrading from 0.3.x, whose 14 days start now.
         if Keychain.get(Licensing.trialStartKey) == nil {
@@ -88,7 +97,7 @@ final class LicenseController {
 
     /// Recomputes from the Keychain and fires the sync callback on a flip.
     private func refreshState() {
-        guard forcedState == nil else { return }
+        guard forcedState == nil, Licensing.isEnforced else { return }
         let previous = state
         state = Self.derive()
         guard state != previous else { return }
@@ -190,7 +199,9 @@ final class LicenseController {
     /// a key the API previously rejected — a re-enabled key should recover
     /// on its own rather than requiring re-entry.
     func revalidateIfStale() async {
-        guard forcedState == nil,
+        // No network call while the mechanic is off — an alpha build must not
+        // be talking to Lemon Squeezy about a product nobody has bought.
+        guard forcedState == nil, Licensing.isEnforced,
             let key = Keychain.get(Licensing.licenseKeyKey),
             let instanceID = Keychain.get(Licensing.instanceIDKey)
         else { return }

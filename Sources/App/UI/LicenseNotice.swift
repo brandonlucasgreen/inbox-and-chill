@@ -14,6 +14,15 @@ struct LicenseNotice: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        // Switched off: nothing about licensing reaches the queue at all.
+        if !Licensing.isEnforced {
+            EmptyView()
+        } else {
+            notice
+        }
+    }
+
+    @ViewBuilder private var notice: some View {
         switch appState.license.state {
         case .expired:
             bar(background: .red.opacity(0.08)) {

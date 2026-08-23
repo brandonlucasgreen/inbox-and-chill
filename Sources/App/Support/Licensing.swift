@@ -13,15 +13,62 @@ enum LicenseState: Equatable {
     /// expired trial pauses *syncing*, loudly, and touches nothing else —
     /// this app exists to stop things being dropped, so the one thing expiry
     /// must never do is silently stop collecting while looking alive.
-    var allowsSync: Bool { self != .expired }
+    ///
+    /// Always `true` while `Licensing.isEnforced` is off.
+    var allowsSync: Bool {
+        Licensing.allowsSync(self, enforced: Licensing.isEnforced)
+    }
 }
 
 /// Trial math and Lemon Squeezy response parsing — the pure half of
 /// licensing, kept free of Keychain and URLSession so every branch is
 /// testable (rule 6). The I/O lives in `LicenseController`.
 enum Licensing {
+    /// **The master switch for the whole trial/licence mechanic. Off.**
+    ///
+    /// Turned off before the first alpha build carrying it (2026-08-23),
+    /// deliberately and temporarily: a handful of people are already running
+    /// Inbox & Chill, the product is not being sold yet, and shipping them a
+    /// build that starts a countdown and then pauses their syncing would
+    /// break a working app for no reason.
+    ///
+    /// While this is `false` the app behaves **exactly as it did before
+    /// licensing existed**: no countdown, no expiry, no notice in the panel
+    /// or the main window, no License section in Settings, no network call to
+    /// Lemon Squeezy — and, most importantly, **no trial start date is
+    /// written**.
+    ///
+    /// That last part is the one that would have bitten. The clock lives in
+    /// the Keychain and survives reinstalls by design, so if a disabled build
+    /// still stamped it, every alpha user's 14 days would elapse silently
+    /// while nothing enforced them — and the day this flips to `true` they
+    /// would all be *instantly expired*. Not stamping it means the trial
+    /// starts when enforcement starts, which is the only fair reading.
+    ///
+    /// **To turn it back on:** flip this to `true`. That is the whole change;
+    /// every gate and every piece of UI reads it. Then check three things,
+    /// because none of them is covered by the unit tests: an existing install
+    /// gets a fresh 14 days (its Keychain has no start date yet), a licensed
+    /// install still reads Licensed, and the expiry notice actually appears
+    /// (`INCHILL_LICENSE_STATE=expired` on a Debug build).
+    static let isEnforced = false
+
     static let trialDays = 14
     static let price = "$15"
+
+    /// Whether syncing is allowed, given a state and whether the mechanic is
+    /// switched on at all.
+    ///
+    /// Pure and takes `enforced` as an argument rather than reading the
+    /// constant, so the tests can pin **both** modes — otherwise the shipped
+    /// value of a compile-time flag would decide which half of the contract
+    /// is covered, and flipping it later would silently drop the other half.
+    nonisolated static func allowsSync(
+        _ state: LicenseState, enforced: Bool
+    ) -> Bool {
+        guard enforced else { return true }
+        return state != .expired
+    }
 
     /// The Lemon Squeezy checkout page.
     static let purchaseURL: URL? = URL(

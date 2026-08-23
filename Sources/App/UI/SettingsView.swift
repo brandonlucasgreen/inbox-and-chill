@@ -44,7 +44,11 @@ struct GeneralPane: View {
                 }
             }
             UpdatesSection()
-            LicenseSection()
+            // Hidden while the mechanic is off, so an alpha build shows no
+            // trace of a product that isn't for sale yet.
+            if Licensing.isEnforced {
+                LicenseSection()
+            }
         }
         .formStyle(.grouped)
     }

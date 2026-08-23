@@ -62,10 +62,32 @@ struct TrialMathTests {
                 == .licensed)
     }
 
-    @Test func onlyExpiryPausesSync() {
-        #expect(LicenseState.trialing(daysLeft: 1).allowsSync)
-        #expect(LicenseState.licensed.allowsSync)
-        #expect(!LicenseState.expired.allowsSync)
+    /// Both halves of the gate, pinned independently of which way the
+    /// shipped flag happens to point — otherwise flipping `isEnforced` later
+    /// would silently drop coverage of whichever mode stopped being live.
+    @Test func onlyExpiryPausesSync_whenEnforced() {
+        #expect(Licensing.allowsSync(.trialing(daysLeft: 1), enforced: true))
+        #expect(Licensing.allowsSync(.licensed, enforced: true))
+        #expect(!Licensing.allowsSync(.expired, enforced: true))
+    }
+
+    /// The mechanic is switched off for the alpha. Nothing may pause syncing
+    /// while it is — not even an expired clock, which is the state an alpha
+    /// user would land in if a start date ever got stamped by mistake.
+    @Test func nothingPausesSync_whenNotEnforced() {
+        for state: LicenseState in [
+            .trialing(daysLeft: 1), .licensed, .expired,
+        ] {
+            #expect(Licensing.allowsSync(state, enforced: false))
+        }
+    }
+
+    /// A guard on the shipped value, so turning the mechanic on is a
+    /// deliberate act that trips a red test rather than something that can
+    /// ride along in an unrelated change. Flip both together.
+    @Test func mechanicIsCurrentlyOff() {
+        #expect(Licensing.isEnforced == false)
+        #expect(LicenseState.expired.allowsSync)
     }
 
     @Test func datesRoundTripThroughKeychainEncoding() {
