@@ -38,6 +38,12 @@ final class LicenseController {
         Keychain.get(Licensing.invalidReasonKey)
     }
 
+    /// Whether the active key is a Lemon Squeezy **test-mode** key. Those
+    /// unlock a real build (same store id), so the state line says so.
+    var isTestModeKey: Bool {
+        Keychain.get(Licensing.testModeKey) == "true"
+    }
+
     /// DEBUG-only escape hatch for UI iteration, same pattern as
     /// `INCHILL_NO_FAKE`: `INCHILL_LICENSE_STATE=licensed|expired|trialing`
     /// (or `trialing:3`) freezes the state and skips Keychain and network.
@@ -134,6 +140,11 @@ final class LicenseController {
                 Keychain.delete(Licensing.invalidReasonKey)
                 _ = Keychain.set(
                     Licensing.encode(.now), for: Licensing.lastValidatedKey)
+                if activation.isTestMode {
+                    _ = Keychain.set("true", for: Licensing.testModeKey)
+                } else {
+                    Keychain.delete(Licensing.testModeKey)
+                }
                 problem = nil
                 refreshState()
             case .refused(let reason):
@@ -165,6 +176,7 @@ final class LicenseController {
             Keychain.delete(Licensing.instanceIDKey)
             Keychain.delete(Licensing.invalidReasonKey)
             Keychain.delete(Licensing.lastValidatedKey)
+            Keychain.delete(Licensing.testModeKey)
             problem = nil
             refreshState()
         } catch {

@@ -82,6 +82,13 @@ struct LicenseSection: View {
                     license.keySuffix.map { "Licensed — key ending \($0)" }
                         ?? "Licensed")
             }
+            if license.isTestModeKey {
+                Text(
+                    "This is a Lemon Squeezy test-mode key. It unlocks the app exactly like a real one — fine for checking the flow, not a real purchase."
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
         case .trialing(let daysLeft):
             LabeledContent("Status") {
                 Text("Free trial — ^[\(daysLeft) day](inflect: true) left")

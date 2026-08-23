@@ -101,6 +101,14 @@ struct SourceEditorSheet: View {
                     MailAccessSection()
                 }
 
+                // Same placement argument as Mail's: the local source can
+                // receive nothing until Claude Code is told where to post,
+                // so the setup belongs with the source rather than in
+                // General, where it used to sit.
+                if descriptor.id == "local" {
+                    ClaudeCodeSection()
+                }
+
                 if !descriptor.fields.isEmpty {
                     Section {
                         ForEach(descriptor.fields) { field in

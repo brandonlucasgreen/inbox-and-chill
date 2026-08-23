@@ -29,6 +29,9 @@ struct SourcesPane: View {
             MailPermissionNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            ClaudeCodeHooksNotice()
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             HStack {
                 Button { isAdding = true } label: {
                     Label("Add Source", systemImage: "plus")

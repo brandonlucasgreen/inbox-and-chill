@@ -484,6 +484,15 @@ final class AppState {
         return configs.contains { $0.kind == "appleMail" && $0.isEnabled }
     }
 
+    /// Whether any enabled source depends on the Claude Code hooks. Same
+    /// contract as `hasEnabledMailSource`: no local source, no notice.
+    var hasEnabledLocalSource: Bool {
+        let configs =
+            (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
+            ?? []
+        return configs.contains { $0.kind == "local" && $0.isEnabled }
+    }
+
     /// Requests permission on first use (if undetermined), then posts.
     private func postBanners(_ items: [ItemSummary], sound: Bool) async {
         guard await resolveBannerAuthorization(prompting: true) else { return }

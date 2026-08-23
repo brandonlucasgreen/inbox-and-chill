@@ -78,28 +78,55 @@ struct TrialMathTests {
 
 // MARK: - Lemon Squeezy response parsing
 
-/// Fixtures follow the shapes in the License API docs
-/// (docs.lemonsqueezy.com/api/license-api). Doc-derived, not yet verified
-/// against the live API — the live check happens once the store exists.
+/// Fixtures **captured from the live API** on 2026-08-22, by activating,
+/// validating and deactivating a real test-mode key against store 188119.
+/// Keys and ids are redacted; the shapes are verbatim. This supersedes the
+/// doc-derived fixtures these started as (rule 4: a config that has never
+/// met the real service is unverified).
 @Suite("Lemon Squeezy parsing")
 struct LemonSqueezyParsingTests {
     @Test func activationSuccess() throws {
         let fixture = """
             {"activated": true, "error": null,
-             "license_key": {"id": 1, "status": "active",
+             "license_key": {"id": 1555197, "status": "active",
                              "key": "REDACTED",
-                             "activation_limit": 3, "activation_usage": 1},
-             "instance": {"id": "47596ad9-a811-4ebf-ac8a-03fc7b6d2a17",
-                          "name": "Brandons MacBook Pro"},
-             "meta": {"store_id": 12345, "product_id": 11}}
+                             "activation_limit": 2, "activation_usage": 1,
+                             "created_at": "2026-08-23T02:00:43.000000Z",
+                             "expires_at": null, "test_mode": false},
+             "instance": {"id": "512d5452-7a35-4861-bd29-4c8a8784e4a9",
+                          "name": "Brandons MacBook Pro",
+                          "created_at": "2026-08-23T02:05:03.000000Z"},
+             "meta": {"store_id": 188119, "order_id": 9283538,
+                      "variant_name": "Default", "product_id": 1309536,
+                      "product_name": "Inbox & Chill",
+                      "customer_name": "Brandon Lucas Green"}}
             """
         let result = try LemonSqueezy.activation(
-            from: Data(fixture.utf8), expectedStoreID: nil)
+            from: Data(fixture.utf8), expectedStoreID: 188_119)
         #expect(
             result
                 == .activated(
                     .init(
-                        instanceID: "47596ad9-a811-4ebf-ac8a-03fc7b6d2a17")))
+                        instanceID: "512d5452-7a35-4861-bd29-4c8a8784e4a9",
+                        isTestMode: false)))
+    }
+
+    /// A test-mode key reports the **same** `store_id` as a live one, so the
+    /// store pin cannot separate them — the app records the flag instead and
+    /// says so in Settings. Verified against the live API.
+    @Test func testModeKeyActivatesAndIsFlagged() throws {
+        let fixture = """
+            {"activated": true, "error": null,
+             "license_key": {"id": 1555197, "status": "active",
+                             "activation_limit": 2, "activation_usage": 1,
+                             "test_mode": true},
+             "instance": {"id": "512d5452", "name": "probe"},
+             "meta": {"store_id": 188119}}
+            """
+        let result = try LemonSqueezy.activation(
+            from: Data(fixture.utf8), expectedStoreID: 188_119)
+        #expect(
+            result == .activated(.init(instanceID: "512d5452", isTestMode: true)))
     }
 
     @Test func activationRefusalCarriesLemonSqueezysWording() throws {
@@ -125,16 +152,30 @@ struct LemonSqueezyParsingTests {
              "instance": {"id": "abc"}, "meta": {"store_id": 99999}}
             """
         let pinned = try LemonSqueezy.activation(
-            from: Data(fixture.utf8), expectedStoreID: 12345)
+            from: Data(fixture.utf8), expectedStoreID: 188_119)
         guard case .refused(let reason) = pinned else {
             Issue.record("expected a refusal, got \(pinned)")
             return
         }
         #expect(reason.contains("different product"))
-        // Unpinned (the pre-launch state), the same response activates.
+        // Unpinned, the same response activates — guards the pin itself
+        // being what refuses, rather than something else in the response.
         let unpinned = try LemonSqueezy.activation(
             from: Data(fixture.utf8), expectedStoreID: nil)
-        #expect(unpinned == .activated(.init(instanceID: "abc")))
+        #expect(
+            unpinned == .activated(.init(instanceID: "abc", isTestMode: false)))
+    }
+
+    /// The shipped pin is the real store id, so a key from it activates.
+    @Test func shippedStorePinAcceptsItsOwnStore() throws {
+        #expect(Licensing.expectedStoreID == 188_119)
+        let fixture = """
+            {"activated": true, "instance": {"id": "abc"},
+             "meta": {"store_id": 188119}}
+            """
+        #expect(
+            try LemonSqueezy.activation(from: Data(fixture.utf8))
+                == .activated(.init(instanceID: "abc", isTestMode: false)))
     }
 
     @Test func validationValid() throws {
@@ -165,14 +206,17 @@ struct LemonSqueezyParsingTests {
         #expect(reason.contains("refund"))
     }
 
+    /// Verbatim from the live API for a mistyped key — and it arrives with
+    /// **HTTP 404**, which is why the transport parses the body regardless
+    /// of status code instead of throwing on non-2xx.
     @Test func unknownKeyFallsBackToTheAPIsError() throws {
         let fixture = """
-            {"valid": false, "error": "license_key not found"}
+            {"valid": false, "error": "license_key not found."}
             """
         #expect(
             try LemonSqueezy.validation(
                 from: Data(fixture.utf8), expectedStoreID: nil)
-                == .invalid(reason: "license_key not found"))
+                == .invalid(reason: "license_key not found."))
     }
 
     @Test func deactivation() throws {

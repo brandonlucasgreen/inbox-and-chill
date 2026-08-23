@@ -23,16 +23,20 @@ enum Licensing {
     static let trialDays = 14
     static let price = "$15"
 
-    /// The Lemon Squeezy checkout page. `nil` until the product exists —
-    /// every Buy button hides itself rather than pointing at nothing.
-    static let purchaseURL: URL? = nil
+    /// The Lemon Squeezy checkout page.
+    static let purchaseURL: URL? = URL(
+        string:
+            "https://bgreenlol.lemonsqueezy.com/checkout/buy/274ad0c5-6ace-48fb-8dfb-a1f475c6f05d"
+    )
 
     /// The Lemon Squeezy store this app's keys come from. The License API is
     /// public and takes only the key, so without this pin a valid key from
-    /// *any* store on the platform would activate the app. `nil` skips the
-    /// check until the store exists; fill it from `meta.store_id` in the
-    /// first real activation response.
-    static let expectedStoreID: Int? = nil
+    /// *any* store on the platform would activate the app.
+    ///
+    /// Verified against the live API 2026-08-22: test-mode keys report the
+    /// same `meta.store_id` as live ones, so this pin does not need a
+    /// test-mode exception.
+    static let expectedStoreID: Int? = 188_119
 
     // Keychain accounts (service lol.bgreen.inboxandchill, like everything
     // else). The trial start date lives in the Keychain rather than
@@ -44,6 +48,7 @@ enum Licensing {
     static let instanceIDKey = "license.instanceID"
     static let invalidReasonKey = "license.invalidReason"
     static let lastValidatedKey = "license.lastValidatedAt"
+    static let testModeKey = "license.testMode"
 
     /// The one derivation. A stored license that the last validation
     /// explicitly rejected does not count — but a license we merely haven't
@@ -92,6 +97,13 @@ enum Licensing {
 enum LemonSqueezy {
     struct Activation: Equatable {
         var instanceID: String
+        /// Lemon Squeezy test-mode keys report the **same** `store_id` as
+        /// live ones (verified against the API 2026-08-22), so the store pin
+        /// does not separate them and a test key unlocks a real build. Only
+        /// the store owner can mint one, so this is not a hole — but it is
+        /// worth saying out loud in Settings rather than having a build
+        /// silently licensed by a key that was never paid for.
+        var isTestMode: Bool
     }
 
     enum ActivationResult: Equatable {
@@ -119,6 +131,12 @@ enum LemonSqueezy {
 
         struct KeyInfo: Decodable {
             var status: String?
+            var testMode: Bool?
+
+            enum CodingKeys: String, CodingKey {
+                case status
+                case testMode = "test_mode"
+            }
         }
         struct Instance: Decodable {
             var id: String?
@@ -164,7 +182,10 @@ enum LemonSqueezy {
                     "Activation succeeded but the response carried no instance id."
             )
         }
-        return .activated(Activation(instanceID: instanceID))
+        return .activated(
+            Activation(
+                instanceID: instanceID,
+                isTestMode: envelope.licenseKey?.testMode ?? false))
     }
 
     nonisolated static func validation(
