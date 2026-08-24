@@ -136,13 +136,41 @@ git tag -a "$TAG" -m "Inbox & Chill $VERSION"
 git push origin "$TAG"
 
 echo "==> Publishing the GitHub release"
+# Notes are generated from the commits since the previous tag — but
+# --notes-start-tag is resolved by GitHub, not by git, so the tag has to exist
+# **on the remote**. `git describe` answers from the local repo and happily
+# names a tag that was never pushed, which GitHub rejects with
+# `HTTP 400: Invalid previous_tag`.
+#
+# That bit on 2026-08-23 cutting v0.3.4: v0.3.3 was tagged locally and never
+# pushed, so the script died here — *after* the tag push, leaving the tag
+# published with no release behind it, and the appcast step unrun. The notes
+# are a nicety; the release is not. So this now checks the remote first, and
+# falls back to un-anchored notes rather than failing the release.
 NOTES_FLAG=(--generate-notes)
 if PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null); then
-  NOTES_FLAG=(--generate-notes --notes-start-tag "$PREV")
+  if git ls-remote --exit-code --tags origin "refs/tags/$PREV" >/dev/null 2>&1; then
+    NOTES_FLAG=(--generate-notes --notes-start-tag "$PREV")
+  else
+    echo "    note: previous tag $PREV is not on origin, so GitHub cannot"
+    echo "          anchor the notes to it. Publishing with un-anchored notes."
+  fi
 fi
 # bash32-ok: NOTES_FLAG always carries --generate-notes, so it is never empty
 # and cannot hit bash 3.2's unbound-variable behaviour. See scripts/check-shell.sh.
-gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" "${NOTES_FLAG[@]}"
+if ! gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" "${NOTES_FLAG[@]}"; then
+  # Last-ditch: anything wrong with note *generation* must not cost the
+  # release, because the tag is already pushed and the feed still needs
+  # writing. Retried exactly once, and only when the first attempt was
+  # anchored — an unanchored failure is a real one (release already exists,
+  # bad asset, no auth) and must stay fatal.
+  [ ${#NOTES_FLAG[@]} -gt 1 ] || die "gh release create failed. The tag $TAG is
+    already pushed, so re-run only this step once the cause is fixed:
+      gh release create $TAG '$ZIP' '$DMG' --title 'Inbox & Chill $VERSION' --generate-notes
+      scripts/appcast.sh"
+  echo "    note: notes generation failed; retrying with un-anchored notes."
+  gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" --generate-notes
+fi
 
 # --- Publish the update feed ---------------------------------------------
 # Strictly after the release exists, because the feed's enclosure URL points
