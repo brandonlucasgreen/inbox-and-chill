@@ -97,9 +97,16 @@ struct LinearNotificationNode: Decodable, Sendable {
         var url: String?
     }
     /// `InitiativeUpdate` / `ProjectUpdate`. An update has no name of its
-    /// own — it borrows its parent's — so it only contributes a deep link.
+    /// own — it borrows its parent's — so its row contributes a deep link;
+    /// `body` and `health` are requested for project updates only and feed
+    /// the D expansion, where the update text *is* the context. (Found live
+    /// 2026-08-23: most project notifications are about an update, and a
+    /// project with no description left them with nothing to show.)
     struct UpdateEntity: Decodable, Sendable {
         var url: String?
+        var body: String?
+        /// `onTrack` / `atRisk` / `offTrack`.
+        var health: String?
     }
 
     var id: String = ""

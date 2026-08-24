@@ -154,7 +154,7 @@ actor LinearConnector: Connector {
                   }
                   ... on ProjectNotification {
                     project { name url description targetDate }
-                    projectUpdate { url }
+                    projectUpdate { url body health }
                     document { title url }
                     comment { body }
                   }
@@ -315,7 +315,17 @@ actor LinearConnector: Connector {
         if let own = node.project { project = own }
 
         var context = ItemContext(chips: chips)
-        if let project, let description = project.description,
+        // A project-update notification's real content is the update itself
+        // — health and body — not the project's (often empty) description.
+        // The description stays as the fallback blurb for everything else.
+        if let health = healthChip(node.projectUpdate?.health) {
+            context.chips.append(health)
+        }
+        if let update = node.projectUpdate?.body, !update.isEmpty {
+            context.blurbLabel = "Project update"
+                + (project.map { " · \($0.name)" } ?? "")
+            context.blurb = String(update.prefix(280))
+        } else if let project, let description = project.description,
             !description.isEmpty {
             var label = "Project · \(project.name)"
             if let ships = formatDay(project.targetDate) {
@@ -325,6 +335,21 @@ actor LinearConnector: Connector {
             context.blurb = String(description.prefix(280))
         }
         return context.isEmpty ? nil : context
+    }
+
+    /// Linear's three project-health states, in the traffic-light colors
+    /// their own UI uses.
+    nonisolated static func healthChip(_ health: String?) -> ItemContext.Chip? {
+        switch health {
+        case "onTrack":
+            return .init(systemImage: "checkmark.circle", text: "On track", tint: .green)
+        case "atRisk":
+            return .init(systemImage: "exclamationmark.triangle", text: "At risk", tint: .orange)
+        case "offTrack":
+            return .init(systemImage: "xmark.circle", text: "Off track", tint: .red)
+        default:
+            return nil
+        }
     }
 
     /// `2026-08-28` → `Fri Aug 28`. Linear's date-only fields carry no time

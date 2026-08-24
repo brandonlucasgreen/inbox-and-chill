@@ -238,13 +238,27 @@ actor GitHubConnector: Connector {
     /// `repo` — GitHub answers 404 (not 403) for that, so a bare "not found"
     /// would send the user hunting a deleted issue that's right there.
     func context(externalID: String, payload: Data?) async throws -> ItemContext? {
-        guard let payload,
-            let stored = try? JSONDecoder().decode(StoredSubject.self, from: payload)
-        else { return nil }
         guard let pat = Keychain.get("\(sourceID).pat") else {
             throw GitHubConnectorError(
                 errorDescription: "GitHub: no personal access token configured.")
         }
+        var stored = payload.flatMap {
+            try? JSONDecoder().decode(StoredSubject.self, from: $0)
+        }
+        if stored == nil {
+            // A row from before this feature (or a pinned row GitHub no
+            // longer reports, which reconcile never rewrites) has no stored
+            // subject — but the external id *is* the thread id, and the
+            // thread endpoint returns the same subject the poll would have.
+            let thread: Thread = try await get(
+                "https://api.github.com/notifications/threads/\(externalID)",
+                pat: pat)
+            stored = StoredSubject(
+                subjectURL: thread.subject.url,
+                commentURL: thread.subject.latest_comment_url,
+                reason: thread.reason)
+        }
+        guard let stored else { return nil }
 
         var context = ItemContext()
         var problem: String?

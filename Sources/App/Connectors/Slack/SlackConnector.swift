@@ -1583,6 +1583,9 @@ actor SlackConnector: Connector {
         var ts: String
         var user: String?
         var text: String
+        /// The parent's ts when this message lives in a thread. What routes
+        /// a reply-mention to its thread rather than the channel around it.
+        var threadTS: String?
     }
 
     /// The conversation around a mention, keyword hit or emoji save — the
@@ -1611,9 +1614,22 @@ actor SlackConnector: Connector {
         var raw: [ContextRaw] = []
         var isThread = false
         if let replies = await api.tryCall("conversations.replies", [
-            "channel": ref.channel, "ts": focusTS, "limit": "50",
+            "channel": ref.channel, "ts": focusTS, "limit": "200",
         ]) {
             raw = Self.rawMessages(replies["messages"])
+            // `ts` of a *reply* answers with just that one message, not its
+            // thread (verified against Brandon's workspace 2026-08-23 — a
+            // reply-mention was falling through to the channel window). The
+            // parent is the message's own thread_ts; ask again with that and
+            // the whole thread comes back.
+            if raw.count == 1, let parent = raw.first?.threadTS,
+                parent != focusTS,
+                let thread = await api.tryCall("conversations.replies", [
+                    "channel": ref.channel, "ts": parent, "limit": "200",
+                ])
+            {
+                raw = Self.rawMessages(thread["messages"])
+            }
             isThread = raw.count > 1
         }
         if !isThread {
@@ -1676,7 +1692,8 @@ actor SlackConnector: Connector {
                 ts: ts,
                 user: message["user"].nonEmptyString
                     ?? message["bot_id"].nonEmptyString,
-                text: text)
+                text: text,
+                threadTS: message["thread_ts"].nonEmptyString)
         }
     }
 

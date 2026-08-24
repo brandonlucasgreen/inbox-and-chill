@@ -818,6 +818,20 @@ struct SlackContextWindowTests {
         let raw = ["1.0", "2.0"].map(message)
         #expect(SlackConnector.window(raw, focusTS: "9.0", radius: 3) == nil)
     }
+
+    @Test("Raw messages keep thread_ts — what routes a reply to its thread")
+    func threadTSSurvivesParsing() throws {
+        let json = try JSONDecoder().decode(
+            SlackJSON.self,
+            from: Data(#"""
+                [{"ts":"5.0","user":"U1","text":"hi","thread_ts":"1.0"},
+                 {"ts":"6.0","user":"U2","text":"top-level"}]
+                """#.utf8))
+        let raw = SlackConnector.rawMessages(json)
+        #expect(raw.count == 2)
+        #expect(raw[0].threadTS == "1.0")
+        #expect(raw[1].threadTS == nil)
+    }
 }
 
 @Suite("Linear context building")
@@ -861,6 +875,31 @@ struct LinearContextTests {
         let context = try #require(LinearConnector.context(for: node))
         #expect(context.chips.isEmpty)
         #expect(context.blurb == "The panel release.")
+    }
+
+    @Test("A project update's own body and health beat the description")
+    func projectUpdate() throws {
+        // The live gap found 2026-08-23: most project notifications are
+        // about an update, and a project with no description showed nothing.
+        var node = LinearNotificationNode()
+        node.project = .init(
+            name: "0.4", url: nil, description: nil, targetDate: nil)
+        node.projectUpdate = .init(
+            url: nil, body: "Shipped the fan-out; scroll anchor next.",
+            health: "atRisk")
+        let context = try #require(LinearConnector.context(for: node))
+        #expect(context.chips.map(\.text) == ["At risk"])
+        #expect(context.chips.first?.tint == .orange)
+        #expect(context.blurb == "Shipped the fan-out; scroll anchor next.")
+        #expect(context.blurbLabel?.contains("Project update") == true)
+    }
+
+    @Test("Health chips map Linear's three states; anything else is dropped")
+    func healthStates() {
+        #expect(LinearConnector.healthChip("onTrack")?.tint == .green)
+        #expect(LinearConnector.healthChip("offTrack")?.tint == .red)
+        #expect(LinearConnector.healthChip(nil) == nil)
+        #expect(LinearConnector.healthChip("unknownState") == nil)
     }
 
     @Test("Date-only strings format without shifting across midnight")
