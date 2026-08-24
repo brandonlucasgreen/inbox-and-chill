@@ -7,7 +7,9 @@ import Foundation
 actor GitHubConnector: Connector {
     nonisolated let sourceID: String
     nonisolated let sourceKind = "github"
-    nonisolated let capabilities: ConnectorCapabilities = [.markDone, .remoteTruth]
+    nonisolated let capabilities: ConnectorCapabilities = [
+        .markDone, .remoteTruth, .providesContext,
+    ]
     // GitHub's docs ask polling clients to respect `X-Poll-Interval` (60s by
     // default, sometimes raised under load). We can't surface a dynamic
     // value here because `pollInterval` is `nonisolated` and can't read
@@ -208,7 +210,167 @@ actor GitHubConnector: Connector {
             url: Self.htmlURL(for: thread.subject),
             actorName: nil,
             occurredAt: occurredAt,
-            highSignal: highSignal)
+            highSignal: highSignal,
+            // The API URLs `context()` needs — the notifications response
+            // carries them but the store doesn't keep the raw thread.
+            payload: try? JSONEncoder().encode(StoredSubject(
+                subjectURL: thread.subject.url,
+                commentURL: thread.subject.latest_comment_url,
+                reason: thread.reason)))
+    }
+
+    // MARK: Context (D expansion)
+
+    /// What `context()` needs later, written into the item's payload at poll
+    /// time. Both URLs point at api.github.com and came from GitHub itself.
+    struct StoredSubject: Codable, Sendable {
+        var subjectURL: String?
+        var commentURL: String?
+        var reason: String?
+    }
+
+    /// Labels and state from the subject (issue/PR), plus the body of the
+    /// comment that produced the notification. Two REST GETs with the same
+    /// PAT, spent only on an explicit expand.
+    ///
+    /// The trap this must name: the setup asks for a token with only the
+    /// `notifications` scope, and *reading content* in a private repo needs
+    /// `repo` — GitHub answers 404 (not 403) for that, so a bare "not found"
+    /// would send the user hunting a deleted issue that's right there.
+    func context(externalID: String, payload: Data?) async throws -> ItemContext? {
+        guard let payload,
+            let stored = try? JSONDecoder().decode(StoredSubject.self, from: payload)
+        else { return nil }
+        guard let pat = Keychain.get("\(sourceID).pat") else {
+            throw GitHubConnectorError(
+                errorDescription: "GitHub: no personal access token configured.")
+        }
+
+        var context = ItemContext()
+        var problem: String?
+
+        if let subjectURL = stored.subjectURL,
+            subjectURL.hasPrefix("https://api.github.com/") {
+            do {
+                let detail: SubjectDetail = try await get(subjectURL, pat: pat)
+                context.chips = Self.contextChips(for: detail)
+            } catch {
+                problem = String(describing: error)
+            }
+        }
+        if let commentURL = stored.commentURL,
+            commentURL.hasPrefix("https://api.github.com/") {
+            do {
+                let comment: CommentDetail = try await get(commentURL, pat: pat)
+                if let body = comment.body, !body.isEmpty {
+                    context.messages = [.init(
+                        author: comment.user?.login ?? "someone",
+                        text: String(body.prefix(600)),
+                        isFocus: true)]
+                    context.messagesLabel =
+                        stored.reason == "mention" || stored.reason == "team_mention"
+                        ? "The comment that mentioned you" : "Latest comment"
+                }
+            } catch {
+                problem = problem ?? String(describing: error)
+            }
+        }
+
+        if let problem {
+            // Nothing loaded at all → surface the failure as the result;
+            // partial results carry the problem as a note instead (rule 5).
+            guard !context.isEmpty else {
+                throw GitHubConnectorError(errorDescription: problem)
+            }
+            context.note = problem
+        }
+        return context.isEmpty ? nil : context
+    }
+
+    private func get<T: Decodable>(_ urlString: String, pat: String) async throws -> T {
+        guard let url = URL(string: urlString) else {
+            throw GitHubConnectorError(errorDescription: "GitHub: malformed API URL.")
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(pat)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw GitHubConnectorError(errorDescription: "GitHub: non-HTTP response.")
+        }
+        guard http.statusCode == 200 else {
+            throw GitHubConnectorError(
+                errorDescription: Self.contextProblem(status: http.statusCode))
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    struct SubjectDetail: Decodable, Sendable {
+        struct Label: Decodable, Sendable {
+            var name: String
+            var color: String?
+        }
+        struct User: Decodable, Sendable {
+            var login: String
+        }
+        var state: String?
+        var merged: Bool?
+        var draft: Bool?
+        var labels: [Label]?
+        var requested_reviewers: [User]?
+    }
+
+    struct CommentDetail: Decodable, Sendable {
+        struct User: Decodable, Sendable {
+            var login: String
+        }
+        var user: User?
+        var body: String?
+    }
+
+    /// State first, then labels, then reviewers — same order every time so
+    /// the chips read as a sentence.
+    static func contextChips(for detail: SubjectDetail) -> [ItemContext.Chip] {
+        var chips: [ItemContext.Chip] = []
+        if detail.merged == true {
+            chips.append(.init(systemImage: "arrow.triangle.merge", text: "Merged"))
+        } else if detail.draft == true {
+            chips.append(.init(systemImage: "circle.dashed", text: "Draft"))
+        } else if let state = detail.state {
+            chips.append(.init(
+                systemImage: "smallcircle.filled.circle",
+                text: state.capitalized,
+                tint: state == "open" ? .green : .red))
+        }
+        for label in detail.labels ?? [] where !label.name.isEmpty {
+            chips.append(.init(dotHex: label.color, text: label.name))
+        }
+        if let reviewers = detail.requested_reviewers, !reviewers.isEmpty {
+            chips.append(.init(
+                systemImage: "person",
+                text: reviewers.count == 1 ? "1 reviewer" : "\(reviewers.count) reviewers"))
+        }
+        return chips
+    }
+
+    /// Rule 5: 404 on a notification subject almost always means scope, not
+    /// absence — the notification itself proves the thing exists.
+    static func contextProblem(status: Int) -> String {
+        switch status {
+        case 404:
+            return "GitHub answered 404 for this thread's details. For a "
+                + "private repo that usually means the token lacks the repo "
+                + "scope — add it under GitHub → Settings → Developer "
+                + "settings → Tokens (classic), then Authorize for SSO orgs."
+        case 403:
+            return "GitHub refused the request (403) — rate limited, or the "
+                + "token isn't authorized for this organization's SSO."
+        case 401:
+            return "GitHub rejected the token (401) — it may have expired."
+        default:
+            return "GitHub answered \(status) fetching the thread's details."
+        }
     }
 
     private static let highSignalReasons: Set<String> = [

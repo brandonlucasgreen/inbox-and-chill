@@ -96,6 +96,31 @@ actor SyncEngine {
         notify(sourceID: sourceID, writeThroughFailure: failure)
     }
 
+    // MARK: Context
+
+    /// Rich detail for an expanded row. Answers `.unavailable` for sources
+    /// that never provide context (or are gone) so the panel shows nothing
+    /// rather than a spinner that can't resolve; a connector error becomes
+    /// `.failed` with its description, rendered inline where the user is
+    /// looking (rule 5).
+    func fetchContext(
+        sourceID: String, externalID: String, payload: Data?
+    ) async -> ContextFetch {
+        guard let connector = connectors[sourceID],
+            connector.capabilities.contains(.providesContext)
+        else { return .unavailable }
+        do {
+            guard
+                let context = try await connector.context(
+                    externalID: externalID, payload: payload),
+                !context.isEmpty
+            else { return .unavailable }
+            return .context(context)
+        } catch {
+            return .failed(String(describing: error))
+        }
+    }
+
     // MARK: Lifecycles
 
     private func drive(_ connector: any Connector, capabilities: ConnectorCapabilities) async {

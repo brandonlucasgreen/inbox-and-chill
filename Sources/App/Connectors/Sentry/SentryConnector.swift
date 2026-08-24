@@ -46,7 +46,9 @@ actor SentryConnector: Connector {
         self.query = trimmed.isEmpty ? Self.defaultQuery : trimmed
         self.resolveOnDone = resolveOnDone
         self.capabilities =
-            resolveOnDone ? [.remoteTruth, .markDone] : [.remoteTruth]
+            resolveOnDone
+            ? [.remoteTruth, .markDone, .providesContext]
+            : [.remoteTruth, .providesContext]
     }
 
     /// Sentry's "For Review" tab, which is the closest thing it has to an
@@ -74,6 +76,7 @@ actor SentryConnector: Connector {
         var shortId: String?
         var permalink: String?
         var lastSeen: String?
+        var firstSeen: String?
         var level: String?
         var count: String?
         var userCount: Int?
@@ -249,7 +252,141 @@ actor SentryConnector: Connector {
             // `.distantPast` merely sorts the row to the bottom until Sentry
             // sends a timestamp we understand.
             occurredAt: parseTimestamp(issue.lastSeen) ?? .distantPast,
-            highSignal: highSignal(level: issue.level, isUnhandled: issue.isUnhandled))
+            highSignal: highSignal(level: issue.level, isUnhandled: issue.isUnhandled),
+            // Stat chips for the D expansion, built from fields the list
+            // response already carries — the lazy half (stack frames) is
+            // fetched in `context()` only when the user asks.
+            payload: contextData(for: issue))
+    }
+
+    // MARK: Context (D expansion)
+
+    /// Stat chips decode from the payload (written at poll time, free); the
+    /// top stack frames cost one extra request to the issue's latest event,
+    /// spent only when the user expands the row. A frames failure degrades
+    /// to a named note rather than losing the chips (rule 5).
+    func context(externalID: String, payload: Data?) async throws -> ItemContext? {
+        var context = payload.flatMap {
+            try? JSONDecoder().decode(ItemContext.self, from: $0)
+        } ?? ItemContext()
+
+        guard let token = Keychain.get("\(sourceID).token"), !token.isEmpty,
+            !org.isEmpty
+        else { return context.isEmpty ? nil : context }
+
+        do {
+            let event = try await fetchLatestEvent(issueID: externalID, token: token)
+            let frames = Self.topFrames(from: event)
+            if !frames.isEmpty {
+                context.frames = frames
+                context.framesLabel = "Latest event · top frames"
+            }
+        } catch {
+            context.note = "Couldn't fetch the latest event: \(String(describing: error))"
+        }
+        return context.isEmpty ? nil : context
+    }
+
+    /// One event, `entries` and all. `collapse=stats` has no equivalent here;
+    /// the payload is big but it's one request on an explicit keypress.
+    private func fetchLatestEvent(issueID: String, token: String) async throws -> LatestEvent {
+        let url = URL(
+            string: "https://sentry.io/api/0/organizations/\(org)/issues/\(issueID)/events/latest/")!
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw SentryConnectorError(errorDescription: "non-HTTP response")
+        }
+        guard http.statusCode == 200 else {
+            throw SentryConnectorError(
+                errorDescription: Self.problem(
+                    forHTTPStatus: http.statusCode,
+                    body: String(data: data.prefix(200), encoding: .utf8),
+                    retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
+                    org: org))
+        }
+        return try JSONDecoder().decode(LatestEvent.self, from: data)
+    }
+
+    /// The slice of an event detail that carries the exception stack.
+    struct LatestEvent: Decodable, Sendable {
+        struct Entry: Decodable, Sendable {
+            var type: String
+            var data: EntryData?
+        }
+        struct EntryData: Decodable, Sendable {
+            var values: [ExceptionValue]?
+        }
+        struct ExceptionValue: Decodable, Sendable {
+            var stacktrace: Stacktrace?
+        }
+        struct Stacktrace: Decodable, Sendable {
+            var frames: [Frame]?
+        }
+        struct Frame: Decodable, Sendable {
+            var function: String?
+            var filename: String?
+            var lineNo: Int?
+            var inApp: Bool?
+        }
+        var entries: [Entry]?
+    }
+
+    /// Crash site first. Sentry orders frames oldest-call-first (the crash is
+    /// the *last* frame), which is backwards for a four-line excerpt — the
+    /// line that broke has to be the one you can't miss. Prefers in-app
+    /// frames when the event marks any, since `Thread.run` twelve levels up
+    /// says nothing.
+    static func topFrames(from event: LatestEvent, limit: Int = 4) -> [String] {
+        let all = (event.entries ?? [])
+            .first { $0.type == "exception" }?
+            .data?.values?
+            .compactMap(\.stacktrace?.frames)
+            .flatMap { $0 } ?? []
+        guard !all.isEmpty else { return [] }
+        let inApp = all.filter { $0.inApp == true }
+        let chosen = inApp.isEmpty ? all : inApp
+        return chosen.suffix(limit).reversed().map { frame in
+            let function = frame.function ?? "<unknown>"
+            var site = frame.filename ?? ""
+            if let line = frame.lineNo { site += ":\(line)" }
+            return site.isEmpty ? function : "\(function)  \(site)"
+        }
+    }
+
+    /// Stat chips from fields the issues list already returned.
+    static func contextData(for issue: Issue) -> Data? {
+        var chips: [ItemContext.Chip] = []
+        if let count = issue.count, count != "1", !count.isEmpty {
+            chips.append(.init(
+                systemImage: "bolt.fill", text: "\(count) events", tint: .orange))
+        }
+        if let users = issue.userCount, users > 0 {
+            chips.append(.init(
+                systemImage: "person.2",
+                text: users == 1 ? "1 user" : "\(users) users"))
+        }
+        if let age = age(from: parseTimestamp(issue.firstSeen)) {
+            chips.append(.init(systemImage: "clock", text: age))
+        }
+        if issue.isUnhandled == true {
+            chips.append(.init(systemImage: "flag", text: "unhandled", tint: .red))
+        }
+        guard !chips.isEmpty else { return nil }
+        return try? JSONEncoder().encode(ItemContext(chips: chips))
+    }
+
+    /// "3d old" / "5h old" / "just in" — how long this issue has existed.
+    static func age(from firstSeen: Date?, now: Date = .now) -> String? {
+        guard let firstSeen else { return nil }
+        let seconds = now.timeIntervalSince(firstSeen)
+        guard seconds >= 0 else { return nil }
+        let days = Int(seconds / 86_400)
+        if days >= 1 { return "\(days)d old" }
+        let hours = Int(seconds / 3_600)
+        if hours >= 1 { return "\(hours)h old" }
+        return "just in"
     }
 
     /// The row's second line: where it broke, and how much. `culprit` is the

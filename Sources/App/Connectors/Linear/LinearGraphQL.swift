@@ -48,10 +48,40 @@ struct LinearNotificationNode: Decodable, Sendable {
         var displayName: String?
     }
     /// `Issue` — the one entity with a human-facing short code (`CORE-42`).
+    ///
+    /// The triage fields past `url` feed `ItemContext` chips on the expanded
+    /// row (D). They ride the same notifications query — Linear rate-limits
+    /// by complexity and these are scalar fields plus one small nested list,
+    /// so the enrichment costs no extra request.
     struct Issue: Decodable, Sendable {
         var identifier: String = ""
         var title: String = ""
         var url: String = ""
+        /// 0 = none, 1 = urgent, 2 = high, 3 = normal, 4 = low.
+        var priority: Int?
+        /// Linear's own human phrasing for `priority` ("Urgent").
+        var priorityLabel: String?
+        /// A date-only string, `2026-08-28`.
+        var dueDate: String?
+        var labels: Labels?
+        var project: ProjectEntity?
+    }
+    struct Labels: Decodable, Sendable {
+        var nodes: [Label] = []
+    }
+    struct Label: Decodable, Sendable {
+        var name: String = ""
+        /// Hex like `#f2c94c`; drawn as the chip's dot.
+        var color: String?
+    }
+    /// A project as context for the expanded row: the blurb and target date
+    /// on top of the name/url `NamedEntity` carries.
+    struct ProjectEntity: Decodable, Sendable {
+        var name: String = ""
+        var url: String?
+        var description: String?
+        /// Date-only string, `2026-09-05`.
+        var targetDate: String?
     }
     struct Comment: Decodable, Sendable {
         var body: String?
@@ -98,7 +128,7 @@ struct LinearNotificationNode: Decodable, Sendable {
     var document: TitledEntity?
     var initiative: NamedEntity?
     var initiativeUpdate: UpdateEntity?
-    var project: NamedEntity?
+    var project: ProjectEntity?
     var projectUpdate: UpdateEntity?
     var pullRequest: TitledEntity?
     var customer: NamedEntity?

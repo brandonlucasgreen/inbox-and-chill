@@ -818,6 +818,60 @@ final class AppState {
         }
     }
 
+    // MARK: Row context (D expansion)
+
+    /// The fully-expanded row's context request. One row can hold D at a
+    /// time (`PanelView.isFullyExpanded`), so one phase is the whole state.
+    private(set) var rowContext: RowContextPhase = .idle
+    /// Which item `rowContext` belongs to — a stale answer for a row the
+    /// selection has left must never paint the row it moved to.
+    private(set) var rowContextUID: String?
+    private var rowContextTask: Task<Void, Never>?
+    /// Slack context includes "messages after", which keeps changing, so
+    /// answers age out rather than living for the session.
+    private var rowContextCache: [String: (context: ItemContext, at: Date)] = [:]
+    private static let rowContextTTL: TimeInterval = 180
+
+    /// Kicks off (or replays from cache) the context fetch for a row the
+    /// user just fully expanded. Quietly does nothing for sources without
+    /// `.providesContext` — the engine answers `.unavailable` and the row
+    /// simply has no context section, same as before the feature existed.
+    func fetchContext(for item: Item) {
+        rowContextTask?.cancel()
+        rowContextUID = item.uid
+        if let cached = rowContextCache[item.uid],
+            Date.now.timeIntervalSince(cached.at) < Self.rowContextTTL {
+            rowContext = .loaded(cached.context)
+            return
+        }
+        rowContext = .loading
+        let (uid, sourceID, ext, payload) =
+            (item.uid, item.sourceID, externalID(of: item), item.payload)
+        rowContextTask = Task {
+            let fetched = await engine.fetchContext(
+                sourceID: sourceID, externalID: ext, payload: payload)
+            guard !Task.isCancelled, rowContextUID == uid else { return }
+            switch fetched {
+            case .context(let context):
+                rowContextCache[uid] = (context, .now)
+                rowContext = .loaded(context)
+            case .unavailable:
+                rowContext = .idle
+            case .failed(let reason):
+                rowContext = .failed(reason)
+            }
+        }
+    }
+
+    /// Collapsing the row (or moving the selection) drops the request — a
+    /// late answer must not grow a row that is back to one line.
+    func clearContext() {
+        rowContextTask?.cancel()
+        rowContextTask = nil
+        rowContextUID = nil
+        rowContext = .idle
+    }
+
     // MARK: Helpers
 
     private func externalID(of item: Item) -> String {
