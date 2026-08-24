@@ -85,7 +85,41 @@ brew install --cask --adopt brandonlucasgreen/tap/inbox-and-chill
 ```
 
 `--adopt` takes over the copy already in `/Applications` instead of failing.
-Untested here as of 2026-08-24.
+
+**It asks for your password, and that is not avoidable.** Homebrew chmods an
+adopted bundle `a+rX`, shelling out through `sudo` whenever the target is not
+writable (`cask/artifact/app.rb`: `sudo: !target.writable?`). A signed app
+bundle reports *not writable* even when it is owned by you with mode 755 and
+carries no ACLs — macOS protects app bundles from modification by processes
+without App Management permission, and `access(W_OK)` reflects that. Verified
+2026-08-24 against `/Applications/Inbox & Chill.app`, owner `brandonlucasgreen`,
+`drwxr-xr-x`. So the adopt needs a terminal that can prompt; it cannot be run
+unattended or from a tool that has no TTY.
+
+Verified working 2026-08-24, on the machine whose 0.3.4 was installed by
+`install-local.sh`: after the adopt, `brew list --cask --versions` reports
+`inbox-and-chill 0.3.4`, `brew outdated --cask` reports nothing — so the
+`auto_updates` bundle comparison agrees with what is on disk — and the `binary`
+stanza has linked `/opt/homebrew/bin/inchill` to the CLI inside the bundle, so
+`inchill` runs from anywhere. The app itself is untouched: same version, still
+stapled, still running.
+
+## Tap trust
+
+Homebrew 6 is rolling out a trust requirement for anything from a non-official
+tap. It is currently a notice rather than a gate — the check only fires when
+`HOMEBREW_REQUIRE_TAP_TRUST` is set, and brew's own comment says "make tap
+trust checks default in a later release".
+
+The install command above survives that change without an extra step:
+`Homebrew::Trust.explicitly_allowed?` treats a **fully-qualified** name passed
+on the command line as permission for that item, and
+`brandonlucasgreen/tap/inbox-and-chill` is exactly that. Only a bare
+`inbox-and-chill`, or a command that evaluates the whole tap, would need
+
+```bash
+brew trust --tap brandonlucasgreen/tap
+```
 
 ---
 
