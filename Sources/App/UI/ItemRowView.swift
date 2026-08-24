@@ -100,13 +100,17 @@ struct ItemRowView: View {
                         expandedLines: RowExpansion.titleLines,
                         isExpanded: isSelected, isFull: isShowingFull,
                         animation: expansion)
-                    if let secondary {
+                    if let secondary, !contextReplacesBody {
                         ExpandingText(
                             text: secondary, size: 12,
                             expandedLines: RowExpansion.bodyLines,
                             isExpanded: isSelected, isFull: isShowingFull,
                             animation: expansion)
                             .foregroundStyle(.secondary)
+                    }
+                    if isShowingFull {
+                        RowContextView(phase: contextPhase)
+                            .transition(.opacity)
                     }
                 }
                 Spacer(minLength: 4)
@@ -271,6 +275,27 @@ struct ItemRowView: View {
     /// last had open, and the hover actions and context menu read this so
     /// they never offer "Show less" on a row that is showing one line.
     private var isShowingFull: Bool { isSelected && isFullyExpanded }
+
+    /// The context request for *this* row — `AppState` holds one phase for
+    /// the one row that can be fully expanded, and the uid check keeps a
+    /// stale answer from painting a row the selection has since moved to.
+    private var contextPhase: RowContextPhase {
+        guard isShowingFull, appState.rowContextUID == item.uid else {
+            return .idle
+        }
+        return appState.rowContext
+    }
+
+    /// A loaded focus message (a Slack thread) *is* the row's body — showing
+    /// the body too would print the same text twice, once plain and once
+    /// highlighted inside the fan.
+    private var contextReplacesBody: Bool {
+        guard isShowingFull, case .loaded(let context) = contextPhase else {
+            return false
+        }
+        return context.replacesBody
+            && context.messages.contains(where: \.isFocus)
+    }
 
     private var secondary: String? {
         let parts = [item.actorName, item.snippet]

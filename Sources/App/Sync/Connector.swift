@@ -43,6 +43,11 @@ struct ConnectorCapabilities: OptionSet, Sendable {
     /// claude code is kind of unique imo"* — so widening this is a decision
     /// to take with him, not a tidy-up.
     static let announcesReturn = ConnectorCapabilities(rawValue: 1 << 4)
+    /// Connector can build an `ItemContext` for an expanded row — richer
+    /// detail (thread messages, labels, stack frames) fetched or decoded on
+    /// demand when the user presses D. Opt-in so the panel never shows a
+    /// loading state for a source that will always answer nothing.
+    static let providesContext = ConnectorCapabilities(rawValue: 1 << 5)
 }
 
 /// Events a push connector can emit between full snapshots.
@@ -90,6 +95,13 @@ protocol Connector: Actor {
     /// page we didn't fetch — and archiving it is destructive *and* sets up a
     /// resurrection loop once the window slides and the item reappears.
     func snapshotWasComplete() async -> Bool
+
+    /// Richer detail for one item, built when the user fully expands its row
+    /// (D). Only called when `.providesContext` is declared. `nil` means
+    /// "nothing to add for this item" and renders as nothing; a throw is
+    /// shown to the user with the error's description, so name the reason
+    /// and what to do about it (rule 5).
+    func context(externalID: String, payload: Data?) async throws -> ItemContext?
 }
 
 extension Connector {
@@ -100,4 +112,5 @@ extension Connector {
     func markDone(externalID: String, payload: Data?) async throws {}
     func snooze(externalID: String, until: Date, payload: Data?) async throws {}
     func run(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {}
+    func context(externalID: String, payload: Data?) async throws -> ItemContext? { nil }
 }

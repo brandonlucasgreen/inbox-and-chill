@@ -147,6 +147,11 @@ struct PanelView: View {
                     .animation(
                         PanelMotion.queue(reduceMotion: reduceMotion),
                         value: isFullyExpanded)
+                    // The context section fades/grows in on the same curve
+                    // as everything else the queue does.
+                    .animation(
+                        PanelMotion.queue(reduceMotion: reduceMotion),
+                        value: appState.rowContext)
                 }
                 .onChange(of: selectedUID) { _, new in
                     guard let new else { return }
@@ -171,6 +176,19 @@ struct PanelView: View {
                     ) {
                         proxy.scrollTo(
                             selectedUID, anchor: isFull ? .top : .center)
+                    }
+                }
+                // Context arrives after the expansion has already anchored,
+                // and it grows the row — so the anchor runs a second time,
+                // or the new content pushes the row's tail off-screen.
+                .onChange(of: appState.rowContext) { _, phase in
+                    guard isFullyExpanded, let selectedUID,
+                        case .loaded = phase
+                    else { return }
+                    withAnimation(
+                        PanelMotion.queue(reduceMotion: reduceMotion)
+                    ) {
+                        proxy.scrollTo(selectedUID, anchor: .top)
                     }
                 }
             }
@@ -575,6 +593,7 @@ struct PanelView: View {
         guard uid != selectedUID else { return }
         selectedUID = uid
         isFullyExpanded = false
+        appState.clearContext()
     }
 
     /// D, and the row's own expand button. Takes the selection first when
@@ -586,6 +605,14 @@ struct PanelView: View {
             focus = .list
         }
         isFullyExpanded.toggle()
+        // The context request lives and dies with the expansion: opening
+        // starts it (or replays the cache), closing cancels it so a late
+        // answer can't grow a row that's back to one line.
+        if isFullyExpanded, let item = selectedItem {
+            appState.fetchContext(for: item)
+        } else {
+            appState.clearContext()
+        }
     }
 
     /// D against whatever holds the selection — nothing to open on an

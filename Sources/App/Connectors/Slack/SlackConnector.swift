@@ -43,7 +43,9 @@ import os
 actor SlackConnector: Connector {
     nonisolated let sourceID: String
     nonisolated let sourceKind = "slack"
-    nonisolated let capabilities: ConnectorCapabilities = [.markDone, .remoteTruth, .push]
+    nonisolated let capabilities: ConnectorCapabilities = [
+        .markDone, .remoteTruth, .push, .providesContext,
+    ]
     /// Unused — `.push` makes the SyncEngine skip interval polling entirely.
     nonisolated let pollInterval: TimeInterval = 45
 
@@ -1570,6 +1572,147 @@ actor SlackConnector: Connector {
         default:
             return nil
         }
+    }
+
+    // MARK: - Context (D expansion)
+
+    /// A message as it comes off `conversations.replies`/`history`, before
+    /// names and markup are resolved. Value type so the windowing that picks
+    /// "3 before, the mention, 3 after" is testable without a network.
+    struct ContextRaw: Sendable, Equatable {
+        var ts: String
+        var user: String?
+        var text: String
+        /// The parent's ts when this message lives in a thread. What routes
+        /// a reply-mention to its thread rather than the channel around it.
+        var threadTS: String?
+    }
+
+    /// The conversation around a mention, keyword hit or emoji save — the
+    /// feature request verbatim: "the 3-5 messages preceding it and after it
+    /// in the thread, so I can see the context in which I was mentioned".
+    ///
+    /// Thread first: `conversations.replies` accepts the ts of *any* message
+    /// in a thread and returns the whole thread, so one call covers both a
+    /// mention that is a reply and one that started the thread. A message in
+    /// no thread errors (`thread_not_found`), and the fallback is a window of
+    /// the channel itself around the ts. Both are covered by the history
+    /// scopes the manifest has always requested — no reinstall.
+    ///
+    /// DM rows get nothing: they represent a *conversation's* unread state,
+    /// not one message, so there is no anchor to fan out from.
+    func context(externalID: String, payload: Data?) async throws -> ItemContext? {
+        guard let ref = Self.reference(externalID: externalID, payload: payload)
+        else { return nil }
+        let focusTS: String
+        switch ref.kind {
+        case .dm: return nil
+        case .mention(let ts), .save(let ts), .watch(let ts): focusTS = ts
+        }
+        let api = try requireAPI()
+
+        var raw: [ContextRaw] = []
+        var isThread = false
+        if let replies = await api.tryCall("conversations.replies", [
+            "channel": ref.channel, "ts": focusTS, "limit": "200",
+        ]) {
+            raw = Self.rawMessages(replies["messages"])
+            // `ts` of a *reply* answers with just that one message, not its
+            // thread (verified against Brandon's workspace 2026-08-23 — a
+            // reply-mention was falling through to the channel window). The
+            // parent is the message's own thread_ts; ask again with that and
+            // the whole thread comes back.
+            if raw.count == 1, let parent = raw.first?.threadTS,
+                parent != focusTS,
+                let thread = await api.tryCall("conversations.replies", [
+                    "channel": ref.channel, "ts": parent, "limit": "200",
+                ])
+            {
+                raw = Self.rawMessages(thread["messages"])
+            }
+            isThread = raw.count > 1
+        }
+        if !isThread {
+            // Not a thread: window the channel. `latest` + inclusive gives
+            // the message and up to 3 before; the after-side fetches a page
+            // and lets `window` pick the 3 *closest* rather than trusting
+            // the API's sort, which differs by parameter combination.
+            let before = try await api.call("conversations.history", [
+                "channel": ref.channel, "latest": focusTS,
+                "inclusive": "true", "limit": "4",
+            ])
+            let after = await api.tryCall("conversations.history", [
+                "channel": ref.channel, "oldest": focusTS,
+                "inclusive": "false", "limit": "100",
+            ])
+            raw = Self.rawMessages(before["messages"])
+                + Self.rawMessages(after?["messages"] ?? .null)
+        }
+
+        guard let window = Self.window(raw, focusTS: focusTS, radius: 3)
+        else { return nil }
+
+        var messages: [ItemContext.Message] = []
+        for (index, message) in window.messages.enumerated() {
+            let isFocus = index == window.focusIndex
+            await resolveReferences(in: message.text)
+            let author: String
+            if let user = message.user {
+                author = await displayName(userID: user)
+            } else {
+                author = "app"
+            }
+            let text = renderText(message.text) ?? message.text
+            messages.append(.init(
+                author: author,
+                // The focus is the row's body replacement — the whole point
+                // of D — so it keeps the same generous cap as the snippet.
+                text: String(text.prefix(isFocus ? Self.snippetLimit : 300)),
+                isFocus: isFocus))
+        }
+
+        var label = isThread ? "Thread" : "Around this message"
+        if let name = channelNames[ref.channel] { label += " · #\(name)" }
+        var context = ItemContext(messages: messages, replacesBody: true)
+        context.messagesLabel = label
+        return context
+    }
+
+    /// Messages out of a `conversations.*` response worth showing: joins,
+    /// leaves and empty texts are noise, not context.
+    nonisolated static func rawMessages(_ json: SlackJSON) -> [ContextRaw] {
+        (json.array ?? []).compactMap { message in
+            guard let ts = message["ts"].nonEmptyString else { return nil }
+            if let subtype = message["subtype"].string,
+                subtype == "channel_join" || subtype == "channel_leave" {
+                return nil
+            }
+            guard let text = message["text"].nonEmptyString else { return nil }
+            return ContextRaw(
+                ts: ts,
+                user: message["user"].nonEmptyString
+                    ?? message["bot_id"].nonEmptyString,
+                text: text,
+                threadTS: message["thread_ts"].nonEmptyString)
+        }
+    }
+
+    /// Sorts ascending, dedups (the thread and history paths can both hold
+    /// the focus), and slices `radius` messages either side of the focus.
+    /// Nil when the focus isn't in what was fetched — showing a window that
+    /// provably doesn't contain the mention would be worse than nothing.
+    nonisolated static func window(
+        _ messages: [ContextRaw], focusTS: String, radius: Int
+    ) -> (messages: [ContextRaw], focusIndex: Int)? {
+        var seen = Set<String>()
+        let sorted = messages
+            .filter { seen.insert($0.ts).inserted }
+            .sorted { SlackTS.isNewer($1.ts, than: $0.ts) }
+        guard let focus = sorted.firstIndex(where: { $0.ts == focusTS })
+        else { return nil }
+        let low = max(0, focus - radius)
+        let high = min(sorted.count - 1, focus + radius)
+        return (Array(sorted[low...high]), focus - low)
     }
 
     private func requireAPI() throws -> SlackAPI {

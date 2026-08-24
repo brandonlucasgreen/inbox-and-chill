@@ -746,6 +746,259 @@ struct ClaudeSessionTargetTests {
 // MARK: - Keychain write failures (Sources/App/Support/Keychain.swift)
 
 
+// MARK: - Item context (Sources/App/Sync/ItemContext.swift + connectors)
+
+@Suite("Item context model")
+struct ItemContextTests {
+    @Test("Round-trips through JSON, the payload storage format")
+    func codableRoundTrip() throws {
+        var context = ItemContext(chips: [
+            .init(systemImage: "bolt.fill", text: "127 events", tint: .orange),
+            .init(dotHex: "#d73a4a", text: "Bug"),
+        ])
+        context.messages = [
+            .init(author: "Maya", text: "before"),
+            .init(author: "Jonah", text: "the mention", isFocus: true),
+        ]
+        context.messagesLabel = "Thread · #deploys"
+        context.replacesBody = true
+        let data = try JSONEncoder().encode(context)
+        let decoded = try JSONDecoder().decode(ItemContext.self, from: data)
+        #expect(decoded == context)
+    }
+
+    @Test("Empty means every section is empty — a note alone still shows")
+    func emptiness() {
+        #expect(ItemContext().isEmpty)
+        var withNote = ItemContext()
+        withNote.note = "Couldn't fetch the latest event"
+        #expect(!withNote.isEmpty)
+        var withChip = ItemContext()
+        withChip.chips = [.init(text: "Urgent")]
+        #expect(!withChip.isEmpty)
+    }
+}
+
+@Suite("Slack context windowing")
+struct SlackContextWindowTests {
+    private func message(_ ts: String) -> SlackConnector.ContextRaw {
+        .init(ts: ts, user: "U1", text: "m\(ts)")
+    }
+
+    @Test("Picks the radius either side of the focus, sorted ascending")
+    func midWindow() throws {
+        // Deliberately shuffled: the two history calls interleave pages.
+        let raw = ["7.0", "1.0", "4.0", "6.0", "2.0", "3.0", "5.0", "8.0"]
+            .map(message)
+        let window = try #require(
+            SlackConnector.window(raw, focusTS: "4.0", radius: 3))
+        #expect(window.messages.map(\.ts) == ["1.0", "2.0", "3.0", "4.0", "5.0", "6.0", "7.0"])
+        #expect(window.focusIndex == 3)
+    }
+
+    @Test("Focus at the start keeps the index honest")
+    func focusAtStart() throws {
+        let raw = ["1.0", "2.0", "3.0"].map(message)
+        let window = try #require(
+            SlackConnector.window(raw, focusTS: "1.0", radius: 3))
+        #expect(window.messages.map(\.ts) == ["1.0", "2.0", "3.0"])
+        #expect(window.focusIndex == 0)
+    }
+
+    @Test("Dedups the focus arriving from both the thread and history calls")
+    func dedups() throws {
+        let raw = ["1.0", "2.0", "2.0", "3.0"].map(message)
+        let window = try #require(
+            SlackConnector.window(raw, focusTS: "2.0", radius: 3))
+        #expect(window.messages.map(\.ts) == ["1.0", "2.0", "3.0"])
+    }
+
+    @Test("A window that provably lacks the mention is refused, not shown")
+    func missingFocus() {
+        let raw = ["1.0", "2.0"].map(message)
+        #expect(SlackConnector.window(raw, focusTS: "9.0", radius: 3) == nil)
+    }
+
+    @Test("Raw messages keep thread_ts — what routes a reply to its thread")
+    func threadTSSurvivesParsing() throws {
+        let json = try JSONDecoder().decode(
+            SlackJSON.self,
+            from: Data(#"""
+                [{"ts":"5.0","user":"U1","text":"hi","thread_ts":"1.0"},
+                 {"ts":"6.0","user":"U2","text":"top-level"}]
+                """#.utf8))
+        let raw = SlackConnector.rawMessages(json)
+        #expect(raw.count == 2)
+        #expect(raw[0].threadTS == "1.0")
+        #expect(raw[1].threadTS == nil)
+    }
+}
+
+@Suite("Linear context building")
+struct LinearContextTests {
+    @Test("An urgent issue yields priority, due date and label chips")
+    func issueChips() throws {
+        var node = LinearNotificationNode()
+        node.issue = .init(
+            identifier: "BUF-1", title: "T", url: "https://linear.app/x",
+            priority: 1, priorityLabel: "Urgent", dueDate: "2026-08-28",
+            labels: .init(nodes: [.init(name: "Bug", color: "#eb5757")]),
+            project: .init(
+                name: "Queue polish", url: nil,
+                description: "Selection and motion fixes.",
+                targetDate: "2026-09-05"))
+        let context = try #require(LinearConnector.context(for: node))
+        #expect(context.chips.count == 3)
+        #expect(context.chips[0].text == "Urgent")
+        #expect(context.chips[0].tint == .orange)
+        #expect(context.chips[1].text.hasPrefix("Due "))
+        #expect(context.chips[2].dotHex == "#eb5757")
+        #expect(context.blurb == "Selection and motion fixes.")
+        #expect(context.blurbLabel?.contains("Queue polish") == true)
+        #expect(context.blurbLabel?.contains("ships") == true)
+    }
+
+    @Test("No priority means no priority chip, and no context means nil")
+    func quietCases() {
+        var bare = LinearNotificationNode()
+        bare.issue = .init(identifier: "BUF-2", title: "T", url: "u")
+        #expect(LinearConnector.context(for: bare) == nil)
+        #expect(LinearConnector.context(for: LinearNotificationNode()) == nil)
+    }
+
+    @Test("A project notification carries the blurb without issue chips")
+    func projectBlurb() throws {
+        var node = LinearNotificationNode()
+        node.project = .init(
+            name: "0.4", url: nil, description: "The panel release.",
+            targetDate: nil)
+        let context = try #require(LinearConnector.context(for: node))
+        #expect(context.chips.isEmpty)
+        #expect(context.blurb == "The panel release.")
+    }
+
+    @Test("A project update's own body and health beat the description")
+    func projectUpdate() throws {
+        // The live gap found 2026-08-23: most project notifications are
+        // about an update, and a project with no description showed nothing.
+        var node = LinearNotificationNode()
+        node.project = .init(
+            name: "0.4", url: nil, description: nil, targetDate: nil)
+        node.projectUpdate = .init(
+            url: nil, body: "Shipped the fan-out; scroll anchor next.",
+            health: "atRisk")
+        let context = try #require(LinearConnector.context(for: node))
+        #expect(context.chips.map(\.text) == ["At risk"])
+        #expect(context.chips.first?.tint == .orange)
+        #expect(context.blurb == "Shipped the fan-out; scroll anchor next.")
+        #expect(context.blurbLabel?.contains("Project update") == true)
+    }
+
+    @Test("Health chips map Linear's three states; anything else is dropped")
+    func healthStates() {
+        #expect(LinearConnector.healthChip("onTrack")?.tint == .green)
+        #expect(LinearConnector.healthChip("offTrack")?.tint == .red)
+        #expect(LinearConnector.healthChip(nil) == nil)
+        #expect(LinearConnector.healthChip("unknownState") == nil)
+    }
+
+    @Test("Date-only strings format without shifting across midnight")
+    func dayFormatting() {
+        // Whatever the local zone, a date-only string must keep its day.
+        #expect(LinearConnector.formatDay("2026-08-28")?.contains("28") == true)
+        #expect(LinearConnector.formatDay("") == nil)
+        #expect(LinearConnector.formatDay("not a date") == nil)
+    }
+}
+
+@Suite("Sentry context building")
+struct SentryContextTests {
+    @Test("Stat chips come straight off the issues list response")
+    func chips() throws {
+        let issue = SentryConnector.Issue(
+            id: "1", title: "Boom", count: "127", userCount: 9,
+            isUnhandled: true)
+        let data = try #require(SentryConnector.contextData(for: issue))
+        let context = try JSONDecoder().decode(ItemContext.self, from: data)
+        #expect(context.chips.map(\.text).contains("127 events"))
+        #expect(context.chips.map(\.text).contains("9 users"))
+        #expect(context.chips.map(\.text).contains("unhandled"))
+    }
+
+    @Test("A single-event issue with no stats stores no payload at all")
+    func nothingWorthStoring() {
+        let issue = SentryConnector.Issue(id: "1", title: "Boom", count: "1")
+        #expect(SentryConnector.contextData(for: issue) == nil)
+    }
+
+    @Test("Ages render as days, hours, then 'just in'")
+    func ages() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        #expect(
+            SentryConnector.age(
+                from: now.addingTimeInterval(-3 * 86_400), now: now) == "3d old")
+        #expect(
+            SentryConnector.age(
+                from: now.addingTimeInterval(-5 * 3_600), now: now) == "5h old")
+        #expect(
+            SentryConnector.age(
+                from: now.addingTimeInterval(-60), now: now) == "just in")
+        #expect(SentryConnector.age(from: nil, now: now) == nil)
+    }
+
+    @Test("Frames put the crash site first and prefer in-app frames")
+    func frames() throws {
+        let json = """
+            {"entries":[{"type":"exception","data":{"values":[{"stacktrace":
+            {"frames":[
+              {"function":"main","filename":"main.swift","lineNo":1,"inApp":false},
+              {"function":"outer","filename":"A.swift","lineNo":10,"inApp":true},
+              {"function":"inner","filename":"B.swift","lineNo":20,"inApp":true}
+            ]}}]}}]}
+            """
+        let event = try JSONDecoder().decode(
+            SentryConnector.LatestEvent.self, from: Data(json.utf8))
+        let frames = SentryConnector.topFrames(from: event)
+        #expect(frames.count == 2)
+        #expect(frames[0].contains("inner"))
+        #expect(frames[0].contains("B.swift:20"))
+        #expect(!frames.joined().contains("main.swift"))
+    }
+}
+
+@Suite("GitHub context building")
+struct GitHubContextTests {
+    @Test("Merged beats state; labels keep their colors; reviewers counted")
+    func chips() {
+        let detail = GitHubConnector.SubjectDetail(
+            state: "closed", merged: true, draft: false,
+            labels: [.init(name: "security", color: "d73a4a")],
+            requested_reviewers: [.init(login: "a"), .init(login: "b")])
+        let chips = GitHubConnector.contextChips(for: detail)
+        #expect(chips.first?.text == "Merged")
+        #expect(chips.contains { $0.text == "security" && $0.dotHex == "d73a4a" })
+        #expect(chips.contains { $0.text == "2 reviewers" })
+    }
+
+    @Test("An open subject gets the green state chip")
+    func openState() {
+        let detail = GitHubConnector.SubjectDetail(state: "open")
+        let chips = GitHubConnector.contextChips(for: detail)
+        #expect(chips.first?.text == "Open")
+        #expect(chips.first?.tint == .green)
+    }
+
+    @Test("404 is explained as the repo scope, not as absence")
+    func scopeAdvice() {
+        let problem = GitHubConnector.contextProblem(status: 404)
+        #expect(problem.contains("repo"))
+        #expect(problem.contains("scope"))
+        // The notification proves the thread exists; never claim it's gone.
+        #expect(!problem.lowercased().contains("deleted"))
+    }
+}
+
+
 // MARK: - Sentry
 
 @Suite("Sentry timestamp parsing")

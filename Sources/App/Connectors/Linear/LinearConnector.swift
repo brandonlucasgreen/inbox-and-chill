@@ -7,7 +7,9 @@ import Foundation
 actor LinearConnector: Connector {
     nonisolated let sourceID: String
     nonisolated let sourceKind = "linear"
-    nonisolated let capabilities: ConnectorCapabilities = [.markDone, .remoteSnooze, .remoteTruth]
+    nonisolated let capabilities: ConnectorCapabilities = [
+        .markDone, .remoteSnooze, .remoteTruth, .providesContext,
+    ]
     nonisolated let pollInterval: TimeInterval = 30
 
     private static let endpoint = URL(string: "https://api.linear.app/graphql")!
@@ -136,7 +138,12 @@ actor LinearConnector: Connector {
                     documentId
                   }
                   ... on IssueNotification {
-                    issue { identifier title url }
+                    issue {
+                      identifier title url
+                      priority priorityLabel dueDate
+                      labels { nodes { name color } }
+                      project { name url description targetDate }
+                    }
                     comment { body }
                   }
                   ... on InitiativeNotification {
@@ -146,8 +153,8 @@ actor LinearConnector: Connector {
                     comment { body }
                   }
                   ... on ProjectNotification {
-                    project { name url }
-                    projectUpdate { url }
+                    project { name url description targetDate }
+                    projectUpdate { url body health }
                     document { title url }
                     comment { body }
                   }
@@ -262,7 +269,100 @@ actor LinearConnector: Connector {
             actorName: node.actor?.displayName,
             occurredAt: occurredAt,
             highSignal: isHighSignal(node.type),
-            payload: nil)
+            // Context is built eagerly — the fields ride the same query —
+            // and stored here, so `context()` needs no network at all.
+            // `Store.update` refreshes payload every poll, keeping it fresh.
+            payload: contextData(for: node))
+    }
+
+    // MARK: Context (D expansion)
+
+    /// Decodes the context this connector wrote into the payload at poll
+    /// time. Never touches the network — an item from an older build simply
+    /// has no context until the next poll rewrites its payload.
+    func context(externalID: String, payload: Data?) async throws -> ItemContext? {
+        guard let payload else { return nil }
+        return try? JSONDecoder().decode(ItemContext.self, from: payload)
+    }
+
+    nonisolated static func contextData(for node: LinearNotificationNode) -> Data? {
+        guard let context = context(for: node), !context.isEmpty else { return nil }
+        return try? JSONEncoder().encode(context)
+    }
+
+    /// Chips (priority, due date, labels) and a project blurb, from whatever
+    /// the notification's entity carries. Pure so it's unit-testable.
+    nonisolated static func context(for node: LinearNotificationNode) -> ItemContext? {
+        var chips: [ItemContext.Chip] = []
+        var project: LinearNotificationNode.ProjectEntity?
+
+        if let issue = node.issue {
+            if let priority = issue.priority, priority > 0,
+                let label = issue.priorityLabel, !label.isEmpty {
+                chips.append(.init(
+                    systemImage: priority == 1 ? "exclamationmark.2" : "flag",
+                    text: label,
+                    tint: priority == 1 ? .orange : .neutral))
+            }
+            if let due = formatDay(issue.dueDate) {
+                chips.append(.init(systemImage: "calendar", text: "Due \(due)"))
+            }
+            for label in issue.labels?.nodes ?? [] where !label.name.isEmpty {
+                chips.append(.init(dotHex: label.color, text: label.name))
+            }
+            project = issue.project
+        }
+        if let own = node.project { project = own }
+
+        var context = ItemContext(chips: chips)
+        // A project-update notification's real content is the update itself
+        // — health and body — not the project's (often empty) description.
+        // The description stays as the fallback blurb for everything else.
+        if let health = healthChip(node.projectUpdate?.health) {
+            context.chips.append(health)
+        }
+        if let update = node.projectUpdate?.body, !update.isEmpty {
+            context.blurbLabel = "Project update"
+                + (project.map { " · \($0.name)" } ?? "")
+            context.blurb = String(update.prefix(280))
+        } else if let project, let description = project.description,
+            !description.isEmpty {
+            var label = "Project · \(project.name)"
+            if let ships = formatDay(project.targetDate) {
+                label += " · ships \(ships)"
+            }
+            context.blurbLabel = label
+            context.blurb = String(description.prefix(280))
+        }
+        return context.isEmpty ? nil : context
+    }
+
+    /// Linear's three project-health states, in the traffic-light colors
+    /// their own UI uses.
+    nonisolated static func healthChip(_ health: String?) -> ItemContext.Chip? {
+        switch health {
+        case "onTrack":
+            return .init(systemImage: "checkmark.circle", text: "On track", tint: .green)
+        case "atRisk":
+            return .init(systemImage: "exclamationmark.triangle", text: "At risk", tint: .orange)
+        case "offTrack":
+            return .init(systemImage: "xmark.circle", text: "Off track", tint: .red)
+        default:
+            return nil
+        }
+    }
+
+    /// `2026-08-28` → `Fri Aug 28`. Linear's date-only fields carry no time
+    /// zone, so this parses in the user's calendar rather than UTC — a due
+    /// date is a day, and shifting it across midnight would rename the day.
+    nonisolated static func formatDay(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let parser = DateFormatter()
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: raw) else { return nil }
+        let out = DateFormatter()
+        out.dateFormat = "EEE MMM d"
+        return out.string(from: date)
     }
 
     /// The row's headline, snippet and deep link.

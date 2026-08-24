@@ -16,7 +16,7 @@ struct LinearDescribeTests {
         document: LinearNotificationNode.TitledEntity? = nil,
         initiative: LinearNotificationNode.NamedEntity? = nil,
         initiativeUpdate: LinearNotificationNode.UpdateEntity? = nil,
-        project: LinearNotificationNode.NamedEntity? = nil,
+        project: LinearNotificationNode.ProjectEntity? = nil,
         projectUpdate: LinearNotificationNode.UpdateEntity? = nil,
         pullRequest: LinearNotificationNode.TitledEntity? = nil,
         customer: LinearNotificationNode.NamedEntity? = nil,
