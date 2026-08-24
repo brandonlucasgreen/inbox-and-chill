@@ -100,7 +100,8 @@ actor SlackConnector: Connector {
     /// interval and survive the app being closed for a while.
     private static let searchWindow: TimeInterval = 24 * 60 * 60
     /// Bounds the cost of a poll: it is one `search.messages` call per term.
-    private static let maxSearchTerms = 10
+    /// Non-private so `parseSearchTerms` in the SlackSearch extension can see it.
+    static let maxSearchTerms = 10
     /// Matches requested per term. Slack sorts newest-first, so a term noisier
     /// than this loses only the oldest hits in the window.
     private static let searchCount = 20
@@ -492,165 +493,6 @@ actor SlackConnector: Connector {
         if !fresh.isEmpty { emit(.upsert(fresh)) }
     }
 
-    /// Slack errors that re-polling will never fix.
-    private static let permanentSearchFailures: Set<String> = [
-        "missing_scope", "not_allowed_token_type", "invalid_auth",
-        "account_inactive", "token_revoked",
-    ]
-
-    nonisolated static func searchScopeAdvice(code: String) -> String {
-        switch code {
-        case "missing_scope", "not_allowed_token_type":
-            return
-                """
-                Slack Keyword Watch needs the `search:read` scope, which this token doesn't have (\(code)).                 Add it under OAuth & Permissions, reinstall the app to your workspace, then paste the new                 user token here. Clear the Keyword Watch field to turn the feature off instead.
-                """
-        default:
-            return "Slack rejected the keyword search (\(code)). Re-check the user token."
-        }
-    }
-
-    /// Splits the settings string into muted channel names.
-    ///
-    /// Accepts what a person actually types or pastes: `#random`, `random`,
-    /// commas or newlines between them, any casing. A raw channel id
-    /// (`C0123ABCD`) is accepted too — it is what you get from Slack's
-    /// "Copy link", and the search API hands us ids for free even when it
-    /// hands us no name.
-    ///
-    /// Uncapped, unlike watch terms: this costs no API calls, it is a set
-    /// membership test.
-    nonisolated static func parseMutedChannels(_ raw: String) -> Set<String> {
-        var muted = Set<String>()
-        for piece in raw.split(whereSeparator: { $0 == "," || $0.isNewline }) {
-            var name = piece.trimmingCharacters(in: .whitespaces)
-            while name.hasPrefix("#") { name.removeFirst() }
-            name = name.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { continue }
-            muted.insert(name.lowercased())
-        }
-        return muted
-    }
-
-    /// True when a channel is muted, by either name or id.
-    ///
-    /// Pure so the rule is testable without a workspace, and deliberately
-    /// tolerant: a name is matched case-insensitively with any leading `#`
-    /// stripped, because "#Deploys" and "deploys" are the same channel to
-    /// everyone except a string comparison.
-    nonisolated static func isMuted(
-        channelName: String?, channelID: String?, muted: Set<String>
-    ) -> Bool {
-        guard !muted.isEmpty else { return false }
-        for candidate in [channelName, channelID] {
-            guard var value = candidate?.trimmingCharacters(in: .whitespaces), !value.isEmpty
-            else { continue }
-            while value.hasPrefix("#") { value.removeFirst() }
-            if muted.contains(value.lowercased()) { return true }
-        }
-        return false
-    }
-
-    /// Splits the settings string into watch terms.
-    ///
-    /// Commas and newlines both separate, so the field accepts a typed list or
-    /// a pasted one. Case-insensitively deduped (Slack search is
-    /// case-insensitive, so two spellings would just cost an extra call) and
-    /// capped, because every term is one API request per poll.
-    nonisolated static func parseSearchTerms(_ raw: String) -> [String] {
-        var seen = Set<String>()
-        var terms: [String] = []
-        for piece in raw.split(whereSeparator: { $0 == "," || $0.isNewline }) {
-            let term = piece.trimmingCharacters(in: .whitespaces)
-            guard !term.isEmpty, seen.insert(term.lowercased()).inserted else { continue }
-            terms.append(term)
-            if terms.count == maxSearchTerms { break }
-        }
-        return terms
-    }
-
-    /// Builds one `search.messages` query.
-    ///
-    /// A multi-word term is quoted so it stays a phrase rather than an OR of
-    /// its words. `after:` is date-granular in Slack and *exclusive*, so it is
-    /// deliberately widened by a day and the precise cutoff enforced against
-    /// each match's timestamp in `watchHit`.
-    nonisolated static func searchQuery(term: String, after: Date) -> String {
-        let calendar = Calendar(identifier: .gregorian)
-        let widened = after.addingTimeInterval(-TimeInterval(24 * 60 * 60))
-        let parts = calendar.dateComponents([.year, .month, .day], from: widened)
-        let stamp = String(
-            format: "%04d-%02d-%02d", parts.year ?? 1970, parts.month ?? 1, parts.day ?? 1)
-        let needsQuotes = term.contains(" ") && !term.hasPrefix("\"")
-        let phrase = needsQuotes ? "\"\(term)\"" : term
-        return "\(phrase) after:\(stamp)"
-    }
-
-    /// True for Slack ids masquerading as a channel name (`U…`, `D…`, `C…`,
-    /// `G…` followed by uppercase alphanumerics), which is what search returns
-    /// for direct and group messages.
-    nonisolated static func isRawChannelID(_ name: String) -> Bool {
-        guard name.count >= 8, let first = name.first, "UDCG".contains(first) else { return false }
-        return name.dropFirst().allSatisfy { $0.isUppercase || $0.isNumber }
-    }
-
-    /// Maps one `search.messages` match to a queue item.
-    ///
-    /// Returns nil for anything outside the window, authored by you, or
-    /// missing the ids a triage verb needs — pure, so the mapping is testable
-    /// without a workspace.
-    nonisolated static func watchHit(
-        from match: SlackJSON, term: String, selfUserID: String, teamID: String = "",
-        notBefore: Date
-    ) -> (channel: String, ts: String, item: RemoteItem)? {
-        guard let ts = match["ts"].nonEmptyString,
-            let channel = match["channel"]["id"].nonEmptyString,
-            let occurredAt = SlackTS.date(ts), occurredAt >= notBefore
-        else { return nil }
-        // You writing your own keyword is not news.
-        if !selfUserID.isEmpty, match["user"].nonEmptyString == selfUserID { return nil }
-
-        let who =
-            match["username"].nonEmptyString
-            ?? match["user"].nonEmptyString ?? "Someone"
-        // Slack returns a raw id as the "name" for DMs and group DMs, which
-        // would render as "#U4NUMLRJQ". Anything that looks like an id gets
-        // described instead of printed.
-        let rawName = match["channel"]["name"].nonEmptyString
-        let channelLabel = rawName.map { Self.isRawChannelID($0) ? "a direct message" : $0 }
-            ?? "a channel"
-        let permalink = match["permalink"].nonEmptyString
-        return (
-            channel, ts,
-            RemoteItem(
-                externalID: "watch-\(channel)-\(ts)",
-                kind: "keyword_watch",
-                title: "“\(term)” in #\(channelLabel)",
-                snippet: truncate(match["text"].nonEmptyString, snippetLimit),
-                // Native first: Slack.app can't be handed an https URL, so a
-                // permalink would go out to the default browser and bounce.
-                url: permalink.flatMap { nativeLink(fromPermalink: $0, teamID: teamID) }
-                    ?? permalink,
-                actorName: who,
-                occurredAt: occurredAt,
-                highSignal: true,
-                payload: payload(channel: channel, ts: ts, permalink: permalink))
-        )
-    }
-
-    /// What a saved row is called. `channelName` falls back to the raw
-    /// channel id when `conversations.info` has no `name` — which is every
-    /// DM — so the id has to be described rather than printed, exactly as
-    /// `watchHit` already does. Pure, so both cases are testable without a
-    /// workspace.
-    nonisolated static func saveTitle(channelLabel: String?) -> String {
-        guard let label = channelLabel, !label.isEmpty else {
-            return "Saved message"
-        }
-        if isRawChannelID(label) { return "Saved from a direct message" }
-        return "Saved in #\(label)"
-    }
-
     /// Periodically re-checks Slack's read state for channels that currently
     /// hold items, because Socket Mode does not deliver `*_marked` events.
     /// Deliberately non-throwing: a hiccup here must not tear down the socket.
@@ -970,26 +812,6 @@ actor SlackConnector: Connector {
     private static let savePageSize = 100
     private static let savePageBudget = 5
 
-    /// Why the saved-message lookup was refused, and what to do about it.
-    /// Separate from `searchScopeAdvice` because it names a different scope
-    /// and a different consequence — saves you make while the app is running
-    /// still arrive over Socket Mode; it is the backfill that stops.
-    nonisolated static func savedScopeAdvice(code: String) -> String {
-        switch code {
-        case "missing_scope", "not_allowed_token_type":
-            return """
-                Slack saved messages need the `reactions:read` scope, which \
-                this token doesn't have (\(code)). Add it under OAuth & \
-                Permissions, reinstall the app to your workspace, then paste \
-                the new user token here. Saves you make from now on still \
-                arrive; it's the ones made earlier that can't be read back.
-                """
-        default:
-            return
-                "Slack refused the saved-messages lookup (\(code)). Re-check the user token."
-        }
-    }
-
     // MARK: - Events
 
     private func handle(
@@ -1293,35 +1115,6 @@ actor SlackConnector: Connector {
         }
     }
 
-    /// The user and channel ids in a message that Slack did *not* label.
-    ///
-    /// Pure and static so the parsing can be tested directly — it is the
-    /// same `<…>` token grammar `renderText` walks, and getting it wrong
-    /// means either a missed name or a wasted API call per message.
-    nonisolated static func unlabelledReferences(
-        in raw: String
-    ) -> (users: [String], channels: [String]) {
-        var users: [String] = []
-        var channels: [String] = []
-        var rest = Substring(raw)
-        while let open = rest.firstIndex(of: "<"),
-            let close = rest[open...].firstIndex(of: ">")
-        {
-            let token = rest[rest.index(after: open)..<close]
-            rest = rest[rest.index(after: close)...]
-            // A label after "|" is the name already; nothing to look up.
-            guard !token.contains("|"), let kind = token.first else { continue }
-            let id = String(token.dropFirst())
-            guard !id.isEmpty else { continue }
-            switch kind {
-            case "@" where !users.contains(id): users.append(id)
-            case "#" where !channels.contains(id): channels.append(id)
-            default: break
-            }
-        }
-        return (users, channels)
-    }
-
     private func displayName(userID: String) async -> String {
         if let cached = userNames[userID] { return cached }
         guard let api,
@@ -1418,49 +1211,6 @@ actor SlackConnector: Connector {
         return label ?? reference
     }
 
-    /// How much message text a row carries.
-    ///
-    /// How much of a message is stored. Twice revised, and each revision
-    /// tracked what the row could actually show:
-    ///
-    /// - **100** — one panel line, with nothing behind it.
-    /// - **320** — enough to fill the paragraph a selected row opens to,
-    ///   because a cap that stops at the visible line makes the expansion
-    ///   reveal nothing but whitespace.
-    /// - **4,000** — D drops the clamp entirely, so the target is no longer
-    ///   "a paragraph" but "the message". At 320 that keypress revealed a
-    ///   line and a half and then an ellipsis it could not get past, which
-    ///   read as a broken feature rather than as a cap.
-    ///
-    /// So this is now a *storage* bound rather than a display one, and it is
-    /// the only one left: the panel bounds its own layout work with
-    /// `ExpandingText.clampedPrefix`, so a long body costs a row nothing
-    /// until it is the selected row. 4,000 covers any message Slack's
-    /// composer sends inline — a longer paste becomes a file snippet, which
-    /// carries no inline text for us to store anyway. (That composer limit
-    /// is from Slack's documentation; it has not been probed here.)
-    static let snippetLimit = 4_000
-
-    private static func truncate(_ text: String?, _ limit: Int) -> String? {
-        guard let text, !text.isEmpty else { return nil }
-        let flattened = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-        guard flattened.count > limit else { return flattened }
-        return String(flattened.prefix(limit - 1)) + "…"
-    }
-
-    /// Strips colons and any skin-tone suffix: `:+1::skin-tone-3:` → `+1`.
-    private static func normalizeEmoji(_ raw: String) -> String {
-        var name = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        while name.hasPrefix(":") { name.removeFirst() }
-        while name.hasSuffix(":") { name.removeLast() }
-        if let separator = name.range(of: "::") {
-            name = String(name[name.startIndex..<separator.lowerBound])
-        }
-        return name
-    }
-
     // MARK: - Item references
 
     private enum RefKind {
@@ -1537,7 +1287,8 @@ actor SlackConnector: Connector {
         return permalink
     }
 
-    private static func payload(
+    /// Non-private so `watchHit` in the SlackSearch extension can call it.
+    static func payload(
         channel: String, ts: String, permalink: String? = nil
     ) -> Data? {
         try? JSONEncoder().encode(
@@ -1575,18 +1326,6 @@ actor SlackConnector: Connector {
     }
 
     // MARK: - Context (D expansion)
-
-    /// A message as it comes off `conversations.replies`/`history`, before
-    /// names and markup are resolved. Value type so the windowing that picks
-    /// "3 before, the mention, 3 after" is testable without a network.
-    struct ContextRaw: Sendable, Equatable {
-        var ts: String
-        var user: String?
-        var text: String
-        /// The parent's ts when this message lives in a thread. What routes
-        /// a reply-mention to its thread rather than the channel around it.
-        var threadTS: String?
-    }
 
     /// The conversation around a mention, keyword hit or emoji save — the
     /// feature request verbatim: "the 3-5 messages preceding it and after it
@@ -1676,43 +1415,6 @@ actor SlackConnector: Connector {
         var context = ItemContext(messages: messages, replacesBody: true)
         context.messagesLabel = label
         return context
-    }
-
-    /// Messages out of a `conversations.*` response worth showing: joins,
-    /// leaves and empty texts are noise, not context.
-    nonisolated static func rawMessages(_ json: SlackJSON) -> [ContextRaw] {
-        (json.array ?? []).compactMap { message in
-            guard let ts = message["ts"].nonEmptyString else { return nil }
-            if let subtype = message["subtype"].string,
-                subtype == "channel_join" || subtype == "channel_leave" {
-                return nil
-            }
-            guard let text = message["text"].nonEmptyString else { return nil }
-            return ContextRaw(
-                ts: ts,
-                user: message["user"].nonEmptyString
-                    ?? message["bot_id"].nonEmptyString,
-                text: text,
-                threadTS: message["thread_ts"].nonEmptyString)
-        }
-    }
-
-    /// Sorts ascending, dedups (the thread and history paths can both hold
-    /// the focus), and slices `radius` messages either side of the focus.
-    /// Nil when the focus isn't in what was fetched — showing a window that
-    /// provably doesn't contain the mention would be worse than nothing.
-    nonisolated static func window(
-        _ messages: [ContextRaw], focusTS: String, radius: Int
-    ) -> (messages: [ContextRaw], focusIndex: Int)? {
-        var seen = Set<String>()
-        let sorted = messages
-            .filter { seen.insert($0.ts).inserted }
-            .sorted { SlackTS.isNewer($1.ts, than: $0.ts) }
-        guard let focus = sorted.firstIndex(where: { $0.ts == focusTS })
-        else { return nil }
-        let low = max(0, focus - radius)
-        let high = min(sorted.count - 1, focus + radius)
-        return (Array(sorted[low...high]), focus - low)
     }
 
     private func requireAPI() throws -> SlackAPI {
