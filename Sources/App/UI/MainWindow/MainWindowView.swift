@@ -676,40 +676,43 @@ struct MainWindowView: View {
 
     // MARK: Sort persistence (§5.3)
 
+    /// The columns the table can be sorted by, and the persisted string for
+    /// each. Adding a column means one new case plus one line in
+    /// `comparator(order:)` — `matching(_:)` walks `allCases`, so the reverse
+    /// mapping updates itself. This replaces two parallel switches over the
+    /// same set of keypaths, which is the shape that silently breaks when
+    /// the two get out of step.
+    private enum SortKey: String, CaseIterable {
+        case age, title, source, kind, actor, pin
+
+        func comparator(order: SortOrder) -> KeyPathComparator<Item> {
+            switch self {
+            case .age: return KeyPathComparator(\Item.occurredAt, order: order)
+            case .title: return KeyPathComparator(\Item.title, order: order)
+            case .source: return KeyPathComparator(\Item.sourceKind, order: order)
+            case .kind: return KeyPathComparator(\Item.kindLabel, order: order)
+            case .actor: return KeyPathComparator(\Item.actorSortKey, order: order)
+            case .pin: return KeyPathComparator(\Item.pinSortKey, order: order)
+            }
+        }
+
+        /// The case whose comparator uses this keypath. Defaults to `.age` for
+        /// anything unrecognised, so an old stored value or a future column
+        /// with no case yet degrades to the same fallback the table opens on.
+        static func matching(_ keyPath: PartialKeyPath<Item>) -> SortKey {
+            Self.allCases.first { $0.comparator(order: .forward).keyPath == keyPath } ?? .age
+        }
+    }
+
     private func persist(sortOrder: [KeyPathComparator<Item>]) {
         guard let first = sortOrder.first else { return }
         sortAscending = first.order == .forward
-        let keyPath = first.keyPath
-        if keyPath == \Item.title {
-            sortKeyStorage = "title"
-        } else if keyPath == \Item.sourceKind {
-            sortKeyStorage = "source"
-        } else if keyPath == \Item.kindLabel {
-            sortKeyStorage = "kind"
-        } else if keyPath == \Item.actorSortKey {
-            sortKeyStorage = "actor"
-        } else if keyPath == \Item.pinSortKey {
-            sortKeyStorage = "pin"
-        } else {
-            sortKeyStorage = "age"
-        }
+        sortKeyStorage = SortKey.matching(first.keyPath).rawValue
     }
 
     private func restoreSortOrder() {
         let order: SortOrder = sortAscending ? .forward : .reverse
-        switch sortKeyStorage {
-        case "title":
-            sortOrder = [KeyPathComparator(\Item.title, order: order)]
-        case "source":
-            sortOrder = [KeyPathComparator(\Item.sourceKind, order: order)]
-        case "kind":
-            sortOrder = [KeyPathComparator(\Item.kindLabel, order: order)]
-        case "actor":
-            sortOrder = [KeyPathComparator(\Item.actorSortKey, order: order)]
-        case "pin":
-            sortOrder = [KeyPathComparator(\Item.pinSortKey, order: order)]
-        default:
-            sortOrder = [KeyPathComparator(\Item.occurredAt, order: order)]
-        }
+        let key = SortKey(rawValue: sortKeyStorage) ?? .age
+        sortOrder = [key.comparator(order: order)]
     }
 }
