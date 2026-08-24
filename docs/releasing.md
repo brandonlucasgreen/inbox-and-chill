@@ -107,10 +107,19 @@ It asks for confirmation before anything outward-facing, then, in order:
    `dist/dmg/InboxAndChill-<version>.dmg`
 2. An annotated git tag, pushed
 3. `gh release create` with both artifacts attached
-4. `scripts/appcast.sh` — regenerates `appcast.xml` and commits it
+4. `scripts/appcast.sh` — regenerates `appcast.xml`
+5. `scripts/homebrew-cask.sh` — points the Homebrew cask at the new release,
+   verifies its checksum against the published asset, and pushes it to the tap
+6. One commit on `main` carrying the new `appcast.xml` and cask
 
 Two artifacts because they have different jobs: Sparkle downloads the **zip**
-to update an existing install; a person downloads the **dmg** the first time.
+to update an existing install; a person downloads the **dmg** the first time —
+and so does `brew`.
+
+Step 5 is the only one that is **not fatal**. By the time it runs, the tag, the
+release and the feed are already public, so an unreachable tap must not read as
+a failed release; it prints the one command to catch up. See
+[docs/homebrew.md](homebrew.md).
 
 It always rebuilds and re-notarizes rather than attaching whatever is sitting
 in `dist/`. That is the point — a tag whose artifact was built from different
@@ -158,6 +167,17 @@ declares `SUPublicEDKey`. An entry without a signature is one Sparkle refuses
 — nobody updates, and nothing says why. `appcast.sh` fails outright when the
 newest entry is unsigned, so this is belt-and-braces.
 
+### The cask points at bytes that exist
+
+```bash
+brew update && brew info --cask brandonlucasgreen/tap/inbox-and-chill
+```
+
+Expect the new version. `scripts/homebrew-cask.sh` already downloaded the
+published asset and compared its checksum before pushing — a mismatch there
+aborts rather than shipping a cask that fails for every user at once — so this
+is confirming the tap got the push, not the checksum.
+
 ### Gatekeeper accepts it the way a stranger receives it
 
 `spctl` skips unquarantined apps entirely, so testing the copy you just built
@@ -192,6 +212,9 @@ xcrun stapler validate "/tmp/gk/Inbox & Chill.app"
 | Nested Sparkle helpers ad-hoc signed | Xcode's embed step re-signs only the framework bundle. | The "Re-sign Sparkle's nested helpers" phase in `project.yml` handles it; `notarize.sh`'s preflight checks each nested item. `codesign --verify --deep` does **not** catch this and never did. |
 | App says "Couldn't read the update feed" | `appcast.xml` is missing or 404s. | Expected until the first Sparkle release ships. After that, check the feed URL. |
 | App says "This build has no update feed" | The build has no `SUFeedURL` — i.e. it predates the Sparkle wiring, or was built from a clone that stripped it. | Nothing to fix in the feed; that install needs replacing by hand. |
+| `the tap repo … does not exist` | The tap has not been created, or `gh` cannot see it. | `gh repo create brandonlucasgreen/homebrew-tap --public --add-readme`, then re-run `scripts/homebrew-cask.sh`. The release itself is fine. |
+| `checksum mismatch` from `homebrew-cask.sh` | The DMG in `dist/` is not the one GitHub is serving. | Do not publish the cask. The release asset and the local build disagree, so re-cut the release. |
+| `brew install` reports a checksum mismatch | A cask was published without the verification step — the sha256 does not match the asset. | Re-run `scripts/homebrew-cask.sh`, which checksums the published asset rather than trusting `dist/`. |
 
 `scripts/notarize.sh --preflight-only` checks a build is submittable without
 any credentials at all. It is the cheapest way to find out whether a release
