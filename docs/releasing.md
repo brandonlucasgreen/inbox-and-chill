@@ -185,6 +185,7 @@ xcrun stapler validate "/tmp/gk/Inbox & Chill.app"
 | Symptom | Cause | Fix |
 |---|---|---|
 | `No Keychain password item found for profile` | The Local Items keychain is locked — usually the Mac slept. Not deletion. | Touch the machine, re-run. `notarytool history` confirms the item exists. |
+| `HTTP 400: Invalid previous_tag` from `gh release create` | The previous tag exists locally but was never pushed. GitHub resolves `--notes-start-tag` on the remote; `git describe` answers from your clone. | Fixed 2026-08-23 — `release.sh` now checks `git ls-remote` first and publishes un-anchored notes instead of failing. If you see it on an older copy: the tag is already pushed, so re-run `gh release create` without `--notes-start-tag`, then `scripts/appcast.sh`. |
 | `release.sh` refuses: `CURRENT_PROJECT_VERSION is N, but vX already shipped N` | The build number did not increase. | Bump it. This is the guard working. |
 | Preflight fails on a broken seal | An incremental Release build ran `ExtractAppIntentsMetadata` after codesign. | `notarize.sh` already does `clean build`; if you built by hand, don't. |
 | Notarization rejects the build | `get-task-allow` injected, or no secure timestamp. | Both are set in `project.yml` under `settings.configs.Release`. `scripts/notarize.sh --preflight-only` catches them with no credentials needed. |
