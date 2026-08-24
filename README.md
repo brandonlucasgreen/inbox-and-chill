@@ -68,6 +68,18 @@ The menu bar icon can show a total count, a high-signal-only count (the default)
 
 - macOS 15 (Sequoia) or later
 
+## Install
+
+```sh
+brew install --cask brandonlucasgreen/tap/inbox-and-chill
+```
+
+One command — it adds the tap and installs the app, and puts the `inchill` CLI on your `PATH`. `brew upgrade` keeps it current, and so does the app's own updater; they check the same feed and whichever gets there first wins. Already installed by hand? Add `--adopt` so brew takes over that copy instead of refusing to overwrite it.
+
+Or download the `.dmg` from [the latest release](https://github.com/brandonlucasgreen/inbox-and-chill/releases/latest) and drag it to Applications. Both artifacts are notarized and stapled, so they open on a Mac that has never seen the app.
+
+More on the tap, and what `brew uninstall` cannot clean up, in [docs/homebrew.md](docs/homebrew.md).
+
 ## Building
 
 Inbox & Chill uses [XcodeGen](https://github.com/yonaskolb/XcodeGen) to generate its Xcode project from `project.yml`, so the `.xcodeproj` itself isn't committed.
@@ -133,7 +145,7 @@ releases happen on a person's Mac, via `scripts/release.sh`.
 
 This is a personal tool, built for one person's daily use, and pre-release. Expect rough edges, and expect the shape of things (especially per-source setup) to shift.
 
-The code is MIT licensed and the repository is public as of 2026-08-21. In-app updates are wired up but not live yet: the only published release predates the Sparkle integration, so it carries no updater, and the next release is a manual download for anyone already running 0.3.2. After that, updates arrive in the app. See [docs/releasing.md](docs/releasing.md).
+The code is MIT licensed and the repository is public as of 2026-08-21. In-app updates are live: 0.3.3 was the first release to carry Sparkle, so anything from 0.3.3 onwards updates itself. Installs older than that need one manual download to catch up. See [docs/releasing.md](docs/releasing.md) for how a release is cut, and [docs/homebrew.md](docs/homebrew.md) for the brew route.
 
 ## License
 

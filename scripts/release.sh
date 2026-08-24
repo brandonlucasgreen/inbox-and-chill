@@ -107,6 +107,7 @@ cat <<EOF
                 $DMG  (what a person downloads)
                 both rebuilt and notarized now, never reused
     feed        appcast.xml, regenerated and committed after publishing
+    cask        packaging/homebrew/inbox-and-chill.rb, pushed to the tap
 EOF
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -117,7 +118,7 @@ fi
 if [ "$ASSUME_YES" -eq 0 ]; then
   # The tag push and the release are the outward-facing steps, so the
   # confirmation sits before both rather than before the build.
-  printf "==> Notarize, tag, publish and update the feed for %s? [y/N] " "$TAG"
+  printf "==> Notarize, tag, publish, and update the feed and cask for %s? [y/N] " "$TAG"
   read -r reply
   case "$reply" in [yY]*) ;; *) echo "    aborted."; exit 1 ;; esac
 fi
@@ -179,13 +180,33 @@ fi
 echo "==> Regenerating appcast.xml"
 scripts/appcast.sh
 
-if [ -n "$(git status --porcelain appcast.xml)" ]; then
-  git add appcast.xml
-  git commit -q -m "Publish appcast for $VERSION"
+# --- Publish the Homebrew cask -------------------------------------------
+# Also strictly after the release, and for the same reason as the feed: the
+# cask names the release asset and carries its checksum.
+#
+# Deliberately not fatal. The tag, the release and the feed are already out by
+# now, so a tap that is unreachable or not yet created must not read as a
+# failed release — it is one command to catch up, and this says which.
+echo "==> Publishing the Homebrew cask"
+CASK_FILE="packaging/homebrew/inbox-and-chill.rb"
+if ! scripts/homebrew-cask.sh; then
+  cat <<EOF
+
+    WARNING: $VERSION shipped, but the Homebrew cask was NOT published.
+    Anyone on brew stays on the previous version until it is. Fix whatever
+    the error above names, then run:
+      scripts/homebrew-cask.sh
+
+EOF
+fi
+
+if [ -n "$(git status --porcelain appcast.xml "$CASK_FILE")" ]; then
+  git add appcast.xml "$CASK_FILE"
+  git commit -q -m "Publish appcast and Homebrew cask for $VERSION"
   git push -q origin main
-  echo "    appcast.xml committed and pushed"
+  echo "    appcast.xml and $CASK_FILE committed and pushed"
 else
-  echo "    appcast.xml unchanged (nothing to commit)"
+  echo "    appcast.xml and $CASK_FILE unchanged (nothing to commit)"
 fi
 
 cat <<EOF

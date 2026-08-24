@@ -813,6 +813,31 @@ only the public key baked into the build they are already running. Back it up.
 seal; preflight then refuses to submit, a long way from the cause. Observed
 2026-08-21.
 
+## Homebrew — one cask, two updaters, one checksum that must be right
+
+`brew install --cask brandonlucasgreen/tap/inbox-and-chill`. Full story in
+`docs/homebrew.md`; the parts that bite:
+
+- **Edit `packaging/homebrew/inbox-and-chill.rb`, never the tap's copy** — the
+  tap is overwritten on every release by `scripts/homebrew-cask.sh`, which
+  `release.sh` calls after the GitHub release exists.
+- **`auto_updates true` does not mean brew leaves the app alone.** Current brew
+  (`Cask#auto_updates_bundle_outdated?`, checked against 6.0.18) compares the
+  **installed bundle's Info.plist**, not its own install record, and upgrades by
+  default with no `--greedy`. Sparkle and brew therefore cannot fight — whoever
+  is first wins, the other no-ops. The older "brew skips auto_updates casks"
+  advice is stale and was wrong here once already.
+- **Never hand-write the sha256.** A cask whose checksum disagrees with the
+  published asset fails for *every* user at once, and brew reports it as a
+  checksum mismatch — reads like a corrupt download, not a stale cask. The
+  script downloads the release asset and compares before pushing, and refuses
+  otherwise. Rule 5, applied to a file that lives in another repo.
+- **The cask step is deliberately non-fatal in `release.sh`.** The tag, release
+  and feed are already public by then; a missing tap prints a catch-up command
+  rather than failing a release that shipped.
+- `homebrew/cask` proper is out of reach and not the goal: self-submitted repos
+  need 90 forks / 90 watchers / 225 stars (`GITHUB_NOTABILITY_THRESHOLDS`, ×3).
+
 ## Working in a git worktree
 
 Bash `cd` lands in the primary checkout and stays there, so edits intended for a
