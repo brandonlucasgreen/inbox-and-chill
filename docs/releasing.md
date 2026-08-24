@@ -10,37 +10,25 @@ means which cause.
 
 ---
 
-## Where things stand (2026-08-21)
+## Where things stand (2026-08-23)
 
-**No release has shipped since Sparkle was wired in.** That makes the next one
-a special case, so read this before the steps below.
+**0.3.3 was the first release that actually carried Sparkle**, and it shipped
+verified: the feed returns 200, its appcast entry is signed, a quarantined copy
+of the artifact is `accepted — Notarized Developer ID`, and `stapler validate`
+passes. The one-time manual-install hop described here for 0.3.2 is behind us.
 
-Verified today, on the public repo:
+So the next release is the first that can be delivered *in-app*, which makes it
+the first real end-to-end test of the update path — the gap called out at the
+bottom of this document. Cut it, then check for it from a 0.3.3 install rather
+than assuming it worked.
 
-| Thing | State |
-|---|---|
-| Repo visibility | public — anonymous fetch returns 200 |
-| `v0.3.2` release asset | downloads anonymously, HTTP 200, 2.8 MB |
-| `appcast.xml` at the feed URL | **404 — the file does not exist in the repo** |
-| Sparkle inside the shipped 0.3.2 build | **absent entirely** |
+`v0.3.3` shipped `CURRENT_PROJECT_VERSION` **6**. The next release must be
+**7 or higher** or `release.sh` refuses to tag.
 
-That last row is the one that matters. `v0.3.2` is tagged at `21c231b`
-(2026-08-20 19:59 EDT). Sparkle was wired in the next morning at `5a9ce81`
-(09:02) and the signing key baked in at `806b42d` (09:47). The tagged tree has
-no Sparkle package, no `UpdateController`, no `SUFeedURL` and no
-`SUPublicEDKey`.
-
-So the published build does not fail to find an update — **it never looks.**
-Generating an appcast today would change nothing for anyone running it.
-
-**Consequence: the next release is a one-time manual install.** Whoever is on
-0.3.2 downloads the `.dmg` by hand, once. Every release after that is offered
-in-app. There is no way to skip this hop; an app with no updater cannot be
-told about an updater.
-
-The version numbers, for the next release: `v0.3.2` shipped
-`CURRENT_PROJECT_VERSION` **5**, and `main` is still on **5**. `release.sh`
-will refuse to tag until it increases.
+**Still free.** `Licensing.isEnforced` is `false`, so a shipped build has no
+trial countdown, no expiry, and writes no trial start date. That is deliberate
+while the app is pre-release — flipping it is its own decision, not part of
+cutting a release. Do not flip it here.
 
 ---
 
@@ -73,8 +61,8 @@ like the credentials were deleted when they are sitting right there.
 
 In `project.yml`:
 
-- `MARKETING_VERSION` → the new version, e.g. `0.3.3`
-- `CURRENT_PROJECT_VERSION` → **must increase**, so `6`
+- `MARKETING_VERSION` → the new version, e.g. `0.3.4`
+- `CURRENT_PROJECT_VERSION` → **must increase**, so `7`
 
 ```bash
 xcodegen generate
