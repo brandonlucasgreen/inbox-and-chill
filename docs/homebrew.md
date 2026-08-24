@@ -96,6 +96,14 @@ without App Management permission, and `access(W_OK)` reflects that. Verified
 `drwxr-xr-x`. So the adopt needs a terminal that can prompt; it cannot be run
 unattended or from a tool that has no TTY.
 
+Verified working 2026-08-24, on the machine whose 0.3.4 was installed by
+`install-local.sh`: after the adopt, `brew list --cask --versions` reports
+`inbox-and-chill 0.3.4`, `brew outdated --cask` reports nothing — so the
+`auto_updates` bundle comparison agrees with what is on disk — and the `binary`
+stanza has linked `/opt/homebrew/bin/inchill` to the CLI inside the bundle, so
+`inchill` runs from anywhere. The app itself is untouched: same version, still
+stapled, still running.
+
 ## Tap trust
 
 Homebrew 6 is rolling out a trust requirement for anything from a non-official
