@@ -337,6 +337,14 @@ should auto-archive". That is only safe if the snapshot can enumerate
 or `remote.occurredAt > doneAt`. This is why re-emitting an item the user
 dismissed is safe as long as `occurredAt` is the real event time.
 
+`.completesTask` is a **second write-through verb**, not a variant of
+`.markDone`. A notification has one end state; a task has two — *seen* and
+*done* — so a to-do connector declares `completesTask` and **not** `markDone`,
+which is what makes `E` leave the source untouched while `C` finishes the task.
+Anything declaring it must also implement `uncomplete`, or ⌘Z restores the row
+while leaving the task ticked off. `Store.undoDone` returns the `DoneReason` so
+the engine can tell the two apart.
+
 ## Task groups in connectors — two ways to lose a source
 
 `run()` uses `withThrowingTaskGroup` with `_ = try await group.next()`, so **the
@@ -366,6 +374,54 @@ the connector 5s later. Two failures have come from this:
 | `local` | HTTP listener | push | `inchill` CLI + Claude Code hooks. Push-only: it sees only what a hook POSTs. A Claude Code item opens the **session**, not its folder — see below. |
 | `sentry` | REST poll 60s | markDone (opt-in), remoteTruth | `?query=is:unresolved is:for_review&sort=inbox` — Sentry's For Review tab *is* the queue. Resolving is **off by default**: it's team-visible, so a local done just means "seen" and the item returns via `resurrectIfNeeded` when `lastSeen` moves. Cursor pagination via `Link` → needs `snapshotWasComplete()`. |
 | `appleMail` | AppleScript poll 60s | markDone, remoteTruth | **Covers Gmail** — it reads every account Mail has, which is why there is no Gmail connector (PLAN §6.13). Flagged-only by default. See below. |
+| `reminders` | EventKit poll 60s | **completesTask**, remoteTruth, providesContext | Apple Reminders. Declares `completesTask` and deliberately **not** `markDone` — that omission is the dismiss-vs-complete feature. No entitlement needed; 7.8ms cold, so no Mail-style cold penalty. See below. |
+
+### A to-do is not a notification (`reminders`, and any future Todoist)
+
+Three things here were arrived at by measuring EventKit, and two of them are
+the opposite of what the rest of this file would lead you to expect. Full
+numbers and method in `docs/todo-sources-plan.md`.
+
+- **EventKit needs NO entitlement.** A Developer ID, hardened-runtime,
+  unsandboxed build with *zero* entitlements gets full Reminders access.
+  `NSRemindersFullAccessUsageDescription` is mandatory — its absence is a
+  **crash**, not a denial — and `verify-bundle.sh` guards it. Do **not** debug
+  an empty Reminders source by adding an entitlement: this is not rule 2's
+  Apple-events case, and Release ships exactly one entitlement on purpose.
+  (PLAN §6.6's entitlement note is correct but applies only to a *sandboxed*
+  build, i.e. the declined MAS variant.)
+- **There is no cold penalty.** 7.8ms cold vs 7.6ms warm, against Mail's 12
+  *seconds*. Don't copy Mail's "a slow first poll is normal" caveat here, and
+  don't add a timeout for a problem this source doesn't have.
+- **`occurredAt` is `modifiedAt`, never the due date.** A due date is in the
+  future, and `resurrectIfNeeded` un-dismisses anything whose `occurredAt`
+  passes its `doneAt` — so a reminder due at 5pm dismissed at 2pm would come
+  straight back. Anything derived from `now` returns every midnight instead.
+  The cost is accepted deliberately (Brandon, 2026-08-26): overdue tasks are
+  high-signal but do **not** float to the top by position. Due date, list and
+  repeat status are chips on `D`.
+- **A recurring task's external id carries its due day**, and this is the
+  *inverse* of the `claude-done-<session>-<epoch>` bug below — don't "simplify"
+  the suffix away. `lastModifiedDate` does not move when a completion rolls the
+  occurrence forward, so with a bare id a daily reminder would be completed
+  once and never reappear. An **uncompleted** occurrence does not roll at all:
+  it stays put and goes overdue, so the suffix is stable while you neglect a
+  task and there is no per-day archive row. Non-recurring tasks keep a bare id
+  so rescheduling updates the row in place.
+- **`fetch()` throws rather than returning `[]`** when access isn't granted.
+  With `.remoteTruth` an empty snapshot means "the user handled all of these"
+  and would archive every task row — the Mail `-1743` failure with a bigger
+  blast radius.
+- The `ending:` bound of `predicateForIncompleteReminders` is **inclusive** and
+  all-day reminders sit at 00:00, so the start of tomorrow lets a task due
+  *tomorrow* in. `TodoScope.dueWindowEnd` is one second earlier.
+
+Everything behavioural lives in `Connectors/Todo/{TodoTask,TodoItemMapper,TodoScope}`,
+pure and tested with no EventKit; `RemindersConnector` is EventKit in,
+`[TodoTask]` out. A Todoist connector is one new file. Note EventKit's types
+are **not `Sendable`**: the UI and the connector hold separate `EKEventStore`s
+and `EKReminder` is mapped inside the `fetchReminders` callback. TCC consent is
+per-process, so nothing is lost by not sharing.
 
 ### One queue row per Claude Code session, not per turn
 
@@ -579,7 +635,9 @@ second one.
 
 - **Per-source badge toggles** (`SourcesPane`, honoured in `AppState`) — the
   badge *style* picker in General is a separate control.
-- **Keyboard nav** ↑/↓/⏎/E/S/⌘P and ←/→ source cycling in the panel.
+- **Keyboard nav** ↑/↓/⏎/E/S/⌘P and ←/→ source cycling in the panel. `C`
+  completes a to-do row (panel, main window, row button, archive) and is
+  refused out loud on any other source — see the to-do section below.
 - **Rows that open on selection** (`UI/ExpandingText.swift`) — the selected
   row grows to `RowExpansion.titleLines`/`bodyLines` and every other row
   stays on one line. Both clamps are laid out at once and cross-faded behind
