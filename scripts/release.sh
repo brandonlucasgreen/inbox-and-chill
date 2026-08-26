@@ -1,11 +1,13 @@
 #!/bin/bash
 #
 # Cut a release: notarize the current source, tag it, publish a GitHub release
-# with both artifacts attached, and regenerate the Sparkle update feed.
+# with its artifacts attached, and regenerate the Sparkle update feed.
 #
-# Two artifacts, because they have different jobs: the .zip is what Sparkle
-# downloads to update an existing install, and the .dmg is what a person
-# downloads the first time. Both are notarized and stapled.
+# Three artifacts, because they have different jobs: the .zip is what Sparkle
+# downloads to update an existing install, the .dmg is what a person downloads
+# the first time, and the .dSYM is what turns a crash report someone pastes
+# into an issue months from now into a file and a line. The zip and the dmg
+# are notarized and stapled; the dSYM is not code and needs neither.
 #
 # Why this exists: before it, "releasing" meant running notarize.sh and then
 # hand-sending `dist/InboxAndChill-<version>.zip` to someone. There were no
@@ -109,7 +111,8 @@ cat <<EOF
     tag         $TAG  ->  $COMMIT
     artifacts   $ZIP  (Sparkle downloads this)
                 $DMG  (what a person downloads)
-                both rebuilt and notarized now, never reused
+                $DSYM  (symbols, so a later crash report resolves to lines)
+                the zip and dmg are rebuilt and notarized now, never reused
     feed        appcast.xml, regenerated and committed after publishing
     cask        packaging/homebrew/inbox-and-chill.rb, pushed to the tap
 EOF
@@ -225,8 +228,10 @@ cat <<EOF
 ==> Done
     $(gh release view "$TAG" --json url -q .url)
 
-    Both artifacts are notarized and stapled, so they open on a Mac that has
-    never seen this app — the only test that means anything (CLAUDE.md).
+    The zip and the dmg are notarized and stapled, so they open on a Mac that
+    has never seen this app — the only test that means anything (CLAUDE.md).
+    The dSYM is attached for you, not for anyone downloading: keep it, because
+    it is matched to this exact binary by UUID and rebuilding makes a new one.
 EOF
 
 if [ "$VISIBILITY" != "PUBLIC" ]; then
