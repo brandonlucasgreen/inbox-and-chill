@@ -86,7 +86,7 @@ enum ConnectorCatalog {
             ],
             setupSteps: [
                 "In GitHub, go to Settings → Developer settings → **Personal access tokens → Tokens (classic)**.",
-                "Generate a token with the **`notifications`** scope.",
+                "Generate a token with the **`notifications`** scope. (For private repo notifications, also include the **`repo`** scope.)",
                 "If your organization enforces SAML SSO, click **Authorize** next to the new token.",
                 "Paste it below.",
             ],
