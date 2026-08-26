@@ -26,7 +26,10 @@ die() { echo "error: $*" >&2; exit 1; }
 
 BIN=$(scripts/sparkle-tools.sh)
 
-ls "$ARCHIVES"/InboxAndChill-*.zip >/dev/null 2>&1 \
+# InboxAndChill.zip is what notarize.sh writes now; the glob also matches the
+# InboxAndChill-<version>.zip files older releases left behind, which are still
+# real archives and still belong in the feed.
+ls "$ARCHIVES"/InboxAndChill*.zip >/dev/null 2>&1 \
   || die "no notarized zips in $ARCHIVES/ — run scripts/notarize.sh first."
 
 # generate_appcast re-uses an appcast already sitting in the ARCHIVES dir and
@@ -112,14 +115,46 @@ EOF
 # the tag differs per item. So the tag directory is inserted here, once per
 # enclosure. Idempotent: the pattern only matches a filename sitting directly
 # after download/, which a previously-rewritten URL does not.
+#
+# The version comes from the item, not from the filename. It used to be read
+# out of `InboxAndChill-<version>.zip`, which stopped being possible when the
+# zip became `InboxAndChill.zip` so that
+# releases/latest/download/InboxAndChill.zip is a durable link. Each <item>
+# already states its own version, and that is the authority — it comes from
+# the built Info.plist, whereas a filename is a label someone chose.
 python3 - "$ARCHIVES/appcast.xml" "$DOWNLOAD_PREFIX" <<'PY'
 import re, sys
 
 path, prefix = sys.argv[1], sys.argv[2]
 text = open(path).read()
 
-pattern = re.compile(re.escape(prefix) + r'(InboxAndChill-([0-9][^"/]*)\.zip)')
-text, count = pattern.subn(lambda m: f"{prefix}v{m.group(2)}/{m.group(1)}", text)
+VERSION = re.compile(r"<sparkle:shortVersionString>([^<]+)</sparkle:shortVersionString>")
+# No slash in the filename, so a URL rewritten by an earlier run is not matched
+# again — this stays idempotent, as it was when the version came from the name.
+ENCLOSURE = re.compile(re.escape(prefix) + r'([^"/]+\.zip)')
+
+count = 0
+
+def tag_item(match):
+    """Prefix every enclosure in one <item> with that item's own tag."""
+    global count
+    block = match.group(0)
+    version = VERSION.search(block)
+    if not version:
+        # Refusing beats guessing: an entry with no version cannot be pointed
+        # at a tag, and a wrong enclosure URL is an update that silently never
+        # installs — the exact failure this whole rewrite exists to prevent.
+        sys.exit("error: an <item> carries no sparkle:shortVersionString, so its\n"
+                 "       release tag cannot be known. Refusing to write the feed.")
+
+    def rewrite(enclosure):
+        global count
+        count += 1
+        return f"{prefix}v{version.group(1)}/{enclosure.group(1)}"
+
+    return ENCLOSURE.sub(rewrite, block)
+
+text = re.sub(r"<item>.*?</item>", tag_item, text, flags=re.DOTALL)
 
 # Anything still pointing straight at download/<file> would be a 404 for every
 # user who tried to update, so refuse to write a feed containing one.

@@ -287,10 +287,20 @@ echo "==> Gatekeeper assessment"
 spctl -a -vvv --type execute "$APP" 2>&1 | sed 's/^/    /'
 
 # --- Distributable archive ------------------------------------------------
+# The name carries no version, deliberately: it makes
+# releases/latest/download/InboxAndChill.zip a link that keeps working, which
+# is worth more than a filename that repeats what the bundle already knows.
+# VERSION is still read, because the dSYM and the DMG do carry it — those are
+# kept side by side across releases, and the zip is not.
+#
+# Nothing downstream reads the version out of this filename. generate_appcast
+# takes it from the Info.plist inside the archive (verified 2026-08-26: two
+# rounds with a fixed name kept both entries — it keys on version, not on the
+# file), and appcast.sh's tag rewrite reads each item's shortVersionString.
 OUT_DIR="dist"
 mkdir -p "$OUT_DIR"
 VERSION=$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "0.0.0")
-OUT="$OUT_DIR/InboxAndChill-$VERSION.zip"
+OUT="$OUT_DIR/InboxAndChill.zip"
 rm -f "$OUT"
 ditto -c -k --keepParent "$APP" "$OUT"
 
