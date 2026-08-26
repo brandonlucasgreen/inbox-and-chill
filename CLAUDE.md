@@ -147,17 +147,25 @@ Two traps in that check:
 mtime and size are not evidence. A behavioural test that "fails" is very often a
 stale binary.
 
-**Logging: `log show` does not work for this app.** It returns nothing for
-subsystem `lol.bgreen.inboxandchill` even at `.error` level. Use a live stream
-and restart the app underneath it:
+**Logging: `log` is a zsh builtin, and it shadows `/usr/bin/log`.** This note
+used to say "`log show` does not work for this app", which was wrong and cost
+several cycles of believing code wasn't running. The "too many arguments"
+error is zsh's own `log` builtin refusing the arguments — nothing to do with
+the predicate, the subsystem, or the log level. **Corrected 2026-08-26**;
+`/usr/bin/log show --last 7d` returned 117 lines for this subsystem
+immediately.
+
+Always spell the path:
 
 ```bash
-log stream --predicate 'subsystem == "lol.bgreen.inboxandchill"' --info --debug --style compact
+/usr/bin/log show --last 1h --predicate 'subsystem == "lol.bgreen.inboxandchill"' --style compact
+/usr/bin/log stream --predicate 'subsystem == "lol.bgreen.inboxandchill"' --info --debug --style compact
 ```
 
-Put the predicate in a script rather than inline — quoting it through a shell
-wrapper fails with "too many arguments". This cost several cycles of believing
-code wasn't running when the logging simply wasn't reaching the terminal.
+One real constraint remains, and it is about *levels*, not tooling: `.debug`
+and `.info` may live only in a memory buffer and never reach disk, so a line
+logged at those levels dies with the process. Anything a crash report should
+carry has to be logged at the default level or above — see `AppLog`.
 
 ### 2. AppleScript needs an entitlement, not just a usage string
 
@@ -477,6 +485,95 @@ fallbacks.
 the flag as well when a flag is what queued it. Read is the load-bearing half:
 unflagging alone leaves the message unread, so an unread-scoped source
 re-queues it forever.
+
+## Diagnostics — crashes and errors (added 2026-08-26)
+
+`Sources/App/Support/Diagnostics/`, surfaced in **Settings › Diagnostics**.
+Rule 5 turned on the app itself: a crash used to leave nothing but a menu bar
+icon that had gone, and a connector failure left a red dot whose reason
+vanished with the Settings window.
+
+**No third-party SDK, no telemetry, no network.** Everything is read from
+files macOS already writes and files beside the store, and leaves the Mac only
+when the user presses Copy Report, Report on GitHub, or Export Diagnostics.
+
+Four facts were measured on macOS 26.5 before any of it was written, and each
+one removed a dependency someone would otherwise reach for:
+
+- **`~/Library/Logs/DiagnosticReports` needs no Full Disk Access and no
+  entitlement.** Controls: `~/Library/Mail` and `~/Library/Safari` were both
+  "Operation not permitted" in the same process that read a report end to end.
+  So `CrashHarvester` just reads the OS's own `.ips` — an in-process handler
+  (PLCrashReporter, KSCrash) would re-derive strictly less, because a signal
+  handler cannot safely allocate, while adding a binary to sign and notarize.
+- **`OSLogStore.local()` needs no entitlement either** — verified from a
+  **launchd-launched, Developer ID, hardened-runtime `.app`** carrying only
+  our apple-events entitlement, which returned 184 entries written by
+  *previous* processes. Apple's docs name `com.apple.logging.local-store`;
+  that is stale for an unsandboxed app run by an admin user, and declaring an
+  entitlement we cannot be granted would break signing rather than help. This
+  is why breadcrumbs need no bespoke file logger. **Verify a probe's signature
+  before believing it** — `codesign -dvv` must say `flags=0x10000(runtime)`;
+  an unsigned probe reports cheerful passes it has not earned.
+- **A `.ips` is two JSON documents, not one.** Line 1 is the header
+  (`bundleID`, `app_version`, `os_version`, `timestamp`, `bug_type`); line 2
+  onward is the body. Handing the whole file to a decoder fails, and reads as
+  a corrupt report rather than the wrong parse.
+- **The shipped binary keeps its Swift symbols** (556 `AppState` symbols in
+  the installed 0.3.5 binary), so crash frames in our own code already
+  resolve to function names. A dSYM adds file and line — which is why
+  `notarize.sh` now archives one and `release.sh` attaches it. It cannot be
+  recovered later: a dSYM is matched to a binary by UUID and a rebuild
+  produces a new one. **No release before 0.3.6 has one.**
+
+### Three traps, all found by running it rather than reading it
+
+- **`bug_type` 309 is a crash, and the `termination.namespace` decides
+  whether the indicator is worth reading.** A dyld failure's indicator
+  ("Library missing") names the bug outright; a `SIGNAL` one only restates the
+  signal ("Segmentation fault: 11") and costs you the frame that says *where*.
+  Preferring the indicator unconditionally titled a real segfault
+  "Segmentation fault: 11" until a live `kill -SEGV` showed it.
+- **Never borrow a frame from another image for the crash signature.** Every
+  idle Mac app is sitting in `mach_msg2_trap`, so a fallback to "topmost
+  symbolicated frame" gives every unrelated crash the same title and groups
+  them together. `topmostOwnSymbol` returns nil instead, and the signature
+  says "sent by `<proc>`" when something killed us — a killed app did not
+  crash, and the two need different investigations.
+- **`xcodebuild test` runs the *app* as its test host and then kills it**,
+  which leaves a run marker behind and looks exactly like a force quit. A
+  plain test run wrote a false "quit unexpectedly" into the developer's own
+  live diagnostics log — and Debug and Release share that one file.
+  `DiagnosticsRecorder.isRunningTests` is the guard; keep it.
+
+### The parts, and why each exists
+
+| File | Job |
+|---|---|
+| `AppLog` | The one subsystem constant + a closed category set. Was seven copies of a string literal; `UnifiedLogReader`'s predicate is only honest because it is now one. |
+| `CrashReportFile` | Pure parsing, signature, backtrace rendering and redaction. All `nonisolated static`, all unit-tested against a real trimmed report. |
+| `CrashHarvester` | Sweeps `DiagnosticReports` **and `Retired/`** — macOS moves reports there, so a top-level-only sweep goes blind on exactly the older crashes people report. |
+| `RunMarker` | The only thing that can tell a crash from a quit, and the only evidence of a run macOS wrote no report for at all (force quit, jetsam, lost power). |
+| `ExceptionTrap` | `NSSetUncaughtExceptionHandler`, chained. Fills one gap — the Objective-C exception *reason* — and is **not** a crash handler. `PanelToggler`'s KVC against a private `statusItem` selector is the live example. |
+| `ProblemLog` | Bounded JSONL beside the store. A tee off sentences the app already computes, with a 15-minute repeat window so a source failing every 30s writes one line, not one per poll. |
+| `UnifiedLogReader` | Breadcrumbs, straight out of the unified log. |
+| `DiagnosticsReport` | Assembles the export. **The single choke point where `redact` runs**, so a section added later cannot forget to. |
+| `DiagnosticsRecorder` | `@MainActor @Observable`, created at App scope beside `UpdateController` and started from `init` — with `.menuBarExtraStyle(.window)` the panel's content is not built until the user first clicks, so a `.task` there would miss the launch entirely. |
+
+**"Recorded once" and "still shown until dismissed" are two different
+questions** and have two UserDefaults keys. Filtering the sweep by date meant a
+crash was visible for exactly one launch and then gone — fine for a
+notification, wrong for a pane whose whole job is to still have the evidence
+when someone finally goes looking.
+
+### Adding a failure path? Tee it
+
+`ProblemLog.note(...)` is fire-and-forget, returns nothing and cannot throw, so
+it changes no control flow. Existing call sites: `AppState.handle` (which
+covers *every* connector, because `SyncEngine` turns any thrown error into
+`ConnectorStatus.error`), launch-at-login, the journal, the agent hooks, and
+`UpdateController`. Reuse the sentence the user already sees; do not write a
+second one.
 
 ## Already exists — do not rebuild
 

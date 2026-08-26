@@ -71,6 +71,11 @@ final class AppState {
                     launchAtLoginError = nil
                 } catch {
                     launchAtLoginError = error.localizedDescription
+                    ProblemLog.note(
+                        .launchAtLogin,
+                        "Couldn't \(newValue ? "turn on" : "turn off") "
+                            + "Launch at login: \(error.localizedDescription)",
+                        detail: String(describing: error))
                 }
             }
         }
@@ -287,6 +292,10 @@ final class AppState {
                     await MainActor.run {
                         self.journalError = String(describing: error)
                     }
+                    ProblemLog.note(
+                        .journal,
+                        "Couldn't write the journal: \(error.localizedDescription)",
+                        detail: String(describing: error))
                     return
                 }
             }
@@ -433,10 +442,12 @@ final class AppState {
                 "\(installer.id, privacy: .public) hooks installed automatically"
             )
         } catch {
-            hookProblems[installer.id] =
-                AgentHookInstaller.explainAutoInstallFailure(
-                    error, displayName: installer.displayName,
-                    settingsLabel: installer.settingsLabel)
+            let problem = AgentHookInstaller.explainAutoInstallFailure(
+                error, displayName: installer.displayName,
+                settingsLabel: installer.settingsLabel)
+            hookProblems[installer.id] = problem
+            ProblemLog.note(
+                .claudeHooks, problem, detail: String(describing: error))
             Self.hooksLog.error(
                 "\(installer.id, privacy: .public) hook auto-install failed: \(String(describing: error), privacy: .public)"
             )
@@ -460,13 +471,14 @@ final class AppState {
             installer.userDeclined = true
             hookProblems[installer.id] = nil
         } catch {
-            hookProblems[installer.id] =
+            let problem =
                 "Couldn't remove the \(installer.displayName) hooks from \(installer.settingsLabel): \(String(describing: error))"
+            hookProblems[installer.id] = problem
+            ProblemLog.note(.claudeHooks, problem)
         }
     }
 
-    private static let hooksLog = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "claude-hooks")
+    private static let hooksLog = AppLog.logger(.claudeHooks)
 
     // MARK: Queue change handling
 
@@ -474,6 +486,17 @@ final class AppState {
         queueVersion += 1
         if let status = change.status, !change.sourceID.isEmpty {
             statuses[change.sourceID] = status
+            // Every connector failure arrives here as `.error` (SyncEngine
+            // turns a thrown error into one), so this single tee covers all
+            // of them — including Apple Mail's -1743, which is invisible by
+            // nature. `ProblemLog` suppresses repeats, so a source failing
+            // every poll writes one line, not one per poll.
+            if case .error(let message) = status {
+                ProblemLog.note(
+                    .sync, message,
+                    sourceID: change.sourceID,
+                    sourceLabel: sourceName(forID: change.sourceID))
+            }
         }
         // Banners: opt-in per source for new items; snooze wakes always.
         let bannerSources = bannerEnabledSourceIDs()
@@ -561,8 +584,7 @@ final class AppState {
     /// Banner delivery is the one path the app cannot verify for itself —
     /// macOS accepts the posting call and drops it — so the resolved
     /// permission state is recorded where it can be read after the fact.
-    private static let bannerLog = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "banners")
+    private static let bannerLog = AppLog.logger(.banners)
 
     /// Resolves permission to read Mail, recording the outcome in
     /// `mailAutomation`, and reports whether a read can go ahead.

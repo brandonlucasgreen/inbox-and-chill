@@ -10,8 +10,7 @@ import OSLog
 enum MailAutomation {
     static let mailBundleID = "com.apple.mail"
 
-    private static let log = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "apple-mail")
+    private static let log = AppLog.logger(.appleMail)
 
     /// `typeWildCard` — '****'. Spelled numerically for the same reason the
     /// status codes are: it keeps this file readable next to

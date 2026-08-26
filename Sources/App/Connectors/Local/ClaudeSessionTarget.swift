@@ -170,8 +170,7 @@ enum ClaudeSessionTarget: Equatable {
 /// stays testable without a terminal, a desktop app, or an AppleEvent.
 @MainActor
 enum ClaudeSessionOpener {
-    private static let log = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "claude-session")
+    private static let log = AppLog.logger(.claudeSession)
 
     /// What happened, so the caller can't accidentally treat "no session
     /// recorded" and "macOS refused" the same way.

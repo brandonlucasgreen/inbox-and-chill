@@ -395,16 +395,14 @@ actor SlackConnector: Connector {
     /// the message timestamp, which is always older than the moment you
     /// dismissed it, so `Store.resurrectIfNeeded` leaves a done item done —
     /// `seenWatchHits` is an efficiency measure, not a correctness one.
-    private static let searchLog = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "keyword-watch")
+    private static let searchLog = AppLog.logger(.keywordWatch)
 
     /// The seed had no logging at all until 2026-08-23, which is how "I
     /// pasted the token and nothing happened" became unanswerable: the save
     /// re-seed sits at the end of a multi-minute conversation walk, and
     /// `tryCall` swallowed whatever `reactions.list` said. Every stage of
     /// the seed now says where it got to.
-    private static let seedLog = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "slack-seed")
+    private static let seedLog = AppLog.logger(.slackSeed)
 
     private func searchLoop(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {
         Self.searchLog.info(

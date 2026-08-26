@@ -94,6 +94,10 @@ fi
 
 ZIP="dist/InboxAndChill-$VERSION.zip"
 DMG="dist/dmg/InboxAndChill-$VERSION.dmg"
+# Attached to the release so a crash report from a shipped build can still be
+# resolved to a line months later. It cannot be regenerated after the fact:
+# the dSYM is matched to a binary by UUID, and rebuilding produces a new one.
+DSYM="dist/dsym/InboxAndChill-$VERSION.dSYM.zip"
 COMMIT=$(git rev-parse --short HEAD)
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 VISIBILITY=$(gh repo view --json visibility -q .visibility)
@@ -157,9 +161,16 @@ if PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null); then
     echo "          anchor the notes to it. Publishing with un-anchored notes."
   fi
 fi
-# bash32-ok: NOTES_FLAG always carries --generate-notes, so it is never empty
-# and cannot hit bash 3.2's unbound-variable behaviour. See scripts/check-shell.sh.
-if ! gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" "${NOTES_FLAG[@]}"; then
+# The dSYM is appended only when it exists, so a build made without one still
+# releases. `[ … ] && …` is safe here under `set -e`: bash ignores a failure on
+# the left of an AND list (checked against bash 3.2.57, the one macOS ships).
+ASSETS=("$ZIP" "$DMG")
+[ -f "$DSYM" ] && ASSETS+=("$DSYM")
+
+# bash32-ok: NOTES_FLAG always carries --generate-notes and ASSETS always
+# carries the zip and the DMG, so neither array can be empty and neither can
+# hit bash 3.2's unbound-variable behaviour. See scripts/check-shell.sh.
+if ! gh release create "$TAG" "${ASSETS[@]}" --title "Inbox & Chill $VERSION" "${NOTES_FLAG[@]}"; then
   # Last-ditch: anything wrong with note *generation* must not cost the
   # release, because the tag is already pushed and the feed still needs
   # writing. Retried exactly once, and only when the first attempt was
@@ -167,10 +178,11 @@ if ! gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" "${
   # bad asset, no auth) and must stay fatal.
   [ ${#NOTES_FLAG[@]} -gt 1 ] || die "gh release create failed. The tag $TAG is
     already pushed, so re-run only this step once the cause is fixed:
-      gh release create $TAG '$ZIP' '$DMG' --title 'Inbox & Chill $VERSION' --generate-notes
+      gh release create $TAG '$ZIP' '$DMG' '$DSYM' --title 'Inbox & Chill $VERSION' --generate-notes
       scripts/appcast.sh"
   echo "    note: notes generation failed; retrying with un-anchored notes."
-  gh release create "$TAG" "$ZIP" "$DMG" --title "Inbox & Chill $VERSION" --generate-notes
+  # bash32-ok: as above — ASSETS always holds at least the zip and the DMG.
+  gh release create "$TAG" "${ASSETS[@]}" --title "Inbox & Chill $VERSION" --generate-notes
 fi
 
 # --- Publish the update feed ---------------------------------------------

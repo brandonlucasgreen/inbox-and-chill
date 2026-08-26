@@ -9,9 +9,19 @@ struct InboxAndChillApp: App {
     // does: the updater must outlive any one window, and a menu bar app has no
     // AppDelegate to hang it off.
     @State private var updates = UpdateController()
+    // Same reasoning as `updates`: it installs process-wide handlers at
+    // launch and reads what the previous run left behind, so it must outlive
+    // any one window.
+    @State private var diagnostics = DiagnosticsRecorder()
 
     init() {
         IntentContext.appState = appState
+        // Started here rather than from a `.task` on the panel: with
+        // `.menuBarExtraStyle(.window)` the panel's content is not built
+        // until the user first clicks the icon, so a crash from the previous
+        // run would go unread until then — and the run marker for *this* run
+        // would never be written at all.
+        diagnostics.start()
         KeyboardShortcuts.onKeyUp(for: .togglePanel) {
             // Toggling MenuBarExtra presentation programmatically:
             // handled via AppKit lookup of our status window in PanelToggler.
@@ -24,6 +34,7 @@ struct InboxAndChillApp: App {
             PanelView()
                 .environment(appState)
                 .environment(updates)
+                .environment(diagnostics)
                 .modelContainer(appState.container)
         } label: {
             MenuBarLabel(badgeText: appState.badgeText)
@@ -34,6 +45,7 @@ struct InboxAndChillApp: App {
             MainWindowView()
                 .environment(appState)
                 .environment(updates)
+                .environment(diagnostics)
                 .modelContainer(appState.container)
                 // LSUIElement apps have no Dock icon or ⌘Tab entry — while
                 // the triage window is open, become a regular app so it
@@ -53,6 +65,7 @@ struct InboxAndChillApp: App {
             SettingsView()
                 .environment(appState)
                 .environment(updates)
+                .environment(diagnostics)
                 .modelContainer(appState.container)
         }
     }

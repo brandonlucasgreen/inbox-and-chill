@@ -274,6 +274,34 @@ OUT="$OUT_DIR/InboxAndChill-$VERSION.zip"
 rm -f "$OUT"
 ditto -c -k --keepParent "$APP" "$OUT"
 
+# --- Debug symbols --------------------------------------------------------
+# Kept because they cannot be recovered later: the dSYM is matched to a build
+# by UUID, and a rebuild from the same source produces a different one. Until
+# now it was left in DerivedData and lost with the next clean, so no shipped
+# release had one.
+#
+# The shipped binary keeps its Swift symbol names, so a crash report already
+# names the function. The dSYM is what adds the file and line — the difference
+# between "somewhere in AppState.handle" and a line number.
+#
+# In its own subdirectory for the same reason the DMG is: generate_appcast
+# treats every archive beside the zip as another release.
+DSYM="$(dirname "$APP")/$APP_NAME.dSYM"
+if [ -d "$DSYM" ]; then
+  DSYM_DIR="$OUT_DIR/dsym"
+  mkdir -p "$DSYM_DIR"
+  DSYM_OUT="$DSYM_DIR/InboxAndChill-$VERSION.dSYM.zip"
+  rm -f "$DSYM_OUT"
+  ditto -c -k --keepParent "$DSYM" "$DSYM_OUT"
+  echo "    debug symbols: $DSYM_OUT"
+else
+  # Not fatal — a build made with DEBUG_INFORMATION_FORMAT=dwarf has none —
+  # but say so, because the consequence only shows up months later when a
+  # crash report from this exact build cannot be resolved to a line.
+  echo "    debug symbols: none at $DSYM — crash reports from this build" >&2
+  echo "                   will name functions but not lines." >&2
+fi
+
 # --- DMG, for people rather than for Sparkle ------------------------------
 # Sparkle updates from the zip — nothing to mount, no user interaction. A
 # human downloading the app for the first time gets the DMG, which is the
@@ -319,4 +347,12 @@ fi
 echo "==> Done"
 echo "    notarized and stapled: $APP"
 echo "    for Sparkle:           $OUT"
-[ "$SKIP_DMG" -eq 0 ] && echo "    for people:            $DMG"
+# `if`, not `&&`: under `set -e` a trailing `[ … ] && echo` that tests false is
+# the script's exit status, so `--skip-dmg` used to end a wholly successful
+# notarization with status 1 — which release.sh reads as "notarization failed".
+if [ -n "${DSYM_OUT:-}" ]; then
+  echo "    debug symbols:         $DSYM_OUT"
+fi
+if [ "$SKIP_DMG" -eq 0 ]; then
+  echo "    for people:            $DMG"
+fi
