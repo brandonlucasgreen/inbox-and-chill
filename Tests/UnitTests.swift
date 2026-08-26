@@ -2319,6 +2319,19 @@ struct OpenSchemeGateTests {
         #expect(AppState.openable(file, sourceKind: "appleMail", payload: nil) == nil)
     }
 
+    @Test("x-apple-reminderkit:// is reminders-source-only")
+    func reminderSchemeRemindersOnly() throws {
+        let link = try #require(
+            URL(string: RemindersConnector.deepLink(for: "ABC-123")))
+        #expect(link.scheme == "x-apple-reminderkit")
+        // The URL is built from an EventKit identifier this app read itself, so
+        // no remote publisher can conjure one — same argument as file://.
+        #expect(AppState.openable(link, sourceKind: "reminders", payload: nil) == link)
+        #expect(AppState.openable(link, sourceKind: "ntfy", payload: nil) == nil)
+        #expect(AppState.openable(link, sourceKind: "jsonPoller", payload: nil) == nil)
+        #expect(AppState.openable(link, sourceKind: "local", payload: nil) == nil)
+    }
+
     @Test("claude:// is local-source-only")
     func claudeSchemeLocalOnly() throws {
         let claude = try #require(URL(string: "claude://local_sessions/abc"))
@@ -2397,15 +2410,69 @@ struct NewSourceCatalogTests {
         }
     }
 
-    @Test("Apple Mail is the one kind that can't be added twice")
-    func appleMailIsSingleton() throws {
-        // A Mac has exactly one Mail.app database, unlike GitHub or Linear,
-        // where multiple accounts are legitimately different sources.
-        let mail = try #require(ConnectorCatalog.descriptor(for: "appleMail"))
-        #expect(!mail.allowsMultiple)
-        for kind in ConnectorCatalog.all where kind.id != "appleMail" {
+    @Test("Only the local-Mac-app kinds can't be added twice")
+    func localMacAppKindsAreSingletons() throws {
+        // The rule, rather than a list: a kind is a singleton exactly when a
+        // second one would be the same underlying data seen twice. This Mac has
+        // one Mail.app database and one Reminders database; a GitHub or Linear
+        // token can name any of several accounts, so those are legitimately
+        // repeatable.
+        //
+        // Was "Apple Mail is the one kind" until Reminders arrived
+        // (2026-08-26). Updated rather than relaxed — the assertion that every
+        // *other* kind allows multiples is the half worth keeping, because it
+        // is what catches a new source copying `allowsMultiple: false` off its
+        // neighbour without meaning to.
+        let singletons: Set<String> = ["appleMail", "reminders"]
+        for id in singletons {
+            let descriptor = try #require(ConnectorCatalog.descriptor(for: id))
+            #expect(
+                !descriptor.allowsMultiple,
+                "\(descriptor.displayName) reads one local database and should be a singleton")
+        }
+        for kind in ConnectorCatalog.all where !singletons.contains(kind.id) {
             #expect(kind.allowsMultiple, "\(kind.displayName) should allow multiple sources")
         }
+    }
+
+    @Test("Reminders explains itself before it asks for anything")
+    func remindersIsConfigurable() throws {
+        // Same contract every other source is held to, plus one claim specific
+        // to this one: the note has to say that dismissing is not completing,
+        // because that is the behaviour people will otherwise assume is a bug.
+        let reminders = try #require(ConnectorCatalog.descriptor(for: "reminders"))
+        #expect(!reminders.setupSteps.isEmpty)
+        #expect(!reminders.authNote.isEmpty)
+        #expect(reminders.authNote.contains("does not complete it"))
+        // Nothing to paste, so nothing should claim otherwise.
+        #expect(reminders.fields.allSatisfy { !$0.isSecret })
+        #expect(reminders.setupURL.isEmpty)
+        // The two modes Brandon asked for, plus the undated escape hatch.
+        #expect(reminders.fields.map(\.key) == ["dueToday", "lists", "listsIncludeUndated"])
+        let dueToday = try #require(reminders.fields.first { $0.key == "dueToday" })
+        #expect(dueToday.defaultOn, "due-today is the mode that makes the source useful unconfigured")
+        let undated = try #require(
+            reminders.fields.first { $0.key == "listsIncludeUndated" })
+        #expect(
+            !undated.defaultOn,
+            "70 of 135 open reminders here are undated — on by default buries the queue")
+    }
+
+    @Test("The Reminders connector completes tasks and never marks them done")
+    func remindersDeclaresTheRightCapabilities() {
+        // The capability set *is* the dismiss-vs-complete behaviour. Declaring
+        // `.markDone` would make E write through to Reminders, which is the
+        // exact thing Brandon asked against — and it would be silent.
+        let connector = RemindersConnector(
+            sourceID: "s", scope: TodoScope(includesDueWindow: true))
+        #expect(connector.capabilities.contains(.completesTask))
+        #expect(
+            !connector.capabilities.contains(.markDone),
+            "dismissing a reminder must not complete it")
+        #expect(connector.capabilities.contains(.remoteTruth))
+        #expect(
+            !connector.capabilities.contains(.announcesReturn),
+            "widening announcesReturn is a decision to take deliberately")
     }
 }
 

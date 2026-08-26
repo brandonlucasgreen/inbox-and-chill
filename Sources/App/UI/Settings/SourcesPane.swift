@@ -27,6 +27,7 @@ struct SourcesPane: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
             MailPermissionNotice()
+            RemindersPermissionNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
             AgentHooksNotice()

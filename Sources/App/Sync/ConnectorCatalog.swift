@@ -178,6 +178,31 @@ enum ConnectorCatalog {
             ],
             authNote: "No token, and nothing to sign in to: this reads the Mail app on this Mac over AppleScript, so it covers every account Mail has — **including Gmail**, which is why there is no separate Gmail source. Nothing is sent anywhere.\n\nmacOS gates this behind Privacy & Security → Automation. If you decline, Mail looks permanently empty rather than broken, so this source says so explicitly instead of showing you an empty queue.\n\nThe first refresh after Mail has been idle can take around ten seconds — that's Mail waking up, not a failure."),
         .init(
+            id: "reminders", displayName: "Apple Reminders", systemImage: "checklist",
+            fields: [
+                .init(
+                    key: "dueToday", label: "Due today or overdue", isSecret: false,
+                    help: "Everything you're already late on, plus anything due before the end of today. Reminders with no due date are never pulled in by this.",
+                    isToggle: true, defaultOn: true),
+                .init(
+                    key: "lists", label: "Lists", isSecret: false,
+                    placeholder: "Buffer, House Projects",
+                    help: "Comma-separated list names, matched exactly as Reminders spells them. Leave blank to rely on due dates alone."),
+                .init(
+                    key: "listsIncludeUndated",
+                    label: "Include reminders with no due date from those lists",
+                    isSecret: false,
+                    help: "Off by default because it's usually a lot: a “someday” list of forty undated items would bury every other source. Turn it on for a list you genuinely work top-to-bottom.",
+                    isToggle: true, defaultOn: false),
+            ],
+            allowsMultiple: false,
+            setupSteps: [
+                "Nothing to paste — this source reads the Reminders app that's already on this Mac.",
+                "macOS will ask once for permission. **Allow it**, or the source stays permanently empty.",
+                "Pick what you want queued below: what's due today, specific lists, or both.",
+            ],
+            authNote: "No token, and nothing to sign in to: this reads Reminders on this Mac through EventKit, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere.\n\n**Dismissing a reminder here does not complete it.** Pressing E strikes it from your queue and keeps it in the archive, and Reminders never hears about it — that's deliberate, because seeing something and doing it are different. Press **C** to actually tick it off, and ⌘Z reopens it if you didn't mean to.\n\nA repeating reminder is safe to complete: only today's occurrence is finished, and the next one arrives on its own.\n\nmacOS gates this behind Privacy & Security › Reminders. If you decline, this source says so explicitly rather than showing you an empty queue."),
+        .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [
                 .init(

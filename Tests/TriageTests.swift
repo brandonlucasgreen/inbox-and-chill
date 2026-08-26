@@ -235,6 +235,137 @@ struct TriageTests {
         #expect(counts.total == 1)
     }
 
+    // MARK: To-do sources — dismissal, completion, recurrence
+    //
+    // These four are the store-level half of the design in
+    // docs/todo-sources-plan.md. Both failure modes they guard are silent: a
+    // dismissal that will not stick, and a repeating task that disappears
+    // forever after being completed once.
+
+    @Test("Dismissing a task keeps it dismissed, poll after poll")
+    func dismissedTaskStaysDismissed() async throws {
+        // The trap. A reminder due later today is still in every snapshot
+        // after you dismiss it, so `resurrectIfNeeded` gets asked about it on
+        // every poll — and if `occurredAt` were the due date it would say yes
+        // and un-dismiss the row a minute later.
+        let store = try makeStore()
+        let now = Date.now
+        let task = TodoTask(
+            providerID: "REM-1", title: "Call the dentist", listName: "Family",
+            due: now.addingTimeInterval(3 * 3600),
+            createdAt: now.addingTimeInterval(-86_400),
+            modifiedAt: now.addingTimeInterval(-3_600))
+        let remote = TodoItemMapper.remoteItem(from: task, now: now)
+
+        _ = try await store.reconcile(
+            snapshot: [remote], sourceID: "s", sourceKind: "reminders",
+            remoteTruth: true)
+        try await store.markDone(uid: "reminders:REM-1")
+
+        // Two more polls, the task unchanged and still incomplete in Reminders.
+        for _ in 0..<2 {
+            _ = try await store.reconcile(
+                snapshot: [remote], sourceID: "s", sourceKind: "reminders",
+                remoteTruth: true)
+        }
+        let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(
+            counts.total == 0,
+            "a dismissed reminder came back — occurredAt is in the future again")
+    }
+
+    @Test("A repeating task's next occurrence arrives as a new row")
+    func recurringTaskReturnsAsANewRow() async throws {
+        // Measured: completing a recurring reminder rolls its due date forward
+        // and leaves `lastModifiedDate` untouched. So identity is the only
+        // thing that can distinguish tomorrow's occurrence from today's.
+        let store = try makeStore()
+        let now = Date.now
+        let modified = now.addingTimeInterval(-600)
+        let today = TodoTask(
+            providerID: "REM-R", title: "Water the plants", listName: "House",
+            due: now.addingTimeInterval(3_600), isRecurring: true,
+            createdAt: now.addingTimeInterval(-86_400 * 30), modifiedAt: modified)
+        var tomorrow = today
+        tomorrow.due = now.addingTimeInterval(86_400 + 3_600)
+        // Same providerID, same modifiedAt — exactly what the spike observed.
+        tomorrow.modifiedAt = modified
+
+        let first = TodoItemMapper.remoteItem(from: today, now: now)
+        _ = try await store.reconcile(
+            snapshot: [first], sourceID: "s", sourceKind: "reminders",
+            remoteTruth: true)
+        try await store.markDone(
+            uid: "reminders:\(first.externalID)",
+            reason: Store.DoneReason.completed)
+
+        let second = TodoItemMapper.remoteItem(from: tomorrow, now: now)
+        #expect(second.externalID != first.externalID)
+        let result = try await store.reconcile(
+            snapshot: [second], sourceID: "s", sourceKind: "reminders",
+            remoteTruth: true)
+        #expect(
+            result.inserted.count == 1,
+            "tomorrow's occurrence did not arrive — a daily reminder would vanish")
+
+        let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 1)
+    }
+
+    @Test("Completing and dismissing are told apart in the archive")
+    func doneReasonDistinguishesCompletionFromDismissal() async throws {
+        let store = try makeStore()
+        let now = Date.now
+        let items = ["REM-A", "REM-B"].map { id in
+            TodoItemMapper.remoteItem(
+                from: TodoTask(
+                    providerID: id, title: id, listName: "Buffer",
+                    due: now.addingTimeInterval(3_600),
+                    modifiedAt: now.addingTimeInterval(-60)), now: now)
+        }
+        _ = try await store.reconcile(
+            snapshot: items, sourceID: "s", sourceKind: "reminders",
+            remoteTruth: true)
+
+        try await store.markDone(uid: "reminders:REM-A")
+        try await store.markDone(
+            uid: "reminders:REM-B", reason: Store.DoneReason.completed)
+
+        // `undoDone` reporting the reason is what lets ⌘Z decide whether to
+        // reopen the task in Reminders. Without it undo half-works in silence.
+        let dismissed = try await store.undoDone(uid: "reminders:REM-A")
+        let completed = try await store.undoDone(uid: "reminders:REM-B")
+        #expect(dismissed == Store.DoneReason.user)
+        #expect(completed == Store.DoneReason.completed)
+    }
+
+    @Test("A completed task does not resurrect on the next poll")
+    func completedTaskStaysDone() async throws {
+        // `.remoteTruth` would normally archive an absent item, but a completed
+        // reminder leaves the incomplete snapshot entirely — so the row has to
+        // stay done rather than flicker.
+        let store = try makeStore()
+        let now = Date.now
+        let remote = TodoItemMapper.remoteItem(
+            from: TodoTask(
+                providerID: "REM-C", title: "File expenses", listName: "Buffer",
+                due: now.addingTimeInterval(-3_600),
+                modifiedAt: now.addingTimeInterval(-7_200)), now: now)
+
+        _ = try await store.reconcile(
+            snapshot: [remote], sourceID: "s", sourceKind: "reminders",
+            remoteTruth: true)
+        try await store.markDone(
+            uid: "reminders:REM-C", reason: Store.DoneReason.completed)
+
+        // Gone from Reminders' incomplete list, as a completed task is.
+        _ = try await store.reconcile(
+            snapshot: [], sourceID: "s", sourceKind: "reminders",
+            remoteTruth: true)
+        let counts = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(counts.total == 0)
+    }
+
     @Test("A source that changes an item's kind is believed")
     func kindIsRefreshed() async throws {
         // A Claude Code row outlives the state it was born in: it appears as

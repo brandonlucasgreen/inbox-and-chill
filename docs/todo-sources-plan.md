@@ -1,6 +1,9 @@
 # To-do sources — design plan (draft for PLAN.md §6.6)
 
-Status: **plan only, nothing built.** Supersedes §6.6's "deprioritized"
+Status: **built 2026-08-26** — the design below is what shipped in the same
+branch, with §4's recurrence reasoning corrected mid-build by a spike (the
+correction is kept in place rather than tidied away, because the wrong version
+is the one a future reader is likely to re-derive). Supersedes §6.6's "deprioritized"
 verdict at Brandon's request, 2026-08-26: *"I use Apple Reminders, and I'd
 like to pull in Reminders due today or Reminders for a specific list(s)."*
 The old verdict's reason (RemindersMenubar already covers it) is not wrong —
@@ -76,6 +79,19 @@ ordinary connector work:
   §4 — see the correction there. (An earlier sample showed a recurring
   reminder modified at 04:00 that morning, which *looked* like a roll bumping
   the field; that remains unexplained and is no longer relied on.)
+- **An UNCOMPLETED recurring reminder does not roll forward.** Second spike,
+  same day, with a daily-recurring reminder back-dated to yesterday and never
+  completed: EventKit reported it still due yesterday, still incomplete, with
+  the **same identifier**, and the due-today predicate returned it. Only
+  *completion* advances the series. Three consequences, all good:
+  - Yesterday's neglected occurrence **stays in the queue and goes overdue**
+    rather than being silently replaced. "I skipped this" does not disappear.
+  - The occurrence suffix is **stable while a task is overdue**, so there is
+    **no daily archive row** — archive growth is one row per completion, the
+    same as every other source. An earlier estimate of ~360 steady-state rows
+    was wrong and is withdrawn.
+  - Midnight is quieter than first described: only genuinely-newly-due
+    reminders arrive then.
 - **`completionDate` was `nil`** immediately after setting `isCompleted =
   true`. Don't read it back to confirm a write.
 - **iCloud is the only writable reminder source on this Mac** (no `.local`
@@ -88,6 +104,28 @@ ordinary connector work:
   priorities, so high-signal must not depend on them.
 - **`x-apple-reminderkit://` is handled by Reminders.app** (Launch Services
   resolves it). `x-apple-reminder://` is not.
+
+### Measured cost (2026-08-26, real data, signed hardened-runtime build)
+
+```
+EKEventStore() init                          2.4ms
+calendars(for:)  [12 lists]                  9.3ms
+due-today fetch, cold  [5 results]           7.8ms
+due-today fetch, warm  [5 results]           7.6ms
+all incomplete, all lists  [135 results]    60.0ms
+per-task calendar math, 135 tasks            0.4ms
+```
+
+**There is no cold penalty** — 7.8ms cold vs 7.6ms warm. This is the opposite
+of `AppleMailConnector`, where the first Apple event after idle costs 12
+*seconds*; that caveat does not transfer, and nobody should add a timeout or an
+apology for a slow first poll here.
+
+At a 60s cadence the duty cycle is 0.01% (due-today only) to 0.1% (with the
+unbounded lists predicate). The redundant per-task work — `dueWindowEnd`
+recomputed per task, `isOverdue` called twice per task by `kind` and
+`highSignal` — measures under 1ms across 135 tasks and is deliberately left
+alone: changing working code for a sub-millisecond win is risk for nothing.
 
 ### Unverified — spikes still open
 

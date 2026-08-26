@@ -4,6 +4,10 @@ import Foundation
 enum JournalAction: String, Sendable {
     case arrived
     case done
+    /// Finished for real in its source, by `C` on a to-do row. Distinct from
+    /// `done` on purpose: reading back a week of triage, "I dismissed this"
+    /// and "I did this" are not the same admission.
+    case completed
     case snoozed
     case pinned
     case unpinned

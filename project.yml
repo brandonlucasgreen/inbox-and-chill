@@ -190,6 +190,15 @@ targets:
         # event outright instead of asking — and the denial looks exactly
         # like "nothing happened".
         NSAppleEventsUsageDescription: Inbox & Chill asks your terminal to bring a Claude Code session's window to the front, and asks Mail for the messages you flagged or haven't read.
+        # EventKit needs this string or it does not fail — it *crashes*. Note
+        # what it does NOT need: an entitlement. Measured 2026-08-26 with a
+        # Developer ID, hardened-runtime, unsandboxed build carrying zero
+        # entitlements, which was granted full Reminders access. That is the
+        # opposite of the Apple-events case above, so if the Reminders source
+        # ever looks empty, do NOT "fix" it by adding an entitlement — Release
+        # ships exactly one and that is deliberate. The sandbox entitlement
+        # PLAN §6.6 mentions applies only to the declined MAS variant.
+        NSRemindersFullAccessUsageDescription: Inbox & Chill reads the reminders you're due so they queue up beside your other notifications. Dismissing one here does not complete it in Reminders.
 
         # --- Sparkle in-app updates -----------------------------------------
         # The feed must be fetchable with no credentials at all: Sparkle sends

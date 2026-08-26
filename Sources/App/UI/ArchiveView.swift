@@ -18,6 +18,7 @@ struct ArchiveView: View {
 
     let index: SourceIndex
     var restore: (Item) -> Void
+    var complete: (Item) -> Void
     var open: (Item) -> Void
     var onClose: () -> Void
 
@@ -50,6 +51,7 @@ struct ArchiveView: View {
                             ArchiveRow(
                                 item: item, display: index.display(for: item),
                                 restore: { restore(item) },
+                                complete: { complete(item) },
                                 open: { open(item) })
                         }
                     }
@@ -113,8 +115,10 @@ private struct ArchiveRow: View {
     let item: Item
     let display: SourceDisplay
     var restore: () -> Void
+    var complete: () -> Void
     var open: () -> Void
 
+    @Environment(AppState.self) private var appState
     @State private var isHovering = false
 
     var body: some View {
@@ -149,6 +153,12 @@ private struct ArchiveRow: View {
         .contextMenu {
             Button("Open", action: open)
             Button("Restore", action: restore)
+            // A dismissed reminder is still an open task, so finishing it from
+            // the archive has to be possible — otherwise pressing E costs you
+            // the ability to ever tick it off from this app.
+            if appState.canComplete(item) {
+                Button("Complete Task", action: complete)
+            }
             Button("Copy") {
                 PanelPasteboard.copy(title: item.title, url: item.url)
             }
@@ -160,7 +170,14 @@ private struct ArchiveRow: View {
         if let done = item.doneAt {
             text += " · done \(PanelFormat.relative(done)) ago"
         }
-        if item.doneReason == "remote" { text += " · cleared by source" }
+        switch item.doneReason {
+        case Store.DoneReason.remote: text += " · cleared by source"
+        // The distinction Brandon asked for, made visible: dismissing a
+        // reminder leaves it open in Reminders, and the archive is the only
+        // place that can still say which of the two happened.
+        case Store.DoneReason.completed: text += " · completed"
+        default: break
+        }
         return text
     }
 }

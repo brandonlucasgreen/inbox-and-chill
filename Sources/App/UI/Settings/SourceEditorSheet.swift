@@ -109,6 +109,14 @@ struct SourceEditorSheet: View {
                     AgentHooksSection()
                 }
 
+                // Same argument again, and one addition: the list picker below
+                // can only show real list names once access exists, so the
+                // permission control has to come first on the page rather than
+                // beside the fields.
+                if descriptor.id == "reminders" {
+                    RemindersAccessSection()
+                }
+
                 if !descriptor.fields.isEmpty {
                     Section {
                         ForEach(descriptor.fields) { field in
@@ -253,6 +261,20 @@ struct SourceEditorSheet: View {
                 field.label, text: binding,
                 prompt: Text(
                     existing != nil ? "•••• saved — enter to replace" : field.placeholder))
+        } else if descriptor.id == "reminders", field.key == "lists" {
+            // Checkboxes over the real list names instead of a text field: the
+            // names have to match what Reminders calls them, and a typo would
+            // produce an empty source with nothing to say about why.
+            VStack(alignment: .leading, spacing: 4) {
+                Text(field.label)
+                RemindersListPicker(value: binding)
+                if !field.help.isEmpty {
+                    Text(field.help)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         } else {
             TextField(field.label, text: binding, prompt: Text(field.placeholder))
         }

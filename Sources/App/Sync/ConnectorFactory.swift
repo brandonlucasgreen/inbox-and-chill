@@ -44,6 +44,17 @@ enum ConnectorFactory {
                 scope: .init(
                     flagged: toggle("flagged"), unread: toggle("unread"),
                     mailbox: settings["mailbox"] ?? ""))
+        case "reminders":
+            let fields = ConnectorCatalog.descriptor(for: "reminders")?.fields ?? []
+            func toggle(_ key: String) -> Bool {
+                fields.first { $0.key == key }?.boolValue(in: settings) ?? false
+            }
+            return RemindersConnector(
+                sourceID: config.id,
+                scope: .init(
+                    includesDueWindow: toggle("dueToday"),
+                    listNames: TodoScope.parseListNames(settings["lists"] ?? ""),
+                    listsIncludeUndated: toggle("listsIncludeUndated")))
         case "slack":
             return SlackConnector(
                 sourceID: config.id,
