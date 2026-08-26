@@ -117,8 +117,7 @@ enum RemindersAuthorization {
     static let notRequestedAdvice =
         "macOS hasn't been asked whether Inbox & Chill may read your Reminders yet, so this source can't show anything. Open Settings › Sources and press “Allow Reminders Access” to ask."
 
-    static let notRequestedMessage =
-        "macOS hasn't been asked whether Inbox & Chill may read your Reminders yet, so this source can't show anything."
+    static let notRequestedMessage = "Not asked yet, so there's nothing to show."
 
     /// The verdict once the *prompting* call has answered.
     ///
@@ -148,20 +147,36 @@ enum RemindersAuthorization {
         var promptNote: String
     }
 
+    /// Two bullets, and they are the two the user cannot guess.
+    ///
+    /// This started at three bullets plus a four-sentence prompt note, on top
+    /// of three setup steps and a four-paragraph `authNote` — and between them
+    /// they said "nothing leaves this Mac" three times and "macOS will ask, and
+    /// it'll look empty if you decline" four times. Brandon, 2026-08-26:
+    /// *"there is WAY too much copy in the Add/Edit Source screen for
+    /// Reminders. There are multiple paragraphs of text that are essentially
+    /// duplicates of each other."*
+    ///
+    /// What survived is the stuff that is load-bearing and unguessable: what it
+    /// reads, and that `E` is not `C`. The privacy claim lives in the *title*
+    /// now rather than being restated as a bullet, and the "macOS only asks
+    /// once" warning is one clause instead of a paragraph — the button is
+    /// directly beneath it, and `notRequestedMessage` covers the un-asked state.
     static let preflight = Preflight(
         title: "Your reminders stay on this Mac",
         lead:
-            "Inbox & Chill reads the reminders you're due, so they queue up beside everything else you owe — and you can triage them with the same keys.",
+            "Reads what you're due so it queues up beside everything else you owe.",
         bullets: [
             // True of fetch(): title, notes, due date, list name, priority.
-            "It reads each reminder's title, notes, list and due date.",
+            // Paired with the write claim, because saying what it reads
+            // invites the question this answers.
+            "Reads titles, notes, lists and due dates. Writes nothing unless you press C.",
             // True of the capability set: .completesTask, and no .markDone.
-            "Dismissing a reminder here does not complete it in Reminders — it just leaves your queue and stays in the archive. Only pressing C completes it.",
-            // True of the connector as a whole: no network path exists in it.
-            "Nothing leaves this Mac. There's no account to make and no server involved — it's reading the Reminders app you already have.",
+            // The one genuinely surprising behaviour in the whole source.
+            "E dismisses without completing — only C ticks a reminder off in Reminders.",
         ],
         promptNote:
-            "Next, macOS will ask whether Inbox & Chill may access Reminders. That dialog is macOS's own, and allowing it is the only way any app can read your reminders. If you decline, this source will look permanently empty rather than broken — so it's worth saying yes now, or leaving this source off."
+            "macOS asks once. Decline and this source stays empty."
     )
 }
 

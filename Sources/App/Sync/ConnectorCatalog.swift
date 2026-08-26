@@ -182,26 +182,25 @@ enum ConnectorCatalog {
             fields: [
                 .init(
                     key: "dueToday", label: "Due today or overdue", isSecret: false,
-                    help: "Everything you're already late on, plus anything due before the end of today. Reminders with no due date are never pulled in by this.",
+                    help: "Anything you're late on, plus anything due before midnight. Undated reminders are never included.",
                     isToggle: true, defaultOn: true),
                 .init(
                     key: "lists", label: "Lists", isSecret: false,
-                    placeholder: "Buffer, House Projects",
-                    help: "Comma-separated list names, matched exactly as Reminders spells them. Leave blank to rely on due dates alone."),
+                    help: "Everything open in the lists you tick."),
                 .init(
                     key: "listsIncludeUndated",
-                    label: "Include reminders with no due date from those lists",
+                    label: "Include undated reminders from those lists",
                     isSecret: false,
-                    help: "Off by default because it's usually a lot: a “someday” list of forty undated items would bury every other source. Turn it on for a list you genuinely work top-to-bottom.",
+                    help: "Off by default — a “someday” list is usually long enough to bury your other sources.",
                     isToggle: true, defaultOn: false),
             ],
             allowsMultiple: false,
-            setupSteps: [
-                "Nothing to paste — this source reads the Reminders app that's already on this Mac.",
-                "macOS will ask once for permission. **Allow it**, or the source stays permanently empty.",
-                "Pick what you want queued below: what's due today, specific lists, or both.",
-            ],
-            authNote: "No token, and nothing to sign in to: this reads Reminders on this Mac through EventKit, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere.\n\n**Dismissing a reminder here does not complete it.** Pressing E strikes it from your queue and keeps it in the archive, and Reminders never hears about it — that's deliberate, because seeing something and doing it are different. Press **C** to actually tick it off, and ⌘Z reopens it if you didn't mean to.\n\nA repeating reminder is safe to complete: only today's occurrence is finished, and the next one arrives on its own.\n\nmacOS gates this behind Privacy & Security › Reminders. If you decline, this source says so explicitly rather than showing you an empty queue."),
+            // No `setupSteps` on purpose. There is no credential to fetch, so
+            // the steps could only restate the permission control that renders
+            // directly below them — which is exactly the duplication Brandon
+            // called out on 2026-08-26. `credentialSourcesExplainThemselves`
+            // only requires steps of sources that ask for a secret.
+            authNote: "No token and nothing to sign in to: this reads the Reminders app on this Mac, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere."),
         .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [

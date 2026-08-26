@@ -2435,18 +2435,41 @@ struct NewSourceCatalogTests {
         }
     }
 
-    @Test("Reminders explains itself before it asks for anything")
+    @Test("Reminders explains itself once, not three times")
     func remindersIsConfigurable() throws {
-        // Same contract every other source is held to, plus one claim specific
-        // to this one: the note has to say that dismissing is not completing,
-        // because that is the behaviour people will otherwise assume is a bug.
         let reminders = try #require(ConnectorCatalog.descriptor(for: "reminders"))
-        #expect(!reminders.setupSteps.isEmpty)
         #expect(!reminders.authNote.isEmpty)
-        #expect(reminders.authNote.contains("does not complete it"))
-        // Nothing to paste, so nothing should claim otherwise.
+        // Nothing to paste, so nothing should claim otherwise — and no setup
+        // steps, because they could only restate the permission control that
+        // renders directly below them. `credentialSourcesExplainThemselves`
+        // only holds sources that ask for a secret to that contract.
         #expect(reminders.fields.allSatisfy { !$0.isSecret })
         #expect(reminders.setupURL.isEmpty)
+        #expect(
+            reminders.setupSteps.isEmpty,
+            "nothing to set up — steps here would duplicate the access section")
+
+        // The anti-duplication guard. This screen said "stays on this Mac"
+        // three times and "macOS asks, and it'll look empty if you decline"
+        // four times before Brandon called it out (2026-08-26). Each fact gets
+        // exactly one home: the E-vs-C surprise lives in the preflight bullets,
+        // and the no-token story lives in authNote.
+        let onScreen =
+            reminders.authNote + reminders.setupSteps.joined()
+            + reminders.fields.map(\.help).joined()
+        #expect(
+            !onScreen.contains("does not complete it"),
+            "dismiss-vs-complete belongs in the preflight, not restated here")
+        #expect(
+            !onScreen.lowercased().contains("permanently empty"),
+            "the empty-source warning belongs in the preflight's prompt note")
+        #expect(
+            RemindersAuthorization.preflight.bullets.contains { $0.contains("only C") },
+            "the E-vs-C surprise must be stated somewhere on this screen")
+        // The picker replaced a text field; the help must not still say
+        // "comma-separated".
+        let lists = try #require(reminders.fields.first { $0.key == "lists" })
+        #expect(!lists.help.lowercased().contains("comma"))
         // The two modes Brandon asked for, plus the undated escape hatch.
         #expect(reminders.fields.map(\.key) == ["dueToday", "lists", "listsIncludeUndated"])
         let dueToday = try #require(reminders.fields.first { $0.key == "dueToday" })
