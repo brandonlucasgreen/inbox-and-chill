@@ -374,6 +374,55 @@ Two complementary mechanisms:
 2. **Local push**: a localhost HTTP listener (`Network.framework`) + the `inchill` CLI for same-machine producers (terminal, Claude Code hooks — see §6.8).
 3. **(Deferred)** a tiny **Cloudflare Worker relay** for remote push (Notion webhooks, Zapier/automation bridges). Decision: not in v1 — nothing currently needs it, and v1 ships with zero infrastructure. The connector protocol won't change when it lands.
 
+### 4.5 Diagnostics — crashes and errors (built 2026-08-26)
+
+The app had no error or crash reporting at all. With real alpha users there
+was no path from *their* Mac to a bug report: a crash left nothing but a menu
+bar icon that had gone, and a connector failure left a red dot whose reason
+vanished when Settings closed. This is §5's rule (a failure the user cannot
+see is worse than a crash) applied to the app itself.
+
+**Decision, 2026-08-26: local only, no telemetry.** Options weighed were an
+opt-in Sentry SDK, MetricKit, an in-process crash handler (PLCrashReporter /
+KSCrash), and reading the OS's own reports. Brandon chose local-only with
+one-click reporting, crashes **and** a durable error log, in its own Settings
+tab.
+
+Why the others were declined:
+
+- **Sentry / Crashlytics** would need a DSN in a public repo, network egress
+  from a local-first app, a consent story, and a fourth nested framework to
+  re-sign — the exact shape of the Sparkle trap in §2.1.9. Worth revisiting
+  at scale: the app already *consumes* Sentry as a source (§6.11), so its own
+  crashes would land in its own queue, which is a genuinely good argument
+  later and a bad one now, at five users.
+- **MetricKit** is declared `macos(12.0)` in the current SDK — the headers were
+  read directly, not assumed — but Sentry's own MetricKit integration ships
+  hangs, CPU and disk-write exceptions and **explicitly not crashes**, and
+  delivery outside the App Store / TestFlight is widely reported as
+  unreliable. Not a foundation. Addable later as a corroborating source.
+- **An in-process crash handler** re-derives what ReportCrash already wrote,
+  strictly worse — a signal handler cannot safely allocate — while adding a
+  binary to sign and notarize.
+- **Hang detection** (a main-thread watchdog) was offered and not chosen. It
+  is a separate change.
+
+What made local-only viable is that both of the things it needs turned out to
+be free. Measured on macOS 26.5 before anything was written:
+`~/Library/Logs/DiagnosticReports` is readable with **no Full Disk Access and
+no entitlement** (controls: `~/Library/Mail` and `~/Library/Safari` both
+refused in the same process), and `OSLogStore.local()` works from a
+launchd-launched Developer ID hardened-runtime `.app` with **no entitlement**,
+returning entries written by *previous* processes. So the crash report and the
+breadcrumbs both come from macOS, and the app adds only reading, redaction and
+a place to press a button. Details and traps: CLAUDE.md, "Diagnostics".
+
+Release hygiene changed with it: `notarize.sh` now archives the `.dSYM` and
+`release.sh` attaches it. A dSYM is matched to a binary by UUID and cannot be
+regenerated after the fact, so **no release before 0.3.6 has one** — crash
+reports from 0.3.5 and earlier will name functions (the shipped binary keeps
+its Swift symbols) but not lines.
+
 ## 5. UX design
 
 ### 5.1 The panel

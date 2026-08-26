@@ -31,8 +31,7 @@ actor AppleMailConnector: Connector {
     private let scope: Scope
     private var snapshotComplete = true
 
-    private static let log = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "apple-mail")
+    private static let log = AppLog.logger(.appleMail)
 
     /// Which messages count as queue-worthy. Both can be on; a message that
     /// is flagged *and* unread is reported once, as flagged, because

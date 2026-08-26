@@ -50,8 +50,7 @@ final class LicenseController {
     private let forcedState: LicenseState?
     private var clockTask: Task<Void, Never>?
 
-    private static let log = Logger(
-        subsystem: "lol.bgreen.inboxandchill", category: "license")
+    private static let log = AppLog.logger(.license)
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         forcedState = Self.forced(from: environment)

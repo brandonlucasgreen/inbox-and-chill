@@ -3,12 +3,13 @@ import SwiftUI
 
 /// Settings shell.
 ///
-/// Four tabs, split by *what the setting is about* rather than by when it was
+/// Five tabs, split by *what the setting is about* rather than by when it was
 /// added: General is the app itself (how you open it, how it updates, what
 /// you paid), Notifications is everything that decides how loudly it reaches
 /// you, Sources is per-connector — including each source's own setup, which
 /// is why the Claude Code hooks now live in the local source's editor rather
-/// than in General.
+/// than in General — and Diagnostics is what broke, which belongs next to the
+/// sources whose failures it records rather than buried in About.
 struct SettingsView: View {
     var body: some View {
         TabView {
@@ -20,6 +21,9 @@ struct SettingsView: View {
 
             SourcesPane()
                 .tabItem { Label("Sources", systemImage: "tray.2") }
+
+            DiagnosticsPane()
+                .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
 
             AboutPane()
                 .tabItem { Label("About", systemImage: "info.circle") }

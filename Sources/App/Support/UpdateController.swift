@@ -89,8 +89,11 @@ final class UpdateController: NSObject, SPUUpdaterDelegate,
             // A failure here is a misconfigured bundle, not a transient
             // problem — surface it and leave `controller` nil so the UI
             // offers no buttons that cannot work.
-            configurationProblem = Self.explain(error as NSError)
+            let problem = Self.explain(error as NSError)
                 ?? error.localizedDescription
+            configurationProblem = problem
+            ProblemLog.note(
+                .updates, "Updates are switched off for this build: \(problem)")
             return
         }
 
@@ -135,6 +138,12 @@ final class UpdateController: NSObject, SPUUpdaterDelegate,
         isChecking = false
         lastCheck = updater.lastUpdateCheckDate
         lastFailure = error.flatMap { Self.explain($0 as NSError) }
+        // A scheduled check runs once a day with nobody watching, so its
+        // failure would otherwise be gone before anyone opened Settings.
+        if let lastFailure, let error {
+            ProblemLog.note(
+                .updates, lastFailure, detail: String(describing: error))
+        }
     }
 
     // MARK: SPUStandardUserDriverDelegate

@@ -746,6 +746,654 @@ struct ClaudeSessionTargetTests {
 // MARK: - Keychain write failures (Sources/App/Support/Keychain.swift)
 
 
+// MARK: - Diagnostics (Sources/App/Support/Diagnostics/)
+
+/// The fixture is a real `.ips` written by macOS 26.5 for a deliberately
+/// crashed Developer ID binary on 2026-08-26, trimmed to the fields the parser
+/// reads and re-badged as ours. Kept as a literal rather than a resource file
+/// so the test bundle needs no `Resources` phase.
+private let sampleCrashIPS = """
+{"app_name":"Inbox & Chill","timestamp":"2026-08-26 11:00:45.00 -0400","app_version":"0.3.5","build_version":"8","platform":1,"bundleID":"lol.bgreen.inboxandchill","bug_type":"309","os_version":"macOS 26.5.2 (25F84)","name":"Inbox & Chill"}
+{"procName":"Inbox & Chill","procPath":"/Applications/Inbox & Chill.app/Contents/MacOS/Inbox & Chill","exception":{"codes":"0x0000000000000001, 0x0000000000000010","rawCodes":[1,16],"type":"EXC_BAD_ACCESS","signal":"SIGSEGV","subtype":"KERN_INVALID_ADDRESS at 0x0000000000000010"},"faultingThread":0,"threads":[{"triggered":true,"id":1,"frames":[{"imageOffset":1193046,"symbol":"AppState.handle(_:)","symbolLocation":128,"imageIndex":0},{"imageOffset":130560,"symbol":"start","symbolLocation":6992,"imageIndex":1}]}],"usedImages":[{"source":"P","arch":"arm64","base":4295737344,"size":3211264,"uuid":"43130ba1-50b4-3adf-bc62-027948988b82","path":"/Applications/Inbox & Chill.app/Contents/MacOS/Inbox & Chill","name":"Inbox & Chill"},{"source":"P","arch":"arm64","base":6800000000,"size":600000,"uuid":"11111111-2222-3333-4444-555555555555","path":"/usr/lib/dyld","name":"dyld"}]}
+"""
+
+/// A dyld "library missing" report: the shape where the backtrace is noise
+/// and the termination reasons are the whole story. This is the crash 0.3.x
+/// would produce if a Sparkle re-sign ever went wrong.
+private let dyldCrashIPS = """
+{"app_name":"Inbox & Chill","timestamp":"2026-08-22 10:59:44.00 -0400","app_version":"0.3.4","build_version":"7","bundleID":"lol.bgreen.inboxandchill","bug_type":"309","os_version":"macOS 26.5.2 (25F84)"}
+{"procName":"Inbox & Chill","exception":{"type":"EXC_CRASH","signal":"SIGABRT"},"termination":{"code":1,"namespace":"DYLD","indicator":"Library missing","reasons":["Library not loaded: @rpath/Sparkle.framework/Versions/B/Sparkle"]},"faultingThread":0,"threads":[{"frames":[{"imageOffset":23428,"symbol":"__abort_with_payload","symbolLocation":8,"imageIndex":0}]}],"usedImages":[{"base":6800000000,"name":"dyld"}]}
+"""
+
+/// The shape a plain signal crash actually has, taken from a real report
+/// written on 2026-08-26 when the installed app was sent SIGSEGV: the
+/// termination namespace is `SIGNAL`, the indicator only restates the signal,
+/// and — because the kill came from outside — no frame belongs to us.
+private let signalCrashIPS = """
+{"app_name":"Inbox & Chill","timestamp":"2026-08-26 11:18:48.00 -0400","app_version":"0.3.5","build_version":"8","bundleID":"lol.bgreen.inboxandchill","bug_type":"309","os_version":"macOS 26.5.2 (25F84)"}
+{"procName":"Inbox & Chill","exception":{"codes":"0x0000000000000000, 0x0000000000000000","type":"EXC_CRASH","signal":"SIGSEGV"},"termination":{"flags":0,"code":11,"namespace":"SIGNAL","indicator":"Segmentation fault: 11","byProc":"zsh","byPid":14781},"faultingThread":0,"threads":[{"frames":[{"imageOffset":5488,"symbol":"mach_msg2_trap","symbolLocation":8,"imageIndex":0}]}],"usedImages":[{"base":6800000000,"name":"libsystem_kernel.dylib"}]}
+"""
+
+@Suite("Crash report parsing")
+struct CrashReportFileTests {
+    private func parsed(_ text: String) throws -> CrashReport {
+        try #require(CrashReportFile.parse(
+            ips: text, fileName: "sample.ips", fallbackDate: .distantPast))
+    }
+
+    @Test("Reads the two-document .ips layout macOS actually writes")
+    func parsesRealReport() throws {
+        let report = try parsed(sampleCrashIPS)
+        #expect(report.bundleID == "lol.bgreen.inboxandchill")
+        #expect(report.appVersion == "0.3.5")
+        #expect(report.buildVersion == "8")
+        #expect(report.procName == "Inbox & Chill")
+        #expect(report.exceptionType == "EXC_BAD_ACCESS")
+        #expect(report.signal == "SIGSEGV")
+        #expect(report.subtype == "KERN_INVALID_ADDRESS at 0x0000000000000010")
+        #expect(report.frames.count == 2)
+    }
+
+    /// The header is its own JSON document on line 1. Handing the whole file
+    /// to a decoder is the mistake this guards.
+    @Test("A single-document file is not a crash report")
+    func rejectsSingleDocument() {
+        #expect(CrashReportFile.parse(
+            ips: "{\"bug_type\":\"309\"}", fileName: "x.ips",
+            fallbackDate: .now) == nil)
+        #expect(CrashReportFile.parse(
+            ips: "", fileName: "x.ips", fallbackDate: .now) == nil)
+    }
+
+    @Test("Timestamps are read in the report's own fixed format, not the locale's")
+    func parsesTimestamp() throws {
+        let report = try parsed(sampleCrashIPS)
+        #expect(report.date != .distantPast)
+        // 2026-08-26 11:00:45 -0400 == 15:00:45Z
+        let components = Calendar(identifier: .gregorian).dateComponents(
+            in: TimeZone(secondsFromGMT: 0)!, from: report.date)
+        #expect(components.year == 2026)
+        #expect(components.month == 8)
+        #expect(components.day == 26)
+        #expect(components.hour == 15)
+    }
+
+    @Test("Falls back to the file date when the header has no usable timestamp")
+    func fallsBackToFileDate() throws {
+        let noTimestamp = sampleCrashIPS.replacingOccurrences(
+            of: "\"timestamp\":\"2026-08-26 11:00:45.00 -0400\",", with: "")
+        let fallback = Date(timeIntervalSince1970: 1_000_000)
+        let report = try #require(CrashReportFile.parse(
+            ips: noTimestamp, fileName: "x.ips", fallbackDate: fallback))
+        #expect(report.date == fallback)
+    }
+
+    @Test("Frame addresses are the image base plus the offset")
+    func computesFrameAddresses() throws {
+        let report = try parsed(sampleCrashIPS)
+        #expect(report.frames[0].address == 4_295_737_344 + 1_193_046)
+        #expect(report.frames[0].image == "Inbox & Chill")
+        #expect(report.frames[1].image == "dyld")
+    }
+
+    @Test("The signature names our own frame, not the runtime above it")
+    func signatureNamesOurFrame() throws {
+        #expect(CrashReportFile.signature(try parsed(sampleCrashIPS))
+            == "EXC_BAD_ACCESS (SIGSEGV) in AppState.handle(_:)")
+    }
+
+    /// dyld says "terminated at launch; ignore backtrace" for these, so the
+    /// backtrace must not be what names the crash.
+    @Test("A dyld failure is named by its indicator, not its backtrace")
+    func signatureUsesTerminationIndicator() throws {
+        let report = try parsed(dyldCrashIPS)
+        #expect(CrashReportFile.signature(report) == "Library missing")
+        #expect(report.terminationReasons.first?.contains("Sparkle") == true)
+    }
+
+    /// The bug this caught in the live test: preferring the termination
+    /// indicator unconditionally titled a segfault "Segmentation fault: 11",
+    /// which restates the signal and throws away the frame that says where.
+    @Test("A SIGNAL termination does not get to name the crash")
+    func signalIndicatorIsNotASignature() throws {
+        let report = try parsed(signalCrashIPS)
+        let signature = CrashReportFile.signature(report)
+        #expect(signature != "Segmentation fault: 11")
+        #expect(signature.contains("EXC_CRASH"))
+        // An external kill is a different thing from a crash, and saying so
+        // is the difference between two very different investigations.
+        #expect(signature.contains("sent by zsh"))
+        #expect(report.terminatedByProcess == "zsh")
+    }
+
+    /// Every idle Mac app is sitting in `mach_msg2_trap`. Borrowing it would
+    /// give every unrelated crash the same title and group them together.
+    @Test("A crash with no frame of ours does not borrow someone else's")
+    func doesNotBorrowForeignSymbols() throws {
+        #expect(CrashReportFile.topmostOwnSymbol(try parsed(signalCrashIPS)) == nil)
+        #expect(CrashReportFile.topmostOwnSymbol(try parsed(sampleCrashIPS))
+            == "AppState.handle(_:)")
+    }
+
+    @Test("Backtrace keeps address and image for a frame with no symbol")
+    func backtraceRendersUnsymbolicatedFrames() throws {
+        var report = try parsed(sampleCrashIPS)
+        report.frames[1].symbol = nil
+        let text = CrashReportFile.backtrace(report)
+        #expect(text.contains("AppState.handle(_:) + 128"))
+        #expect(text.contains("(no symbol)"))
+        // The address has to survive so `atos` can still resolve it later.
+        #expect(text.contains(String(format: "0x%016llx", report.frames[1].address)))
+    }
+
+    @Test("A report with no frames says so rather than rendering nothing")
+    func backtraceHandlesNoFrames() throws {
+        var report = try parsed(sampleCrashIPS)
+        report.frames = []
+        #expect(CrashReportFile.backtrace(report) == "(no frames recorded)")
+    }
+
+    @Test("Only bug_type 309 is a crash")
+    func readsBugType() {
+        #expect(CrashReportFile.bugType(ips: sampleCrashIPS) == "309")
+        #expect(CrashReportFile.bugType(ips: "not json\nalso not") == nil)
+    }
+
+    /// A crashed `inchill` has no bundle id at all — measured on this Mac,
+    /// where a bare executable's report carried `procName` and no `bundleID`.
+    @Test("Ownership falls back to the process name when there is no bundle id")
+    func ownershipFallsBackToProcName() throws {
+        var report = try parsed(sampleCrashIPS)
+        #expect(CrashReportFile.belongsToUs(
+            report, bundleID: "lol.bgreen.inboxandchill", procNames: []))
+        report.bundleID = nil
+        report.procName = "inchill"
+        #expect(CrashReportFile.belongsToUs(
+            report, bundleID: "lol.bgreen.inboxandchill", procNames: ["inchill"]))
+        #expect(!CrashReportFile.belongsToUs(
+            report, bundleID: "lol.bgreen.inboxandchill", procNames: ["something-else"]))
+    }
+
+    @Test("Someone else's crash is not ours")
+    func rejectsForeignReports() throws {
+        var report = try parsed(sampleCrashIPS)
+        report.bundleID = "com.apple.Safari"
+        #expect(!CrashReportFile.belongsToUs(
+            report, bundleID: "lol.bgreen.inboxandchill", procNames: ["Inbox & Chill"]))
+    }
+}
+
+@Suite("Diagnostics redaction")
+struct DiagnosticsRedactionTests {
+    @Test("Strips every token shape this app can hold")
+    func redactsTokens() {
+        let text = """
+            slack xoxp-1234567890-0987654321-abcdefghijklmnop failed
+            github ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 rejected
+            linear lin_api_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123 expired
+            Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature
+            {"token":"s3cr3t-value-here","topic":"alerts"}
+            """
+        let redacted = CrashReportFile.redact(text)
+        #expect(!redacted.contains("xoxp-1234567890"))
+        #expect(!redacted.contains("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"))
+        #expect(!redacted.contains("lin_api_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"))
+        #expect(!redacted.contains("eyJhbGciOiJIUzI1NiJ9"))
+        #expect(!redacted.contains("s3cr3t-value-here"))
+        // The surrounding sentence has to survive, or the report is useless.
+        #expect(redacted.contains("failed"))
+        #expect(redacted.contains("rejected"))
+        #expect(redacted.contains("alerts"))
+    }
+
+    @Test("Strips home directories macOS did not already anonymise")
+    func redactsHomeDirectory() {
+        let redacted = CrashReportFile.redact(
+            "wrote /Users/brandon/Library/Logs and /Users/USER/Desktop/app")
+        #expect(!redacted.contains("/Users/brandon"))
+        // macOS's own placeholder is left alone — replacing it would lose the
+        // fact that the OS, not us, did the redacting.
+        #expect(redacted.contains("/Users/USER/Desktop"))
+    }
+
+    @Test("Strips e-mail addresses, which mail errors carry")
+    func redactsEmail() {
+        let redacted = CrashReportFile.redact("no account for someone@example.com")
+        #expect(!redacted.contains("someone@example.com"))
+        #expect(redacted.contains("no account for"))
+    }
+
+    @Test("Leaves an ordinary backtrace untouched")
+    func leavesBacktraceAlone() {
+        let text = "0   Inbox & Chill  0x0000000102345678  AppState.handle(_:) + 128"
+        #expect(CrashReportFile.redact(text) == text)
+    }
+}
+
+@Suite("Crash harvesting")
+struct CrashHarvesterTests {
+    private func makeDirectory() throws -> URL {
+        let url = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func write(_ text: String, _ name: String, in url: URL) throws {
+        try Data(text.utf8).write(to: url.appending(path: name))
+    }
+
+    @Test("Finds our crash and ignores everyone else's")
+    func findsOurCrash() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try write(sampleCrashIPS, "Inbox & Chill-2026-08-26-110045.ips", in: dir)
+        try write(
+            sampleCrashIPS.replacingOccurrences(
+                of: "lol.bgreen.inboxandchill", with: "com.apple.Safari"),
+            "Safari-2026-08-26-110045.ips", in: dir)
+        try write("not a report at all", "junk.diag", in: dir)
+
+        let harvest = CrashHarvester.harvest(
+            directories: [dir], bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: nil)
+        #expect(harvest.problem == nil)
+        #expect(harvest.reports.count == 1)
+        #expect(harvest.newest?.appVersion == "0.3.5")
+    }
+
+    /// macOS moves reports into `Retired`, so a sweep that reads only the top
+    /// level goes blind on exactly the older crashes people report.
+    @Test("Reads the Retired subdirectory as well")
+    func readsRetiredDirectory() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let retired = dir.appending(path: "Retired")
+        try FileManager.default.createDirectory(
+            at: retired, withIntermediateDirectories: true)
+        try write(dyldCrashIPS, "Inbox & Chill-2026-08-22-105944.ips", in: retired)
+
+        let harvest = CrashHarvester.harvest(
+            directories: [dir, retired], bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: nil)
+        #expect(harvest.newest?.appVersion == "0.3.4")
+        #expect(harvest.problem == nil)
+    }
+
+    @Test("A crash already reported is not reported twice")
+    func skipsAlreadySeen() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try write(sampleCrashIPS, "Inbox & Chill-2026-08-26-110045.ips", in: dir)
+
+        let first = CrashHarvester.harvest(
+            directories: [dir], bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: nil)
+        let crashDate = try #require(first.newest?.date)
+        let second = CrashHarvester.harvest(
+            directories: [dir], bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: crashDate)
+        #expect(second.newest == nil)
+    }
+
+    @Test("The same crash seen in two directories is reported once")
+    func deduplicatesAcrossDirectories() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let retired = dir.appending(path: "Retired")
+        try FileManager.default.createDirectory(
+            at: retired, withIntermediateDirectories: true)
+        try write(sampleCrashIPS, "Inbox & Chill-2026-08-26-110045.ips", in: dir)
+        try write(
+            sampleCrashIPS, "Inbox & Chill-2026-08-26-110045.000.ips", in: retired)
+
+        let harvest = CrashHarvester.harvest(
+            directories: [dir, retired], bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: nil)
+        #expect(harvest.reports.count == 1)
+    }
+
+    @Test("A non-crash report in the same folder is skipped")
+    func skipsNonCrashBugTypes() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try write(
+            sampleCrashIPS.replacingOccurrences(
+                of: "\"bug_type\":\"309\"", with: "\"bug_type\":\"288\""),
+            "Inbox & Chill-2026-08-26-110045.ips", in: dir)
+
+        let harvest = CrashHarvester.harvest(
+            directories: [dir], bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: nil)
+        #expect(harvest.newest == nil)
+        #expect(harvest.problem == nil)
+    }
+
+    /// The control that must fail loudly (rule 5). "No crashes recorded" and
+    /// "I was not able to look" have to be distinguishable, or the pane is
+    /// reassuring for the wrong reason for the rest of the app's life.
+    @Test("Being unable to look is reported, not rendered as 'no crashes'")
+    func namesAReasonWhenItCannotLook() {
+        let missing = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        let harvest = CrashHarvester.harvest(
+            directories: [missing], bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: nil)
+        #expect(harvest.newest == nil)
+        let problem = harvest.problem
+        #expect(problem != nil)
+        #expect(problem?.contains(missing.path) == true)
+    }
+
+    /// A missing `Retired` is the ordinary state of a Mac that has never had
+    /// a report age out, so it must not be reported as a problem.
+    @Test("A missing optional directory is not a problem")
+    func missingOptionalDirectoryIsSilent() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let harvest = CrashHarvester.harvest(
+            directories: [dir, dir.appending(path: "Retired")],
+            bundleID: "lol.bgreen.inboxandchill",
+            procNames: ["Inbox & Chill"], newerThan: nil)
+        #expect(harvest.problem == nil)
+    }
+}
+
+@Suite("Problem log")
+struct ProblemLogTests {
+    private func makeURL() -> URL {
+        URL.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "diagnostics.log")
+    }
+
+    @Test("A problem round-trips through the JSONL line format")
+    func lineRoundTrips() throws {
+        let problem = Problem(
+            date: Date(timeIntervalSince1970: 1_700_000_000),
+            category: .sync, sourceID: "abc", sourceLabel: "Slack",
+            summary: "invalid_auth", detail: "token rejected")
+        let line = try #require(ProblemLog.line(for: problem))
+        let decoded = ProblemLog.problems(fromJSONL: line)
+        #expect(decoded == [problem])
+    }
+
+    /// A crash mid-append leaves a half-written line. Losing the whole
+    /// history to it would be the diagnostics log failing at the one moment
+    /// it exists for.
+    @Test("A corrupt line costs that line, not the file")
+    func toleratesCorruptLines() throws {
+        let good = try #require(ProblemLog.line(for: Problem(
+            date: .now, category: .journal, summary: "first")))
+        let text = good + "\n{\"date\":\"trunc\n" + good
+        #expect(ProblemLog.problems(fromJSONL: text).count == 2)
+    }
+
+    @Test("Writes, reads back, and keeps newest first")
+    func writesAndReads() async throws {
+        let url = makeURL()
+        defer { try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent()) }
+        let log = ProblemLog(url: url)
+        await log.record(.sync, "older", at: Date(timeIntervalSince1970: 100))
+        await log.record(.journal, "newer", at: Date(timeIntervalSince1970: 200))
+        let recent = await log.recent()
+        #expect(recent.map(\.summary) == ["newer", "older"])
+        #expect(await log.currentWriteProblem() == nil)
+    }
+
+    /// A poll loop failing every 30 seconds would otherwise write the same
+    /// sentence thousands of times and bury everything else.
+    @Test("The same problem moments later is not written twice")
+    func suppressesRepeats() async throws {
+        let url = makeURL()
+        defer { try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent()) }
+        let log = ProblemLog(url: url)
+        let start = Date(timeIntervalSince1970: 1000)
+        await log.record(.sync, "invalid_auth", sourceID: "s1", at: start)
+        await log.record(
+            .sync, "invalid_auth", sourceID: "s1",
+            at: start.addingTimeInterval(30))
+        #expect(await log.recent().count == 1)
+
+        // Past the window it is news again.
+        await log.record(
+            .sync, "invalid_auth", sourceID: "s1",
+            at: start.addingTimeInterval(ProblemLog.repeatWindow + 1))
+        #expect(await log.recent().count == 2)
+    }
+
+    @Test("A different source's identical message is a different problem")
+    func doesNotSuppressAcrossSources() async throws {
+        let url = makeURL()
+        defer { try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent()) }
+        let log = ProblemLog(url: url)
+        let start = Date(timeIntervalSince1970: 1000)
+        await log.record(.sync, "invalid_auth", sourceID: "s1", at: start)
+        await log.record(.sync, "invalid_auth", sourceID: "s2", at: start)
+        #expect(await log.recent().count == 2)
+    }
+
+    /// Rule 5 applied to the log itself: if it cannot be written, that has to
+    /// be visible, because everything else in the pane is about to look empty.
+    @Test("A log that cannot be written says so")
+    func reportsItsOwnWriteFailure() async throws {
+        // A path whose parent is a *file*, so the directory cannot be made.
+        let blocker = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        try Data("not a directory".utf8).write(to: blocker)
+        defer { try? FileManager.default.removeItem(at: blocker) }
+
+        let log = ProblemLog(url: blocker.appending(path: "diagnostics.log"))
+        await log.record(.sync, "something failed")
+        let problem = await log.currentWriteProblem()
+        #expect(problem != nil)
+        #expect(problem?.contains("diagnostics.log") == true)
+    }
+}
+
+@Suite("Diagnostics report")
+struct DiagnosticsReportTests {
+    private func snapshot(crash: CrashReport? = nil) -> DiagnosticsSnapshot {
+        DiagnosticsSnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            appVersion: "0.3.5", buildVersion: "8",
+            osVersion: "26.5.2", architecture: "arm64",
+            installPath: "/Applications/Inbox & Chill.app",
+            sourceKinds: ["slack": 1, "github": 2],
+            crash: crash)
+    }
+
+    private var sampleCrash: CrashReport {
+        CrashReportFile.parse(
+            ips: sampleCrashIPS, fileName: "sample.ips", fallbackDate: .now)!
+    }
+
+    @Test("Says 'no crashes' only when it actually looked")
+    func distinguishesNoCrashFromNoLook() {
+        #expect(DiagnosticsReport.text(snapshot()).contains("No crashes recorded."))
+
+        var blocked = snapshot()
+        blocked.harvestProblem = "Couldn't read DiagnosticReports: denied."
+        let text = DiagnosticsReport.text(blocked)
+        #expect(text.contains("Couldn't read DiagnosticReports"))
+        #expect(!text.contains("No crashes recorded."))
+    }
+
+    @Test("Carries the crash, the versions and the backtrace")
+    func includesTheCrash() {
+        let text = DiagnosticsReport.text(snapshot(crash: sampleCrash))
+        #expect(text.contains("EXC_BAD_ACCESS (SIGSEGV) in AppState.handle(_:)"))
+        #expect(text.contains("Version at the time: 0.3.5 (8)"))
+        #expect(text.contains("AppState.handle(_:) + 128"))
+        // Sorted by kind, so two exports of the same setup diff cleanly.
+        #expect(text.contains("github ×2, slack"))
+    }
+
+    /// The single choke point: every section goes through `redact` on the way
+    /// out, so a section added later cannot forget to.
+    @Test("Everything leaving the app is redacted")
+    func redactsOnTheWayOut() {
+        var withSecret = snapshot()
+        withSecret.problems = [Problem(
+            date: .now, category: .sync,
+            summary: "Slack rejected xoxp-1111111111-2222222222-abcdefghijkl")]
+        let text = DiagnosticsReport.text(withSecret)
+        #expect(!text.contains("xoxp-1111111111"))
+        #expect(text.contains("Slack rejected"))
+    }
+
+    @Test("The issue title is the signature, so duplicates look like duplicates")
+    func issueTitleIsTheSignature() {
+        #expect(DiagnosticsReport.issueTitle(snapshot(crash: sampleCrash))
+            == "Crash: EXC_BAD_ACCESS (SIGSEGV) in AppState.handle(_:) (0.3.5)")
+    }
+
+    /// A silent truncation is the exact failure this feature exists to
+    /// prevent: the reader would think the backtrace simply ended there.
+    @Test("A body too long for a URL is truncated loudly")
+    func truncatesLoudly() {
+        var big = snapshot(crash: sampleCrash)
+        big.problems = (0..<400).map {
+            Problem(date: .now, category: .sync, summary: "problem number \($0)")
+        }
+        let body = DiagnosticsReport.issueBody(big)
+        #expect(body.count <= DiagnosticsReport.issueBodyLimit)
+        #expect(body.contains("truncated"))
+        #expect(body.contains("Export Diagnostics"))
+    }
+
+    @Test("A short body is not truncated")
+    func leavesShortBodiesAlone() {
+        #expect(!DiagnosticsReport.issueBody(snapshot()).contains("truncated"))
+    }
+
+    @Test("The issue URL points at this repository and carries the report")
+    func buildsIssueURL() throws {
+        let url = try #require(DiagnosticsReport.issueURL(snapshot(crash: sampleCrash)))
+        #expect(url.absoluteString.hasPrefix(
+            "https://github.com/brandonlucasgreen/inbox-and-chill/issues/new"))
+        let items = try #require(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(items.contains { $0.name == "labels" && $0.value == "bug" })
+        #expect(items.first { $0.name == "body" }?.value?
+            .contains("EXC_BAD_ACCESS") == true)
+    }
+}
+
+@Suite("Breadcrumbs")
+struct UnifiedLogRenderTests {
+    /// Rule 5 again: a log we could not read must not render as a log with
+    /// nothing in it.
+    @Test("An unreadable log says why instead of looking empty")
+    func namesAReasonWhenUnreadable() {
+        var breadcrumbs = LogBreadcrumbs()
+        breadcrumbs.problem = "Couldn't read the app's own log: denied"
+        #expect(UnifiedLogReader.render(breadcrumbs).contains("denied"))
+    }
+
+    @Test("An empty window is described as empty")
+    func describesAnEmptyWindow() {
+        #expect(UnifiedLogReader.render(LogBreadcrumbs())
+            .contains("wrote nothing"))
+    }
+
+    @Test("Entries render with time, level and category")
+    func rendersEntries() {
+        let breadcrumbs = LogBreadcrumbs(entries: [
+            AppLogEntry(
+                date: Date(timeIntervalSince1970: 1_700_000_000),
+                category: "apple-mail", level: "error",
+                message: "AppleScript failed: -1743")
+        ])
+        let text = UnifiedLogReader.render(breadcrumbs)
+        #expect(text.contains("[apple-mail]"))
+        #expect(text.contains("ERROR"))
+        #expect(text.contains("-1743"))
+    }
+}
+
+@Suite("Run marker")
+struct RunMarkerTests {
+    private func makeURL() -> URL {
+        URL.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "last-run.json")
+    }
+
+    /// The marker surviving is the only evidence of a run that ended with no
+    /// crash report at all — force quit, out of memory, lost power.
+    @Test("A marker left behind is reported to the next run")
+    func reportsAnUncleanPreviousRun() throws {
+        let url = makeURL()
+        defer { try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent()) }
+
+        #expect(RunMarkerStore.beginRun(url: url, pid: 100, version: "0.3.5", build: "8") == nil)
+        let previous = try #require(
+            RunMarkerStore.beginRun(url: url, pid: 200, version: "0.3.5", build: "8"))
+        #expect(previous.pid == 100)
+    }
+
+    @Test("A clean quit leaves nothing behind")
+    func aCleanQuitLeavesNothing() {
+        let url = makeURL()
+        defer { try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent()) }
+        RunMarkerStore.beginRun(url: url, pid: 100, version: "0.3.5", build: "8")
+        RunMarkerStore.endRun(url: url)
+        #expect(RunMarkerStore.beginRun(url: url, pid: 200, version: "0.3.5", build: "8") == nil)
+    }
+
+    /// Guards against a second call inside one launch mistaking this very
+    /// process for a dead one.
+    @Test("The current process is never mistaken for a previous run")
+    func ignoresItsOwnMarker() {
+        let url = makeURL()
+        defer { try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent()) }
+        RunMarkerStore.beginRun(url: url, pid: 100, version: "0.3.5", build: "8")
+        #expect(RunMarkerStore.beginRun(url: url, pid: 100, version: "0.3.5", build: "8") == nil)
+    }
+}
+
+@Suite("Exception trap")
+struct ExceptionTrapTests {
+    @Test("An exception is read once, then gone")
+    func takesPreviousOnce() throws {
+        let url = URL.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "last-exception.json")
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent()) }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let recorded = UncaughtException(
+            date: Date(timeIntervalSince1970: 1_700_000_000),
+            name: "NSUnknownKeyException",
+            reason: "this class is not key value coding-compliant for the key statusItem.",
+            callStack: ["0   AppKit  0x00 -[NSObject valueForKey:]"])
+        try encoder.encode(recorded).write(to: url)
+
+        let read = try #require(ExceptionTrap.takePrevious(url: url))
+        #expect(read == recorded)
+        #expect(ExceptionTrap.takePrevious(url: url) == nil)
+    }
+
+    @Test("The summary names the class and the reason")
+    func summaryReadsWell() {
+        let exception = UncaughtException(
+            date: .now, name: "NSUnknownKeyException",
+            reason: "not KVC-compliant for the key statusItem.", callStack: [])
+        #expect(ExceptionTrap.summary(exception)
+            == "NSUnknownKeyException: not KVC-compliant for the key statusItem.")
+    }
+}
+
+
 // MARK: - Item context (Sources/App/Sync/ItemContext.swift + connectors)
 
 @Suite("Item context model")
