@@ -1682,6 +1682,35 @@ struct OpenSchemeGateTests {
     }
 }
 
+@Suite("Local source recreation policy (Sources/App/AppState.swift)")
+struct LocalSourceRecreationTests {
+    /// The bug this guards: `bootstrapConnectors()` runs after every source
+    /// add/edit/toggle and on every launch, and used to recreate the
+    /// built-in local source unconditionally whenever none existed — making
+    /// the trash button in `SourcesPane` undo itself a moment after deleting
+    /// "Terminal & Claude Code".
+    @Test func createsOnlyWhenMissingAndNotUserRemoved() {
+        #expect(
+            AppState.shouldCreateLocalSource(
+                hasLocalConfig: false, userRemoved: false))
+        #expect(
+            !AppState.shouldCreateLocalSource(
+                hasLocalConfig: true, userRemoved: false))
+    }
+
+    /// The guard the fix rests on: deleting the source has to stay deleted,
+    /// the same contract `ClaudeCodeIntegration.shouldAutoInstall` already
+    /// keeps for the hooks themselves.
+    @Test func neverUndoesAnExplicitRemoval() {
+        #expect(
+            !AppState.shouldCreateLocalSource(
+                hasLocalConfig: false, userRemoved: true))
+        #expect(
+            !AppState.shouldCreateLocalSource(
+                hasLocalConfig: true, userRemoved: true))
+    }
+}
+
 @Suite("New sources are configurable")
 struct NewSourceCatalogTests {
     @Test("Sentry and Apple Mail are in the catalog with usable fields")
