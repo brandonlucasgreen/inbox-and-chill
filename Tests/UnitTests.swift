@@ -925,6 +925,13 @@ struct CrashReportFileTests {
 
 @Suite("Diagnostics redaction")
 struct DiagnosticsRedactionTests {
+    /// The fixtures below are token-*shaped* on purpose — that is the whole
+    /// point — and they are safe to commit only because their bodies are
+    /// sequential and so fall under gitleaks' entropy threshold. That is a
+    /// constraint to preserve, not a happy accident: replace one with
+    /// something random and the repo's own Secret scan fails on this file.
+    /// Verified clean against gitleaks 8.30.1 over full history, which is the
+    /// version CI installs (the workflow tracks latest, deliberately).
     @Test("Strips every token shape this app can hold")
     func redactsTokens() {
         let text = """
