@@ -24,6 +24,8 @@ That's the whole setup. Linear is polled every 30–60 seconds and is a true 1:1
 
 **Why classic, not fine-grained:** as of 2026 fine-grained PATs still have no permission at all for the notifications API — there's simply no scope to grant. A classic token with `notifications` is the only way in. Gitify, Trailer, and every other GitHub-notifications tool hits this same wall.
 
+**If any of your notifications come from private repos, add the `repo` scope too.** `notifications` only lets the app list your notifications. Expanding one — to show its labels, state, or the comment that mentioned you — is a separate API call, and on a private repo that call 404s (not 403s) without `repo`. A bare "not found" reads like the issue was deleted; it almost always means the scope is missing.
+
 **SSO note:** if your organization enforces SAML SSO on personal access tokens, a freshly created classic PAT won't be able to see that org's notifications until you authorize it — look for an **"Enable SSO"** / **"Authorize"** link next to the token on the tokens page and click through it once.
 
 **Only where I'm involved** (on by default) adds `participating=true`, which limits the feed to threads you're actually in — mentioned, assigned, review requested, authored, or already commented on. Turn it off and you get every notification from every repo you watch.
