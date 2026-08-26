@@ -432,9 +432,13 @@ in the mapper.
 
 #### Todoist's own traps (all from its OpenAPI document, 2026-08-26)
 
-Not one of these was verified against a live account when written; treat the
-whole connector as rule 4's "unverified however carefully it was written"
-until someone has pointed a real token at it.
+None of these was verified when written — all four came from the document.
+Brandon then pointed a real token at it the same day, and the reading path
+holds: his tasks arrived, a task due at a time today showed that time, and `C`
+on a repeating task produced the next occurrence as its own row. **Three paths
+are still unexercised** and should not be trusted on the strength of that:
+undo after `C` on a repeating task, paging past the first page, and the
+rejected-token path.
 
 - **`priority: 1` is the default every task carries**, and 4 is urgent — the
   inverse of EventKit, *and* the inverse of the labels Todoist's own UI prints

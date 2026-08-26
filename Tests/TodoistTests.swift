@@ -21,7 +21,9 @@ import Testing
 //    every task past the cut.
 //
 // Shapes come from Todoist's published OpenAPI document, fetched 2026-08-26.
-// Nothing here has met a live account — see the note in `TodoistConnector`.
+// The shapes were confirmed against a real account on 2026-08-26 — see the
+// note in `TodoistConnector` for exactly which paths that exercised, and which
+// three it did not.
 
 private func decodeTask(_ json: String) throws -> TodoistAPI.TaskEntry {
     try JSONDecoder().decode(

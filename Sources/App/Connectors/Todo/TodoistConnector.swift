@@ -31,10 +31,17 @@ import OSLog
 /// 4. **Task ids are opaque alphanumeric strings**, and there is no `url`
 ///    field, so the deep link is constructed.
 ///
-/// **Not yet verified against a live account.** Every shape above comes from
-/// Todoist's OpenAPI document rather than a real response; CLAUDE.md rule 4 is
-/// explicit that a config which has never met the real service is unverified
-/// however carefully it was written.
+/// **Verified against a real account on 2026-08-26** by Brandon: a personal
+/// token, his own tasks arriving in the queue, a task due at a time today
+/// showing that time, and `C` on a repeating task producing the next
+/// occurrence as its own row. So the shapes above are no longer just a
+/// document — the decoding path, the due parsing and the recurrence identity
+/// have all met the real service.
+///
+/// Still unexercised, and worth knowing before trusting either: **undo after
+/// `C` on a repeating task** (the lossy path `uncomplete` reports), **paging
+/// past the first page**, and the **rejected-token path**. Those remain rule
+/// 4 territory.
 actor TodoistConnector: Connector {
     nonisolated let sourceID: String
     nonisolated let sourceKind = "todoist"

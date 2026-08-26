@@ -382,8 +382,21 @@ fetched 2026-08-26 — not from memory, which mattered: the current API is the
 unified **v1**, and a connector written against the widely-remembered
 `/rest/v2/tasks` would 404 on every call.
 
-Rule 4 still applies, and it is the honest headline: **none of it has met a
-live account.** A document is not a service. The first real token pointed at
-this will be the first evidence, and the fields most likely to be wrong are
-the ones the document left loosest — `due`, which it types only as a free-form
-object, is decoded from its worked example.
+Rule 4 applied in full until it didn't: **Brandon pointed a real token at it
+on 2026-08-26**, and the reading path holds. His tasks arrived in the queue, a
+task due at a time today showed that time, and `C` on a repeating task
+produced the next occurrence as its own row. That last one is the important
+result — it exercises both the `due.date` parsing the document left loosest
+*and* the occurrence-day identity, which were the two most likely places for
+this to be quietly wrong.
+
+**Three paths remain unexercised**, and a passing read path is not evidence
+for any of them:
+
+- **Undo after `C` on a repeating task** — the deliberately lossy branch, and
+  the only place this connector's behaviour differs from Reminders'.
+- **Paging past the first page.** `next_cursor` handling has never actually
+  had a second page to fetch, and this is the one that would fail *silently*
+  and destructively: a mishandled cursor plus `.remoteTruth` archives the tail.
+- **The rejected-token path** (401), including whether the project picker's
+  error reads well when the token is wrong rather than absent.
