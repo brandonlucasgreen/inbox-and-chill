@@ -4,8 +4,8 @@
 #
 # Edit this file, never the copy in the tap.
 cask "inbox-and-chill" do
-  version "0.3.4"
-  sha256 "701dbf25e32065c87f63278d73e248b7f7c4cafb23682ff659962577afc2bdab"
+  version "0.3.5"
+  sha256 "1f6e76a052c2e8b22d21f2b384f44cdedd42d893bca611215ea8259ba22b25eb"
 
   url "https://github.com/brandonlucasgreen/inbox-and-chill/releases/download/v#{version}/InboxAndChill-#{version}.dmg"
   name "Inbox & Chill"
