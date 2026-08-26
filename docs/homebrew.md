@@ -133,10 +133,25 @@ the tap — the tap's copy is overwritten on every release.
 `scripts/release.sh` calls it after the GitHub release exists:
 
 1. reads `MARKETING_VERSION` from `project.yml`
-2. checksums `dist/dmg/InboxAndChill-<version>.dmg`
+2. checksums `dist/dmg/InboxAndChill.dmg`
 3. rewrites the `version` and `sha256` lines
 4. **downloads the published asset and compares checksums**
 5. copies the file into the tap and pushes it
+
+**The DMG's filename carries no version** — every release publishes
+`InboxAndChill.dmg`, so
+`https://github.com/brandonlucasgreen/inbox-and-chill/releases/latest/download/InboxAndChill.dmg`
+is a link that can go on a page once and never be revised. The cask is
+unaffected by that: its `url` still interpolates `v#{version}/`, so brew
+downloads the release the cask names rather than whatever is newest, and
+`version` and `sha256` still pin the exact bytes.
+
+One consequence to know. The path `dist/dmg/InboxAndChill.dmg` no longer
+proves *which* version is sitting there — before, a stale DMG simply did not
+match the path the script looked for. Step 4 is now the only thing that
+notices, and it does: it compares real bytes against the published asset and
+refuses to push. `--local-only` skips step 4, so a cask written that way is
+not evidence of anything until the full run confirms it.
 
 Step 4 is the one that earns its place. A cask whose `sha256` does not match
 the bytes GitHub serves fails for *every* user at once, and Homebrew reports it
@@ -160,7 +175,7 @@ The name **must** start with `homebrew-`, or `brew` will not resolve
 credentials, exactly like Sparkle. Then:
 
 ```bash
-scripts/homebrew-cask.sh     # needs dist/dmg/InboxAndChill-<version>.dmg present
+scripts/homebrew-cask.sh     # needs dist/dmg/InboxAndChill.dmg present
 ```
 
 ### Checking a change to the cask
@@ -177,6 +192,13 @@ brew livecheck --cask <you>/scratchtap/inbox-and-chill
 brew untap <you>/scratchtap
 ```
 
+**Delete the scratch cask file before `brew untap`.** While the scratch tap
+holds a cask with the same token, `inbox-and-chill` is ambiguous between two
+taps, and `brew untap` answers *"Would untap … after uninstalling the
+following casks"* rather than untapping. Forcing it there would uninstall the
+real app. `rm` the `.rb` from `$(brew --repository <you>/scratchtap)/Casks/`
+first and the untap is clean. Hit on 2026-08-26.
+
 `livecheck` reads `appcast.xml` — the Sparkle feed doubles as the cask's
 version source, so a release that updates the feed also tells brew a new
 version exists. Two audit findings worth not rediscovering:
@@ -188,3 +210,14 @@ version exists. Two audit findings worth not rediscovering:
   `depends_on macos: :sequoia` by the `Homebrew/OSDependsOn` cop. The Cask
   Cookbook still reads as though the bare symbol pins one exact release; the
   cop is what current brew enforces.
+- `brew style` on a bare *path* reports three Sorbet/frozen-string offenses
+  that vanish when the same file is inspected inside a tap. Audit the tap, not
+  the path, or you will chase style rules casks are exempt from.
+
+**A version-free asset filename is fine by brew**, verified 2026-08-26 rather
+than reasoned about: a probe cask pointing at
+`releases/download/v0.4.0/InboxAndChill.zip` — a real asset with no version in
+its name — passed `brew audit --cask --strict --online` (exit 0) and cached
+as `<url-hash>--InboxAndChill.zip`. The cache key is derived from the whole
+URL, which still carries the tag, so two releases sharing a filename do not
+collide.

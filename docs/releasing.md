@@ -111,7 +111,7 @@ It asks for confirmation before anything outward-facing, then, in order:
 
 1. `scripts/notarize.sh` — **clean** Release build, preflight, submit to
    Apple, staple, and write `dist/InboxAndChill.zip`,
-   `dist/dmg/InboxAndChill-<version>.dmg` and
+   `dist/dmg/InboxAndChill.dmg` and
    `dist/dsym/InboxAndChill-<version>.dSYM.zip`
 2. An annotated git tag, pushed
 3. `gh release create` with both artifacts attached
@@ -172,26 +172,27 @@ Expect `200`. GitHub release URLs embed the tag, and `appcast.sh` inserts
 that the insertion worked. Safe because the signature covers the archive
 bytes, not the URL.
 
-**The zip is `InboxAndChill.zip` in every release — no version in the name.**
-That is what makes this a link you can publish once and never revise:
+**The zip and the DMG carry no version in their names.** Every release
+publishes `InboxAndChill.zip` and `InboxAndChill.dmg`, which is what makes
+these two links publishable once and never revised:
 
 ```
+https://github.com/brandonlucasgreen/inbox-and-chill/releases/latest/download/InboxAndChill.dmg
 https://github.com/brandonlucasgreen/inbox-and-chill/releases/latest/download/InboxAndChill.zip
 ```
 
-The tag still varies per enclosure inside the feed, because Sparkle must
-download the *specific* version an entry describes, not whatever is newest.
-The version itself is nowhere in the filename and does not need to be: it is
-in the `Info.plist` inside the archive, which is where `generate_appcast`
-reads it from, and in each item's `sparkle:shortVersionString`, which is where
-`appcast.sh` gets the tag it inserts. The DMG and the dSYM keep their versions
-— they accumulate side by side in `dist/` and nothing else tells them apart.
+The tag still varies per enclosure inside the feed, and inside the cask,
+because both must fetch the *specific* version they describe rather than
+whatever is newest. The version itself is nowhere in either filename and does
+not need to be: it is in the `Info.plist` inside the archive, which is where
+`generate_appcast` reads it from, and in each item's
+`sparkle:shortVersionString`, which is where `appcast.sh` gets the tag it
+inserts.
 
-One caveat when checking a URL by hand: GitHub answered `200` for
-`v0.4.0/InboxAndChill.zip` *before* any release used that name, serving the
-bytes of `InboxAndChill-0.4.0.zip` (measured 2026-08-26; `NoSuchThing.zip`
-under the same tag correctly 404s). So a `200` here is weaker evidence than it
-looks — compare the size against the feed's `length` if it matters.
+**The dSYM keeps its version.** It is the one artifact that accumulates in
+`dist/` across releases, and nothing inside it says which build it belongs to
+— it is matched to a binary by UUID. An unversioned dSYM is a file you cannot
+attribute months later, which is the only thing it exists for.
 
 ### The appcast entry is signed
 

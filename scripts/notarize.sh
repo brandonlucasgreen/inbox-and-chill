@@ -348,7 +348,17 @@ if [ "$SKIP_DMG" -eq 0 ]; then
   # release.
   DMG_DIR="$OUT_DIR/dmg"
   mkdir -p "$DMG_DIR"
-  DMG="$DMG_DIR/InboxAndChill-$VERSION.dmg"
+  # Unversioned for the same reason as the zip: it makes
+  # releases/latest/download/InboxAndChill.dmg a link that keeps working, and
+  # that is the link a *person* clicks. The cask still pins the exact version
+  # and sha256, and its URL still carries the tag, so brew downloads the
+  # release it means rather than whatever is newest.
+  #
+  # The dSYM above keeps its version, deliberately: it is the one artifact
+  # that accumulates in dist/ across releases, and a dSYM whose build you
+  # cannot name is useless — it is matched to a binary by UUID and nothing
+  # else in the file says which release it belongs to.
+  DMG="$DMG_DIR/InboxAndChill.dmg"
   STAGE=$(mktemp -d)
   cp -R "$APP" "$STAGE/"
   ln -s /Applications "$STAGE/Applications"

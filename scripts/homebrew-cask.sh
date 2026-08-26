@@ -48,13 +48,23 @@ die() { echo "error: $*" >&2; exit 1; }
 VERSION=$(grep -m1 'MARKETING_VERSION:' project.yml | sed 's/.*"\(.*\)".*/\1/')
 [ -n "$VERSION" ] || die "could not read MARKETING_VERSION from project.yml."
 
-DMG="dist/dmg/InboxAndChill-$VERSION.dmg"
+# The DMG's name carries no version — one link, `releases/latest/download/
+# InboxAndChill.dmg`, keeps working across releases. Which means this path
+# alone no longer proves the DMG is *this* version: before, a stale one simply
+# did not match the path and the check below said so.
+#
+# The backstop is the published-asset comparison further down, which compares
+# actual bytes and is the thing that has to be right anyway. It runs on every
+# path that publishes. `--local-only` skips it and would happily write the
+# checksum of a stale DMG into the cask — harmless, because it pushes nothing,
+# but re-run without the flag before believing that cask.
+DMG="dist/dmg/InboxAndChill.dmg"
 [ -f "$DMG" ] || die "$DMG is missing — the cask's checksum comes from the
     notarized DMG, so run scripts/notarize.sh (or scripts/release.sh) first."
 
 SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
 [ -n "$SHA" ] || die "could not checksum $DMG."
-URL="https://github.com/$REPO_SLUG/releases/download/v$VERSION/InboxAndChill-$VERSION.dmg"
+URL="https://github.com/$REPO_SLUG/releases/download/v$VERSION/InboxAndChill.dmg"
 
 echo "==> Cask plan"
 echo "    version     $VERSION"
@@ -97,11 +107,15 @@ curl -fsSL "$URL" -o "$ASSET" || die "could not download $URL.
     credentials. Check the release exists and the repo is public."
 PUBLISHED_SHA=$(shasum -a 256 "$ASSET" | awk '{print $1}')
 rm -f "$ASSET"
-[ "$PUBLISHED_SHA" = "$SHA" ] || die "checksum mismatch.
-    local  $DMG: $SHA
-    github $URL: $PUBLISHED_SHA
-    The DMG in dist/ is not the one that was uploaded. Do not publish this
-    cask — every install would fail its checksum. Re-cut the release."
+[ "$PUBLISHED_SHA" = "$SHA" ] || die "checksum mismatch — not pushing the cask.
+    local  $DMG
+           $SHA
+    github $URL
+           $PUBLISHED_SHA
+    The DMG in dist/ is not the one that was uploaded. Every install would
+    fail its checksum. Two causes now that the name carries no version: the
+    release was cut from different bytes, or dist/dmg/InboxAndChill.dmg is
+    left over from an earlier version. Re-run scripts/notarize.sh."
 echo "    match: the DMG in dist/ is byte-for-byte what GitHub serves"
 
 # --- Push it to the tap ---------------------------------------------------

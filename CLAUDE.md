@@ -1007,17 +1007,30 @@ Two more facts about the feed:
   same-named archive does **not** clobber the previous release's entry
   (measured: two rounds with a fixed name kept both items); and the tag
   rewrite in `appcast.sh` now reads the version from the item instead of the
-  name. The DMG and the dSYM keep their versions — unlike the zip they
-  accumulate side by side in `dist/`.
-  The check this cost: a mismatch between the built `Info.plist` and
-  `project.yml` used to surface as `dist/InboxAndChill-<version>.zip` being
-  missing after `notarize.sh`. A fixed name cannot fail that way, so
-  `release.sh` now reads `CFBundleShortVersionString` out of the zip and
-  compares it — an assertion rather than a side effect.
-  And **a `200` on an enclosure URL is weaker evidence than it looks**: GitHub
-  answered 200 for `v0.4.0/InboxAndChill.zip` before any release used that
-  name, serving `InboxAndChill-0.4.0.zip`'s bytes (2026-08-26). A genuinely
-  absent asset under the same tag does 404.
+  name.
+- **The DMG is `InboxAndChill.dmg` too**, same date and same reason —
+  `releases/latest/download/InboxAndChill.dmg` is the link a *person* clicks,
+  so it is the one most worth keeping stable. The cask is unaffected: its
+  `url` still interpolates `v#{version}/`, and `version` + `sha256` still pin
+  the exact bytes, so brew downloads the release the cask names.
+- **The dSYM keeps its version, deliberately.** It is the one artifact that
+  accumulates in `dist/` across releases, and nothing inside it says which
+  build it belongs to — it is matched to a binary by UUID. An unversioned
+  dSYM would be a file you cannot attribute.
+- **Two accidental checks were lost, and one replaced both.** A build whose
+  version disagreed with `project.yml` used to surface as
+  `dist/InboxAndChill-<version>.zip` (or `.dmg`) being missing after
+  `notarize.sh` — that is the stale-`.xcodeproj` failure that cost the first
+  attempt at cutting 0.4.0. Fixed names cannot fail that way, so `release.sh`
+  reads `CFBundleShortVersionString` out of the zip and compares it before
+  pushing the tag. Read it by the **exact** path: `unzip -p "$ZIP"
+  "*/Contents/Info.plist"` matches five plists (Sparkle's `Updater.app`, both
+  XPC services, the KeyboardShortcuts bundle, and the app's own **last**),
+  because unzip's wildcards cross `/`.
+  The other lost check was `homebrew-cask.sh`'s: `dist/dmg/InboxAndChill.dmg`
+  no longer proves which version it holds. Its published-asset comparison
+  catches a stale one on every path that publishes — but `--local-only` skips
+  that, so a cask written that way proves nothing until the full run.
 
 ### The signing key lives in the *login* keychain
 

@@ -100,7 +100,7 @@ fi
 # The DMG and the dSYM still carry theirs — they sit side by side in dist/
 # across releases, and are told apart by nothing else.
 ZIP="dist/InboxAndChill.zip"
-DMG="dist/dmg/InboxAndChill-$VERSION.dmg"
+DMG="dist/dmg/InboxAndChill.dmg"
 # Attached to the release so a crash report from a shipped build can still be
 # resolved to a line months later. It cannot be regenerated after the fact:
 # the dSYM is matched to a binary by UUID, and rebuilding produces a new one.
@@ -141,12 +141,13 @@ scripts/notarize.sh
 [ -f "$ZIP" ] || die "notarize.sh finished but $ZIP is missing."
 [ -f "$DMG" ] || die "notarize.sh finished but $DMG is missing."
 
-# Asked of the bundle rather than inferred from a filename. While the zip was
-# named InboxAndChill-<version>.zip, a build whose version disagreed with
-# project.yml simply left that path missing and the check above caught it by
-# accident; a fixed name cannot. So ask the built Info.plist directly — this is
-# the stale-.xcodeproj failure that cost the first attempt at cutting 0.4.0,
-# and it is worth catching before the tag is pushed rather than after.
+# Asked of the bundle rather than inferred from a filename, and now the ONLY
+# thing asking. While the artifacts were named InboxAndChill-<version>.{zip,dmg}
+# a build whose version disagreed with project.yml simply left those paths
+# missing, and the two checks above caught it by accident; fixed names cannot.
+# So ask the built Info.plist directly — this is the stale-.xcodeproj failure
+# that cost the first attempt at cutting 0.4.0, and it is worth catching before
+# the tag is pushed rather than after.
 # The exact path, not a glob. `*/Contents/Info.plist` also matches the four
 # nested bundles in there — Sparkle's Updater.app, both of its XPC services,
 # and the KeyboardShortcuts resource bundle — and unzip's wildcards cross `/`,
