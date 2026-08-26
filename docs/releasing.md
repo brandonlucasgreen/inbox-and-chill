@@ -10,20 +10,27 @@ means which cause.
 
 ---
 
-## Where things stand (2026-08-23)
+## Where things stand (2026-08-26)
 
-**0.3.3 was the first release that actually carried Sparkle**, and it shipped
-verified: the feed returns 200, its appcast entry is signed, a quarantined copy
-of the artifact is `accepted — Notarized Developer ID`, and `stapler validate`
-passes. The one-time manual-install hop described here for 0.3.2 is behind us.
+**0.4.0 is a feature release**, and the first `.x` bump since to-do support
+landed: Apple Reminders (#33) and Todoist (#35) are new source kinds, and #34
+added crash and error reporting in Settings › Diagnostics.
 
-So the next release is the first that can be delivered *in-app*, which makes it
-the first real end-to-end test of the update path — the gap called out at the
-bottom of this document. Cut it, then check for it from a 0.3.3 install rather
-than assuming it worked.
+`v0.3.5` shipped `CURRENT_PROJECT_VERSION` **8**. 0.4.0 ships **9**, which
+`release.sh` enforces.
 
-`v0.3.3` shipped `CURRENT_PROJECT_VERSION` **6**. The next release must be
-**7 or higher** or `release.sh` refuses to tag.
+**0.4.0 is the first release that archives a dSYM.** Nothing before it has
+one, and none can be recovered — a dSYM is matched to a binary by UUID and a
+rebuild produces a different one. So a crash report from 0.3.5 or earlier
+resolves to function names (the shipped binary keeps its Swift symbols) but not
+to line numbers. From here on, `notarize.sh` writes
+`dist/dsym/InboxAndChill-<version>.dSYM.zip` and `release.sh` attaches it.
+
+**The in-app update path has still never been observed working end to end.**
+0.3.4 → 0.3.5 was the first pair that could have tested it and nobody has
+confirmed a Check Now finding it. `UpdateController.checkInterval` is 86,400 —
+once a day — so "no update came through" usually means the check has not run
+yet, not that the release is broken.
 
 **Still free.** `Licensing.isEnforced` is `false`, so a shipped build has no
 trial countdown, no expiry, and writes no trial start date. That is deliberate
@@ -103,8 +110,9 @@ scripts/release.sh
 It asks for confirmation before anything outward-facing, then, in order:
 
 1. `scripts/notarize.sh` — **clean** Release build, preflight, submit to
-   Apple, staple, and write `dist/InboxAndChill-<version>.zip` plus
-   `dist/dmg/InboxAndChill-<version>.dmg`
+   Apple, staple, and write `dist/InboxAndChill-<version>.zip`,
+   `dist/dmg/InboxAndChill-<version>.dmg` and
+   `dist/dsym/InboxAndChill-<version>.dSYM.zip`
 2. An annotated git tag, pushed
 3. `gh release create` with both artifacts attached
 4. `scripts/appcast.sh` — regenerates `appcast.xml`
@@ -112,9 +120,17 @@ It asks for confirmation before anything outward-facing, then, in order:
    verifies its checksum against the published asset, and pushes it to the tap
 6. One commit on `main` carrying the new `appcast.xml` and cask
 
-Two artifacts because they have different jobs: Sparkle downloads the **zip**
+Three artifacts because they have different jobs: Sparkle downloads the **zip**
 to update an existing install; a person downloads the **dmg** the first time —
-and so does `brew`.
+and so does `brew`. The **dSYM** is for you, months later: it is what turns a
+crash report someone pastes into an issue from a function name into a file and
+a line. Each lives in its own directory because `generate_appcast` treats every
+archive beside the zip as another release.
+
+```bash
+atos -o "InboxAndChill-<version>.dSYM/Contents/Resources/DWARF/Inbox & Chill" \
+  -arch arm64 -l <load-address> <frame-address>
+```
 
 Step 5 is the only one that is **not fatal**. By the time it runs, the tag, the
 release and the feed are already public, so an unreachable tap must not read as
