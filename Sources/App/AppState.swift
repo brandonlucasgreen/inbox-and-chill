@@ -326,7 +326,10 @@ final class AppState {
             ?? []
         // The local source (terminal + Claude Code) is built-in: create it on
         // first run. Banners default on for local (decision §2.1.4).
-        if !configs.contains(where: { $0.kind == "local" }) {
+        if Self.shouldCreateLocalSource(
+            hasLocalConfig: configs.contains(where: { $0.kind == "local" }),
+            userRemoved: Self.localSourceUserRemoved)
+        {
             let local = SourceConfig(
                 kind: "local", displayName: "Terminal & Claude Code",
                 bannersEnabled: true)
@@ -346,6 +349,29 @@ final class AppState {
                 await engine.register(FakeConnector())
             }
         #endif
+    }
+
+    /// Whether `bootstrapConnectors()` should (re)create the built-in local
+    /// source. Pulled out as a pure function per rule 6 — the SwiftData
+    /// plumbing around it isn't worth testing, this decision is.
+    nonisolated static func shouldCreateLocalSource(
+        hasLocalConfig: Bool, userRemoved: Bool
+    ) -> Bool {
+        !hasLocalConfig && !userRemoved
+    }
+
+    private static let localSourceUserRemovedKey = "localSource.userRemoved"
+
+    /// Set when the user deletes the local source from Settings → Sources.
+    /// Without this, `bootstrapConnectors()` — which runs after every source
+    /// add/edit/toggle, and on every launch — would recreate the source it
+    /// was just told to remove, making the trash button in `SourcesPane` a
+    /// no-op for this one row.
+    static var localSourceUserRemoved: Bool {
+        get { UserDefaults.standard.bool(forKey: localSourceUserRemovedKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: localSourceUserRemovedKey)
+        }
     }
 
     /// Why the app couldn't write an agent's hooks, keyed by harness id.
