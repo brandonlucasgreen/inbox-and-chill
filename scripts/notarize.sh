@@ -118,6 +118,26 @@ if [ -z "$APP" ]; then
   # seal — the preflight below then refuses to submit, a long way from the
   # cause. Observed 2026-08-21. A release is rare and has to describe one
   # known state anyway, so it pays the few extra minutes.
+  # Regenerate the project first, exactly as install-local.sh does. The
+  # .xcodeproj is generated from project.yml and gitignored, so it does not
+  # arrive with a `git pull` — a release cut right after merging a PR that
+  # ADDED files builds against a project that has never heard of them, and
+  # fails with `cannot find '<Type>' in scope` for source sitting on disk.
+  #
+  # That happened cutting 0.4.0: main had merged #33/#34/#35, the primary
+  # checkout's project was six hours stale, and the build died on ProblemLog
+  # and RemindersAuthorization. It failed loudly only because those commits
+  # added new *types*. A commit that merely DELETED a file would have built
+  # clean and shipped a binary containing code no longer in the repo — which
+  # is precisely the "a tag whose artifact was built from different code"
+  # failure this script's header says it exists to prevent.
+  echo "==> Generating Xcode project"
+  if ! command -v xcodegen >/dev/null 2>&1; then
+    echo "xcodegen not found. Install it with: brew install xcodegen" >&2
+    exit 1
+  fi
+  xcodegen generate >/dev/null
+
   echo "==> Building (Release, clean)"
   xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill \
     -configuration Release clean build >/tmp/inchill-notarize-build.log 2>&1 || {
