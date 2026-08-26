@@ -341,6 +341,62 @@ reminders are flagged high-signal but do not float to the top of the queue by
 position (Brandon's call, §4). If that turns out to matter, it is a queue sort
 option — a separate change.
 
-Todoist is deliberately **not** in this PR. The seam is the deliverable; the
-second provider proves it later, and CLAUDE.md rule 4's "untestable is a real
-blocker" applies until there is an account to test against.
+## 9. Todoist — the second provider (added 2026-08-26)
+
+The original text here said Todoist was deliberately not in this PR, the seam
+being the deliverable. It is now in its own follow-up, and the seam held: two
+new files (`TodoistAPI`, `TodoistConnector`) plus a project picker, and **no
+change at all** to `TodoTask`, `TodoScope` or `TodoItemMapper`'s decisions. The
+only edits to existing to-do code were additive or tidying — a
+`TodoPriority.fromTodoist` beside `fromEventKit`, `rank` moved from
+`RemindersConnector` up into `TodoItemMapper` where both providers reach it,
+and the chips moved into a shared `TodoContext`.
+
+What Todoist needed that Reminders did not:
+
+| | Reminders | Todoist |
+|---|---|---|
+| Source of truth | EventKit, local | REST v1, network |
+| Permission | TCC dialog | a pasted API token |
+| "Lists" | reminder lists | projects |
+| Due window | two predicates | filter query `overdue \| today \| tomorrow` |
+| Completeness guard | a 200-task cap | cursor pagination *and* the cap |
+| Poll | 60s | 120s — it costs a round trip |
+| Undo after `C` | restores | **lossy on a repeating task, and says so** |
+
+That last row is the one real behavioural difference, and it is Todoist's, not
+ours: `close` on a recurring task reschedules it instead of completing it, so
+there is nothing for `reopen` to put back. `TodoistConnector.uncomplete`
+reports that rather than letting an undo half-work in silence.
+
+**The same latent gap exists in `RemindersConnector` and is not fixed here.**
+EventKit rolls a recurring reminder the same way, so `uncomplete` setting
+`isCompleted = false` on the rolled original does not restore the old due date
+either — it just does not say so. Worth a follow-up; out of scope for the
+connector that noticed it.
+
+### Verification status
+
+Every shape in `TodoistAPI` comes from Todoist's published OpenAPI document,
+fetched 2026-08-26 — not from memory, which mattered: the current API is the
+unified **v1**, and a connector written against the widely-remembered
+`/rest/v2/tasks` would 404 on every call.
+
+Rule 4 applied in full until it didn't: **Brandon pointed a real token at it
+on 2026-08-26**, and the reading path holds. His tasks arrived in the queue, a
+task due at a time today showed that time, and `C` on a repeating task
+produced the next occurrence as its own row. That last one is the important
+result — it exercises both the `due.date` parsing the document left loosest
+*and* the occurrence-day identity, which were the two most likely places for
+this to be quietly wrong.
+
+**Three paths remain unexercised**, and a passing read path is not evidence
+for any of them:
+
+- **Undo after `C` on a repeating task** — the deliberately lossy branch, and
+  the only place this connector's behaviour differs from Reminders'.
+- **Paging past the first page.** `next_cursor` handling has never actually
+  had a second page to fetch, and this is the one that would fail *silently*
+  and destructively: a mishandled cursor plus `.remoteTruth` archives the tail.
+- **The rejected-token path** (401), including whether the project picker's
+  error reads well when the token is wrong rather than absent.

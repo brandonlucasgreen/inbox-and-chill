@@ -115,18 +115,11 @@ actor RemindersConnector: Connector {
 
     /// Most urgent first, so a cap drops the least urgent.
     ///
-    /// Overdue before due-today before later before undated, then by due date,
-    /// then by title so the order is stable poll to poll. `nil` due dates sort
-    /// last rather than comparing as `.distantPast`.
+    /// Lives in `TodoItemMapper` — every to-do provider needs the same order
+    /// for the same reason, and a cap that keeps a different set per provider
+    /// would be a bug you could only find by counting rows.
     nonisolated static func rank(_ tasks: [TodoTask]) -> [TodoTask] {
-        tasks.sorted { a, b in
-            switch (a.due, b.due) {
-            case let (x?, y?) where x != y: return x < y
-            case (nil, _?): return false
-            case (_?, nil): return true
-            default: return a.title < b.title
-            }
-        }
+        TodoItemMapper.rank(tasks)
     }
 
     // MARK: EventKit
@@ -293,43 +286,13 @@ actor RemindersConnector: Connector {
 
     /// Pure, so the chips are testable without EventKit.
     ///
-    /// Built lazily rather than stored in `payload` like Linear's, because
-    /// `payload` already carries `TodoPayload` for the write-through and
-    /// because "Overdue by 3 days" goes stale sitting in a database.
+    /// The chips themselves live in `TodoContext`, shared with every other
+    /// to-do provider: they answer a question `TodoItemMapper.occurredAt`
+    /// creates rather than anything EventKit-specific, so one copy is right.
+    /// This forwarder stays so the connector still reads as self-contained.
     nonisolated static func context(from payload: TodoPayload, now: Date)
         -> ItemContext?
     {
-        let task = TodoTask(
-            providerID: payload.providerID, title: "", listName: payload.listName,
-            due: payload.due, isAllDay: payload.isAllDay,
-            priority: payload.priority, isRecurring: payload.isRecurring)
-        let overdue = payload.due.map {
-            TodoItemMapper.isOverdue(due: $0, isAllDay: payload.isAllDay, now: now)
-        } ?? false
-
-        var chips: [ItemContext.Chip] = [
-            .init(
-                systemImage: overdue ? "exclamationmark.circle" : "calendar",
-                text: TodoItemMapper.dueDescription(for: task, now: now),
-                tint: overdue ? .red : .neutral)
-        ]
-        if let list = payload.listName, !list.isEmpty {
-            chips.append(.init(systemImage: "list.bullet", text: list))
-        }
-        if payload.isRecurring {
-            chips.append(.init(systemImage: "repeat", text: "Repeats"))
-        }
-        switch payload.priority {
-        case .high:
-            chips.append(
-                .init(systemImage: "flag.fill", text: "High priority", tint: .orange))
-        case .medium:
-            chips.append(.init(systemImage: "flag", text: "Medium priority"))
-        case .low:
-            chips.append(.init(systemImage: "flag", text: "Low priority"))
-        case .none:
-            break
-        }
-        return ItemContext(chips: chips)
+        TodoContext.chips(from: payload, now: now)
     }
 }

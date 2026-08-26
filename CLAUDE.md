@@ -375,8 +375,9 @@ the connector 5s later. Two failures have come from this:
 | `sentry` | REST poll 60s | markDone (opt-in), remoteTruth | `?query=is:unresolved is:for_review&sort=inbox` — Sentry's For Review tab *is* the queue. Resolving is **off by default**: it's team-visible, so a local done just means "seen" and the item returns via `resurrectIfNeeded` when `lastSeen` moves. Cursor pagination via `Link` → needs `snapshotWasComplete()`. |
 | `appleMail` | AppleScript poll 60s | markDone, remoteTruth | **Covers Gmail** — it reads every account Mail has, which is why there is no Gmail connector (PLAN §6.13). Flagged-only by default. See below. |
 | `reminders` | EventKit poll 60s | **completesTask**, remoteTruth, providesContext | Apple Reminders. Declares `completesTask` and deliberately **not** `markDone` — that omission is the dismiss-vs-complete feature. No entitlement needed; 7.8ms cold, so no Mail-style cold penalty. See below. |
+| `todoist` | REST poll 120s | **completesTask**, remoteTruth, providesContext | Todoist, via a personal API token. Same to-do semantics as `reminders` — `E` dismisses locally, `C` closes in Todoist. **API v1 only** (`api.todoist.com/api/v1`); REST v2 and Sync v9 are gone. Undo is honestly lossy on a repeating task. See below. |
 
-### A to-do is not a notification (`reminders`, and any future Todoist)
+### A to-do is not a notification (`reminders`, `todoist`)
 
 Three things here were arrived at by measuring EventKit, and two of them are
 the opposite of what the rest of this file would lead you to expect. Full
@@ -416,12 +417,60 @@ numbers and method in `docs/todo-sources-plan.md`.
   all-day reminders sit at 00:00, so the start of tomorrow lets a task due
   *tomorrow* in. `TodoScope.dueWindowEnd` is one second earlier.
 
-Everything behavioural lives in `Connectors/Todo/{TodoTask,TodoItemMapper,TodoScope}`,
-pure and tested with no EventKit; `RemindersConnector` is EventKit in,
-`[TodoTask]` out. A Todoist connector is one new file. Note EventKit's types
-are **not `Sendable`**: the UI and the connector hold separate `EKEventStore`s
-and `EKReminder` is mapped inside the `fetchReminders` callback. TCC consent is
+Everything behavioural lives in
+`Connectors/Todo/{TodoTask,TodoItemMapper,TodoScope,TodoContext}`, pure and
+tested with no EventKit and no network; each connector is *provider in,
+`[TodoTask]` out* and nothing more. Note EventKit's types are **not
+`Sendable`**: the UI and the connector hold separate `EKEventStore`s and
+`EKReminder` is mapped inside the `fetchReminders` callback. TCC consent is
 per-process, so nothing is lost by not sharing.
+
+**The seam held.** Todoist added two files and changed none of the four above
+— which is the thing to preserve. A third provider that needs
+`TodoItemMapper` changed is a signal the change belongs in that provider, not
+in the mapper.
+
+#### Todoist's own traps (all from its OpenAPI document, 2026-08-26)
+
+None of these was verified when written — all four came from the document.
+Brandon then pointed a real token at it the same day, and the reading path
+holds: his tasks arrived, a task due at a time today showed that time, and `C`
+on a repeating task produced the next occurrence as its own row. **Three paths
+are still unexercised** and should not be trusted on the strength of that:
+undo after `C` on a repeating task, paging past the first page, and the
+rejected-token path.
+
+- **`priority: 1` is the default every task carries**, and 4 is urgent — the
+  inverse of EventKit, *and* the inverse of the labels Todoist's own UI prints
+  (its "P1" is `priority: 4`). Mapping 1 to anything but `.none` makes the
+  high-signal badge fire on the entire account.
+- **`due.date` carries both shapes** — `2026-08-26` for all-day, a full
+  timestamp for a timed task — so the string's own form is the all-day
+  discriminator. The timed form is sometimes *floating*, with no zone
+  designator, which `ISO8601DateFormatter` rejects outright; `ISO8601Timestamp`
+  alone would silently drop every timed task's due date. Todoist also sends
+  **six** fractional digits, one past what that formatter is specified for.
+- **`close` on a recurring task reschedules it rather than completing it**,
+  keeping the same id — identical to EventKit, and the reason the occurrence
+  day in the external id is load-bearing here too. It also makes **undo
+  genuinely lossy**: there is nothing for `reopen` to restore and no call that
+  brings the old due date back, so `uncomplete` *says so* rather than
+  half-working in silence.
+- **`next_cursor` is the only end-of-list signal.** A short page is not the
+  end. Stopping early without reporting the snapshot incomplete would hand
+  `.remoteTruth` a truncated list, which archives everything past the cut.
+- **`GET /tasks` has no due-date parameter**, so the due window goes through
+  the filter language and chosen projects through `project_id` — two requests
+  unioned by task id, the same shape `RemindersConnector` uses. The filter
+  query deliberately asks for `tomorrow` as well: Todoist evaluates `today` in
+  the *account's* timezone, and `TodoScope.accepts` is the gate that makes this
+  Mac's clock authoritative.
+- **Ids are opaque alphanumeric strings and there is no `url` field**, so the
+  deep link is constructed. It is `https`, which `AppState.openable` already
+  admits — this source widens no scheme.
+- The project picker in the source editor is **also the token check**, on
+  purpose: a bad token otherwise produces a source that looks like a free
+  afternoon. There is no second "Check Connection" control saying it again.
 
 ### One queue row per Claude Code session, not per turn
 
