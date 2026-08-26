@@ -40,6 +40,7 @@ final class AppState {
     /// reason — a refusal here is invisible from the queue, because it looks
     /// exactly like an inbox with nothing in it.
     private(set) var mailAutomation: MailAutomationAuthorization.Outcome?
+    private(set) var remindersAccess: RemindersAuthorization.Outcome?
 
     /// Persisted across relaunch (§5.3). nil = All.
     var selectedSourceFilter: String? {
@@ -347,11 +348,19 @@ final class AppState {
             configs.append(local)
         }
         ensureClaudeCodeHooks(configs: configs)
+        var taskSourceIDs: Set<String> = []
         for config in configs where config.isEnabled {
             if let connector = ConnectorFactory.make(config: config) {
+                // Read off the connector rather than restating it in the
+                // catalog: the capability is the truth, and a second
+                // declaration is a second thing to get out of step.
+                if connector.capabilities.contains(.completesTask) {
+                    taskSourceIDs.insert(connector.sourceID)
+                }
                 await engine.register(connector)
             }
         }
+        completesTaskSourceIDs = taskSourceIDs
         #if DEBUG
             if configs.allSatisfy({ $0.kind == "local" }),
                 ProcessInfo.processInfo.environment["INCHILL_NO_FAKE"] == nil {
@@ -611,6 +620,44 @@ final class AppState {
         return outcome.allowsFetch
     }
 
+    /// Resolves permission to read Reminders, recording the outcome in
+    /// `remindersAccess`, and reports whether a read can go ahead.
+    ///
+    /// Same contract as `resolveMailAutomation`, for the same reason:
+    /// `prompting: false` is free and shows nothing, so it is safe on appear
+    /// and on refresh. Pass `true` **only** from a control the user just
+    /// pressed — macOS shows its Reminders dialog once, and the point of the
+    /// flow is that they have read `RemindersAuthorization.preflight` before
+    /// it appears.
+    @discardableResult
+    func resolveRemindersAccess(prompting: Bool) async -> Bool {
+        let previous = remindersAccess
+        let outcome = await RemindersAccess.resolve(prompting: prompting)
+        remindersAccess = outcome
+        // Only on the transition into granted — otherwise the user waits out a
+        // poll interval after clicking Allow, which reads as the permission
+        // not having worked.
+        if outcome.allowsFetch, previous?.allowsFetch != true {
+            await engine.refreshNow()
+        }
+        return outcome.allowsFetch
+    }
+
+    /// Whether any configured, enabled source needs Reminders.
+    var hasEnabledRemindersSource: Bool {
+        let configs =
+            (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
+            ?? []
+        return configs.contains { $0.kind == "reminders" && $0.isEnabled }
+    }
+
+    /// The reminder lists on this Mac, for the source editor's picker.
+    ///
+    /// Empty until access is granted, which is why the editor shows the
+    /// permission control above the picker rather than beside it — an empty
+    /// list of lists otherwise reads as "you have no reminders".
+    func remindersListNames() -> [String] { RemindersAccess.listTitles() }
+
     /// Whether any configured, enabled source actually needs Mail — the
     /// notice is silent otherwise, exactly like `hasBannerEnabledSource`.
     var hasEnabledMailSource: Bool {
@@ -746,6 +793,14 @@ final class AppState {
         case "file", "claude":
             // A remote push must not open local files or session URIs.
             return sourceKind == "local" ? url : nil
+        case "x-apple-reminderkit":
+            // Reminders' own deep link, and local-only for the same reason:
+            // the URL is constructed by `RemindersConnector` from an EventKit
+            // identifier, never supplied by anything remote. Launch Services
+            // resolves the scheme to Reminders.app (measured 2026-08-26);
+            // whether this exact path lands on the right reminder is NOT
+            // verified, so a miss is a no-op rather than a wrong app opening.
+            return sourceKind == "reminders" ? url : nil
         default:
             return nil
         }
@@ -773,19 +828,70 @@ final class AppState {
         }
     }
 
+    /// Sources whose rows can be completed with `C`.
+    ///
+    /// Rebuilt by `bootstrapConnectors`, which is also what runs when a source
+    /// is saved or toggled — so this cannot drift from the registered
+    /// connectors without the connectors themselves having changed.
+    private(set) var completesTaskSourceIDs: Set<String> = []
+
+    /// Whether `C` means anything for this row.
+    func canComplete(_ item: Item) -> Bool {
+        completesTaskSourceIDs.contains(item.sourceID)
+    }
+
+    func canCompleteAll(_ items: [Item]) -> Bool {
+        !items.isEmpty && items.allSatisfy(canComplete)
+    }
+
+    /// `C` — finish the task in its source, and take the row out of the queue.
+    ///
+    /// Distinct from `markDone` by design: dismissing a to-do leaves the task
+    /// open in Reminders and keeps the row in the archive, and this is the only
+    /// thing that actually ticks it off. Goes on the same undo stack, and
+    /// `restore` reopens it remotely.
+    func completeTask(_ item: Item) {
+        guard canComplete(item) else {
+            openProblem =
+                "Only to-do sources can be completed. Press E to dismiss this instead."
+            return
+        }
+        undoStack.append(item.uid)
+        journal(
+            .completed, item: item,
+            detail: JournalWriter.waited(from: item.firstSeenAt, to: .now))
+        let (uid, sourceID, ext, payload) =
+            (item.uid, item.sourceID, externalID(of: item), item.payload)
+        Task {
+            await engine.completeTask(
+                uid: uid, sourceID: sourceID, externalID: ext, payload: payload)
+        }
+    }
+
     func undoDone() {
         guard let uid = undoStack.popLast() else { return }
         restore(uid: uid)
     }
 
     /// Bring a done item back to the queue (⌘Z and archive Restore).
+    ///
+    /// Carries the external id and payload as well as the source, because a
+    /// row that was *completed* rather than dismissed has to be reopened in
+    /// its source too — the engine decides which, from the reason the store
+    /// recorded. Restoring a dismissal is unaffected; nothing is written.
     func restore(uid: String) {
-        if journalEnabled, journalLogActions, let item = item(forUID: uid) {
-            journal(.restored, item: item)
+        let restored = item(forUID: uid)
+        if journalEnabled, journalLogActions, let restored {
+            journal(.restored, item: restored)
         }
         undoStack.removeAll { $0 == uid }
-        let sourceID = sourceID(forUID: uid)
-        Task { await engine.undoDone(uid: uid, sourceID: sourceID) }
+        let sourceID = restored?.sourceID ?? sourceID(forUID: uid)
+        let ext = restored.map(externalID(of:)) ?? ""
+        let payload = restored?.payload
+        Task {
+            await engine.undoDone(
+                uid: uid, sourceID: sourceID, externalID: ext, payload: payload)
+        }
     }
 
     private func item(forUID uid: String) -> Item? {

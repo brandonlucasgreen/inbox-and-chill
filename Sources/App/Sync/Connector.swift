@@ -48,6 +48,23 @@ struct ConnectorCapabilities: OptionSet, Sendable {
     /// demand when the user presses D. Opt-in so the panel never shows a
     /// loading state for a source that will always answer nothing.
     static let providesContext = ConnectorCapabilities(rawValue: 1 << 5)
+    /// Connector can finish a task in the remote service — a *second* verb,
+    /// distinct from `.markDone`.
+    ///
+    /// The distinction only matters for to-do sources, and it is the whole
+    /// point of them. Brandon, asking for Reminders: *"Dismissing a reminder
+    /// should not complete it, but rather strike it from the list."* A
+    /// notification has one end state — you dealt with it — so `.markDone`
+    /// conflating "gone from my queue" with "resolved at the source" is
+    /// correct for Slack or Linear. A task has two: *I have seen this* and
+    /// *I have done this*.
+    ///
+    /// So a to-do connector declares this and **not** `.markDone`. `E` then
+    /// writes nothing remotely (the row is struck locally and kept in the
+    /// archive) and `C` is the only thing that completes anything. A connector
+    /// declaring both would be saying dismissal and completion are the same
+    /// gesture, which for a task they are not.
+    static let completesTask = ConnectorCapabilities(rawValue: 1 << 6)
 }
 
 /// Events a push connector can emit between full snapshots.
@@ -82,6 +99,18 @@ protocol Connector: Actor {
     func markDone(externalID: String, payload: Data?) async throws
     /// Write-through snooze. No-op unless `.remoteSnooze`.
     func snooze(externalID: String, until: Date, payload: Data?) async throws
+    /// Finish the task in the remote service. No-op unless `.completesTask`.
+    ///
+    /// Note the external id may not be the id the *service* knows: a
+    /// recurring task's queue id carries its occurrence day (see
+    /// `TodoItemMapper`), so recover the provider's own id from `payload`.
+    func complete(externalID: String, payload: Data?) async throws
+    /// Reopen a task this connector completed, for ⌘Z.
+    ///
+    /// Required, not optional, for any connector declaring `.completesTask`:
+    /// without it undo restores the queue row while leaving the task ticked
+    /// off in the service, which is an undo that silently only half works.
+    func uncomplete(externalID: String, payload: Data?) async throws
     /// Start a push connection, delivering events via `emit`. Runs until
     /// cancelled. Default implementation returns immediately (poll-only).
     func run(emit: @escaping @Sendable (ConnectorEvent) -> Void) async
@@ -111,6 +140,8 @@ extension Connector {
     func snapshotWasComplete() async -> Bool { true }
     func markDone(externalID: String, payload: Data?) async throws {}
     func snooze(externalID: String, until: Date, payload: Data?) async throws {}
+    func complete(externalID: String, payload: Data?) async throws {}
+    func uncomplete(externalID: String, payload: Data?) async throws {}
     func run(emit: @escaping @Sendable (ConnectorEvent) -> Void) async {}
     func context(externalID: String, payload: Data?) async throws -> ItemContext? { nil }
 }

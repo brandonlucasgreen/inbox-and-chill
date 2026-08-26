@@ -24,6 +24,10 @@ struct TriageActions {
     var selection: Set<PersistentIdentifier>
     var allSelectedPinned: Bool
     var canRestore: Bool
+    /// True only when *every* selected row belongs to a source that can
+    /// complete tasks. All-or-nothing rather than "some", because a partial
+    /// completion across a mixed selection would be silently half-done.
+    var canComplete: Bool
     var canUndoDone: Bool
     /// True while the search field owns the keyboard: plain-key equivalents
     /// (E for Done) must stand down so typing an "e" types an "e".
@@ -36,6 +40,7 @@ struct TriageActions {
     var open: @MainActor () -> Void
     var openAndDone: @MainActor () -> Void
     var markDone: @MainActor () -> Void
+    var completeTask: @MainActor () -> Void
     var snooze: @MainActor (SnoozePreset) -> Void
     var pickSnoozeDate: @MainActor () -> Void
     var togglePin: @MainActor () -> Void
@@ -67,6 +72,7 @@ extension TriageActions: Equatable {
             && lhs.selection == rhs.selection
             && lhs.allSelectedPinned == rhs.allSelectedPinned
             && lhs.canRestore == rhs.canRestore
+            && lhs.canComplete == rhs.canComplete
             && lhs.canUndoDone == rhs.canUndoDone
             && lhs.isSearchFocused == rhs.isSearchFocused
             && lhs.revision == rhs.revision

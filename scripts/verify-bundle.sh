@@ -120,6 +120,9 @@ expect_plist_present SUPublicEDKey
 # denies the Apple event outright instead of asking, and the denial looks
 # exactly like "nothing happened" (CLAUDE.md rule 2).
 expect_plist_present NSAppleEventsUsageDescription
+# EventKit crashes outright without this, and the Reminders source is dead
+# without EventKit. Nothing else in the build would notice it missing.
+expect_plist_present NSRemindersFullAccessUsageDescription
 
 # --- Entitlements ---------------------------------------------------------
 # Only meaningful on a signed bundle; an unsigned build carries none at all.

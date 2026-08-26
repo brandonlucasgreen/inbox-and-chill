@@ -77,9 +77,57 @@ actor SyncEngine {
         notify(sourceID: sourceID, writeThroughFailure: failure)
     }
 
-    func undoDone(uid: String, sourceID: String) async {
-        try? await store.undoDone(uid: uid)
-        notify(sourceID: sourceID)
+    /// Finishes a to-do in its source, and marks the row done locally.
+    ///
+    /// Mirrors `markDone` deliberately, including the order: the local write
+    /// lands first so the queue responds to the keypress immediately, and a
+    /// write-through failure is *named* rather than swallowed. Silence here
+    /// would be the worst of both — the row leaves the queue while the task
+    /// stays open in Reminders, and nothing says so (rule 5).
+    func completeTask(
+        uid: String, sourceID: String, externalID: String, payload: Data?
+    ) async {
+        try? await store.markDone(uid: uid, reason: Store.DoneReason.completed)
+        var failure: String?
+        if let connector = connectors[sourceID],
+            connector.capabilities.contains(.completesTask) {
+            do {
+                try await connector.complete(externalID: externalID, payload: payload)
+            } catch {
+                failure = String(describing: error)
+            }
+        }
+        notify(sourceID: sourceID, writeThroughFailure: failure)
+    }
+
+    /// Whether this source can complete tasks — the panel and the main window
+    /// both need to know before offering `C`.
+    func completesTasks(sourceID: String) async -> Bool {
+        connectors[sourceID]?.capabilities.contains(.completesTask) ?? false
+    }
+
+    /// Brings a done item back — and reopens the task in its source when the
+    /// done was a *completion* rather than a dismissal.
+    ///
+    /// The store reports which kind of done it was, because by the time undo
+    /// runs nothing else knows. Without this branch, ⌘Z after `C` would put the
+    /// row back while leaving the reminder ticked off in Reminders.
+    func undoDone(
+        uid: String, sourceID: String, externalID: String = "", payload: Data? = nil
+    ) async {
+        let reason = try? await store.undoDone(uid: uid)
+        var failure: String?
+        if reason == Store.DoneReason.completed, !externalID.isEmpty,
+            let connector = connectors[sourceID],
+            connector.capabilities.contains(.completesTask) {
+            do {
+                try await connector.uncomplete(
+                    externalID: externalID, payload: payload)
+            } catch {
+                failure = String(describing: error)
+            }
+        }
+        notify(sourceID: sourceID, writeThroughFailure: failure)
     }
 
     func snooze(uid: String, sourceID: String, externalID: String, until: Date, payload: Data?) async {

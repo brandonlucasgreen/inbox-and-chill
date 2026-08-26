@@ -47,6 +47,7 @@ struct PanelView: View {
                 ArchiveView(
                     index: queue.index,
                     restore: { restoreFromArchive($0) },
+                    complete: { appState.completeTask($0) },
                     open: { appState.open($0) },
                     onClose: { showArchive = false })
             } else {
@@ -534,6 +535,13 @@ struct PanelView: View {
             "D" where filterText.isEmpty && !isFiltering:
             expandSelected()
             return true
+        // Complete, as distinct from dismiss. Only to-do sources can, and the
+        // key says so rather than doing nothing when they can't — a silent
+        // no-op reads as a broken shortcut.
+        case "c" where filterText.isEmpty && !isFiltering,
+            "C" where filterText.isEmpty && !isFiltering:
+            completeSelected()
+            return true
         default:
             guard character.isLetter || character.isNumber
                 || character.isPunctuation || character == " "
@@ -651,6 +659,17 @@ struct PanelView: View {
     private func doneSelected() {
         guard let item = selectedItem else { return }
         appState.markDone(item)
+    }
+
+    /// `C` — finish the task in its source.
+    ///
+    /// `appState.completeTask` is what refuses a non-task row, and it does so
+    /// out loud: it sets `openProblem`, which the panel already surfaces. That
+    /// keeps the "which sources can do this" answer in one place instead of
+    /// duplicating the capability check here.
+    private func completeSelected() {
+        guard let item = selectedItem else { return }
+        appState.completeTask(item)
     }
 
     private func pinSelected() {

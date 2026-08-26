@@ -2319,6 +2319,19 @@ struct OpenSchemeGateTests {
         #expect(AppState.openable(file, sourceKind: "appleMail", payload: nil) == nil)
     }
 
+    @Test("x-apple-reminderkit:// is reminders-source-only")
+    func reminderSchemeRemindersOnly() throws {
+        let link = try #require(
+            URL(string: RemindersConnector.deepLink(for: "ABC-123")))
+        #expect(link.scheme == "x-apple-reminderkit")
+        // The URL is built from an EventKit identifier this app read itself, so
+        // no remote publisher can conjure one — same argument as file://.
+        #expect(AppState.openable(link, sourceKind: "reminders", payload: nil) == link)
+        #expect(AppState.openable(link, sourceKind: "ntfy", payload: nil) == nil)
+        #expect(AppState.openable(link, sourceKind: "jsonPoller", payload: nil) == nil)
+        #expect(AppState.openable(link, sourceKind: "local", payload: nil) == nil)
+    }
+
     @Test("claude:// is local-source-only")
     func claudeSchemeLocalOnly() throws {
         let claude = try #require(URL(string: "claude://local_sessions/abc"))
@@ -2397,15 +2410,92 @@ struct NewSourceCatalogTests {
         }
     }
 
-    @Test("Apple Mail is the one kind that can't be added twice")
-    func appleMailIsSingleton() throws {
-        // A Mac has exactly one Mail.app database, unlike GitHub or Linear,
-        // where multiple accounts are legitimately different sources.
-        let mail = try #require(ConnectorCatalog.descriptor(for: "appleMail"))
-        #expect(!mail.allowsMultiple)
-        for kind in ConnectorCatalog.all where kind.id != "appleMail" {
+    @Test("Only the local-Mac-app kinds can't be added twice")
+    func localMacAppKindsAreSingletons() throws {
+        // The rule, rather than a list: a kind is a singleton exactly when a
+        // second one would be the same underlying data seen twice. This Mac has
+        // one Mail.app database and one Reminders database; a GitHub or Linear
+        // token can name any of several accounts, so those are legitimately
+        // repeatable.
+        //
+        // Was "Apple Mail is the one kind" until Reminders arrived
+        // (2026-08-26). Updated rather than relaxed — the assertion that every
+        // *other* kind allows multiples is the half worth keeping, because it
+        // is what catches a new source copying `allowsMultiple: false` off its
+        // neighbour without meaning to.
+        let singletons: Set<String> = ["appleMail", "reminders"]
+        for id in singletons {
+            let descriptor = try #require(ConnectorCatalog.descriptor(for: id))
+            #expect(
+                !descriptor.allowsMultiple,
+                "\(descriptor.displayName) reads one local database and should be a singleton")
+        }
+        for kind in ConnectorCatalog.all where !singletons.contains(kind.id) {
             #expect(kind.allowsMultiple, "\(kind.displayName) should allow multiple sources")
         }
+    }
+
+    @Test("Reminders explains itself once, not three times")
+    func remindersIsConfigurable() throws {
+        let reminders = try #require(ConnectorCatalog.descriptor(for: "reminders"))
+        #expect(!reminders.authNote.isEmpty)
+        // Nothing to paste, so nothing should claim otherwise — and no setup
+        // steps, because they could only restate the permission control that
+        // renders directly below them. `credentialSourcesExplainThemselves`
+        // only holds sources that ask for a secret to that contract.
+        #expect(reminders.fields.allSatisfy { !$0.isSecret })
+        #expect(reminders.setupURL.isEmpty)
+        #expect(
+            reminders.setupSteps.isEmpty,
+            "nothing to set up — steps here would duplicate the access section")
+
+        // The anti-duplication guard. This screen said "stays on this Mac"
+        // three times and "macOS asks, and it'll look empty if you decline"
+        // four times before Brandon called it out (2026-08-26). Each fact gets
+        // exactly one home: the E-vs-C surprise lives in the preflight bullets,
+        // and the no-token story lives in authNote.
+        let onScreen =
+            reminders.authNote + reminders.setupSteps.joined()
+            + reminders.fields.map(\.help).joined()
+        #expect(
+            !onScreen.contains("does not complete it"),
+            "dismiss-vs-complete belongs in the preflight, not restated here")
+        #expect(
+            !onScreen.lowercased().contains("permanently empty"),
+            "the empty-source warning belongs in the preflight's prompt note")
+        #expect(
+            RemindersAuthorization.preflight.bullets.contains { $0.contains("only C") },
+            "the E-vs-C surprise must be stated somewhere on this screen")
+        // The picker replaced a text field; the help must not still say
+        // "comma-separated".
+        let lists = try #require(reminders.fields.first { $0.key == "lists" })
+        #expect(!lists.help.lowercased().contains("comma"))
+        // The two modes Brandon asked for, plus the undated escape hatch.
+        #expect(reminders.fields.map(\.key) == ["dueToday", "lists", "listsIncludeUndated"])
+        let dueToday = try #require(reminders.fields.first { $0.key == "dueToday" })
+        #expect(dueToday.defaultOn, "due-today is the mode that makes the source useful unconfigured")
+        let undated = try #require(
+            reminders.fields.first { $0.key == "listsIncludeUndated" })
+        #expect(
+            !undated.defaultOn,
+            "70 of 135 open reminders here are undated — on by default buries the queue")
+    }
+
+    @Test("The Reminders connector completes tasks and never marks them done")
+    func remindersDeclaresTheRightCapabilities() {
+        // The capability set *is* the dismiss-vs-complete behaviour. Declaring
+        // `.markDone` would make E write through to Reminders, which is the
+        // exact thing Brandon asked against — and it would be silent.
+        let connector = RemindersConnector(
+            sourceID: "s", scope: TodoScope(includesDueWindow: true))
+        #expect(connector.capabilities.contains(.completesTask))
+        #expect(
+            !connector.capabilities.contains(.markDone),
+            "dismissing a reminder must not complete it")
+        #expect(connector.capabilities.contains(.remoteTruth))
+        #expect(
+            !connector.capabilities.contains(.announcesReturn),
+            "widening announcesReturn is a decision to take deliberately")
     }
 }
 

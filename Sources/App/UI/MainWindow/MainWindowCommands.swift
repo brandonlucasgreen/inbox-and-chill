@@ -60,6 +60,15 @@ struct MainWindowCommands: Commands {
             // focus so typing an "e" stays an "e".
             .keyboardShortcut("e", modifiers: [])
             .disabled(!canAct)
+        // Bare C, matching the panel. Distinct from Mark Done on purpose: for
+        // a to-do, "I've seen this" and "I've done this" are different facts,
+        // and only this one writes to the source. Hidden rather than disabled
+        // when the selection can't be completed — see the row buttons.
+        if actions?.canComplete == true {
+            Button(label("Complete", suffix: "Task")) { actions?.completeTask() }
+                .keyboardShortcut("c", modifiers: [])
+                .disabled(!canAct)
+        }
         Menu("Snooze") {
             ForEach(SnoozePreset.allCases) { preset in
                 Button("\(preset.title) (\(preset.detail))") {

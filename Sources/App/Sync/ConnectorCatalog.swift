@@ -178,6 +178,30 @@ enum ConnectorCatalog {
             ],
             authNote: "No token, and nothing to sign in to: this reads the Mail app on this Mac over AppleScript, so it covers every account Mail has — **including Gmail**, which is why there is no separate Gmail source. Nothing is sent anywhere.\n\nmacOS gates this behind Privacy & Security → Automation. If you decline, Mail looks permanently empty rather than broken, so this source says so explicitly instead of showing you an empty queue.\n\nThe first refresh after Mail has been idle can take around ten seconds — that's Mail waking up, not a failure."),
         .init(
+            id: "reminders", displayName: "Apple Reminders", systemImage: "checklist",
+            fields: [
+                .init(
+                    key: "dueToday", label: "Due today or overdue", isSecret: false,
+                    help: "Anything you're late on, plus anything due before midnight. Undated reminders are never included.",
+                    isToggle: true, defaultOn: true),
+                .init(
+                    key: "lists", label: "Lists", isSecret: false,
+                    help: "Everything open in the lists you tick."),
+                .init(
+                    key: "listsIncludeUndated",
+                    label: "Include undated reminders from those lists",
+                    isSecret: false,
+                    help: "Off by default — a “someday” list is usually long enough to bury your other sources.",
+                    isToggle: true, defaultOn: false),
+            ],
+            allowsMultiple: false,
+            // No `setupSteps` on purpose. There is no credential to fetch, so
+            // the steps could only restate the permission control that renders
+            // directly below them — which is exactly the duplication Brandon
+            // called out on 2026-08-26. `credentialSourcesExplainThemselves`
+            // only requires steps of sources that ask for a secret.
+            authNote: "No token and nothing to sign in to: this reads the Reminders app on this Mac, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere."),
+        .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [
                 .init(

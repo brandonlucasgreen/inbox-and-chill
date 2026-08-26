@@ -434,6 +434,15 @@ struct MainWindowView: View {
         for item in targets where !item.isDone { appState.markDone(item) }
     }
 
+    private func completeSelected() { complete(selectedItems) }
+
+    /// Completing already-done rows is allowed on purpose: dismissing a
+    /// reminder leaves the task open in Reminders, so finishing it later from
+    /// the archive is exactly the case this has to serve.
+    private func complete(_ targets: [Item]) {
+        for item in targets { appState.completeTask(item) }
+    }
+
     private func snooze(_ targets: [Item], until date: Date) {
         for item in targets where !item.isDone {
             appState.snooze(item, until: date)
@@ -485,12 +494,14 @@ struct MainWindowView: View {
             selection: selection,
             allSelectedPinned: allSelectedPinned,
             canRestore: canRestore,
+            canComplete: appState.canCompleteAll(selectedItems),
             canUndoDone: !appState.undoStack.isEmpty,
             isSearchFocused: isSearchFocused,
             revision: appState.queueVersion,
             open: { openSelected(andDone: false) },
             openAndDone: { openSelected(andDone: true) },
             markDone: { doneSelected() },
+            completeTask: { completeSelected() },
             snooze: { snooze(selectedItems, until: $0.date()) },
             pickSnoozeDate: { snoozeTargetIDs = selection },
             togglePin: { togglePin(selectedItems) },

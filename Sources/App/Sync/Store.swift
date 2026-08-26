@@ -57,7 +57,7 @@ actor Store {
             where !seen.contains(item.uid) && item.doneAt == nil
                 && !item.isPinned {
                 item.doneAt = .now
-                item.doneReason = "remote"
+                item.doneReason = DoneReason.remote
                 item.updatedAt = .now
                 result.clearedRemotely += 1
             }
@@ -106,7 +106,7 @@ actor Store {
             where uids.contains(item.uid) && item.doneAt == nil
                 && !item.isPinned {
                 item.doneAt = .now
-                item.doneReason = "remote"
+                item.doneReason = DoneReason.remote
                 item.updatedAt = .now
                 result.clearedRemotely += 1
             }
@@ -119,21 +119,47 @@ actor Store {
 
     // MARK: Triage verbs
 
-    func markDone(uid: String) throws {
+    /// Reasons an item can be done. `doneReason` was already a bare string on
+    /// `Item`; naming the values keeps the archive's wording and
+    /// `resurrectIfNeeded`'s rule reading off the same list.
+    enum DoneReason {
+        /// Dismissed by the user — struck from the queue, nothing written to
+        /// the source.
+        static let user = "user"
+        /// The source cleared it: absent from a `.remoteTruth` snapshot.
+        static let remote = "remote"
+        /// Finished for real in the source, by `C` on a to-do row. Behaves
+        /// exactly like `user` in `resurrectIfNeeded` — only a moved
+        /// `occurredAt` brings it back — but the archive can say *Completed*
+        /// rather than *Dismissed*, and `undoDone` needs it to know whether to
+        /// un-complete remotely.
+        static let completed = "completed"
+    }
+
+    func markDone(uid: String, reason: String = DoneReason.user) throws {
         guard let item = try item(uid: uid) else { return }
         item.doneAt = .now
-        item.doneReason = "user"
+        item.doneReason = reason
         item.snoozedUntil = nil
         item.updatedAt = .now
         try modelContext.save()
     }
 
-    func undoDone(uid: String) throws {
-        guard let item = try item(uid: uid) else { return }
+    /// Brings a done item back, and reports what it was done *for*.
+    ///
+    /// The return value is load-bearing rather than informational: ⌘Z on a
+    /// completed to-do has to un-complete it in the source too, and the store
+    /// is the only thing that still knows which kind of done this was by the
+    /// time undo runs.
+    @discardableResult
+    func undoDone(uid: String) throws -> String? {
+        guard let item = try item(uid: uid) else { return nil }
+        let reason = item.doneReason
         item.doneAt = nil
         item.doneReason = nil
         item.updatedAt = .now
         try modelContext.save()
+        return reason
     }
 
     func snooze(uid: String, until: Date) throws {
@@ -272,7 +298,7 @@ actor Store {
     @discardableResult
     private func resurrectIfNeeded(_ item: Item, from remote: RemoteItem) -> Bool {
         guard let doneAt = item.doneAt else { return false }
-        guard item.doneReason == "remote" || remote.occurredAt > doneAt else {
+        guard item.doneReason == DoneReason.remote || remote.occurredAt > doneAt else {
             return false
         }
         item.doneAt = nil

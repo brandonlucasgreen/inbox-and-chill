@@ -163,9 +163,24 @@ struct ItemRowView: View {
                 appState.open(item)
             }
             actionButton(
-                "checkmark.circle", key: "E", "Done (E)", "Mark done"
+                "checkmark.circle", key: "E",
+                appState.canComplete(item)
+                    ? "Dismiss — does not complete it (E)" : "Done (E)",
+                appState.canComplete(item) ? "Dismiss" : "Mark done"
             ) {
                 appState.markDone(item)
+            }
+            // Only to-do sources, because only they have two end states. The
+            // button is absent rather than disabled: a greyed-out "complete"
+            // on every Slack mention would be permanent clutter explaining
+            // itself to nobody.
+            if appState.canComplete(item) {
+                actionButton(
+                    "checkmark.circle.fill", key: "C",
+                    "Complete it in Reminders (C)", "Complete task"
+                ) {
+                    appState.completeTask(item)
+                }
             }
             SnoozeMenu(
                 apply: { appState.snooze(item, until: $0) },
@@ -218,7 +233,12 @@ struct ItemRowView: View {
             appState.markDone(item)
         }
         Divider()
-        Button("Mark Done") { appState.markDone(item) }
+        Button(appState.canComplete(item) ? "Dismiss" : "Mark Done") {
+            appState.markDone(item)
+        }
+        if appState.canComplete(item) {
+            Button("Complete Task") { appState.completeTask(item) }
+        }
         Menu("Snooze") {
             ForEach(SnoozePreset.allCases) { preset in
                 Button("\(preset.title) (\(preset.detail))") {
