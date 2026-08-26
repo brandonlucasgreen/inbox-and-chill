@@ -64,6 +64,23 @@ enum TodoPriority: Int, Sendable, Equatable, Codable {
         }
     }
 
+    /// Todoist's `priority`: **1 is the default every task has** and 4 is
+    /// urgent — the inverse of EventKit, and also the inverse of the labels
+    /// Todoist's own UI prints, where `priority: 4` is shown as "P1".
+    ///
+    /// Mapping 1 to `.none` rather than `.low` is the load-bearing half.
+    /// `TodoItemMapper.highSignal` fires on `.high`, and every untouched
+    /// Todoist task arrives as 1 — so treating 1 as a real priority would
+    /// make "has a priority" true of the entire account and say nothing.
+    static func fromTodoist(_ raw: Int) -> TodoPriority {
+        switch raw {
+        case 4: return .high
+        case 3: return .medium
+        case 2: return .low
+        default: return .none
+        }
+    }
+
     /// Back to EventKit's scale, for a write-through that has to preserve it.
     var eventKitValue: Int {
         switch self {

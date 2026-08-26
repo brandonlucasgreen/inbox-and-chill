@@ -51,7 +51,10 @@ import Foundation
 enum TodoItemMapper {
 
     /// Separates a recurring task's id from its occurrence day. `#` is safe
-    /// here: EventKit identifiers are UUIDs, and Todoist's are digits.
+    /// here: EventKit identifiers are UUIDs, and Todoist's are opaque
+    /// alphanumeric strings like `6XGgmFVcrG5RRjVr` — checked against
+    /// Todoist's published schema on 2026-08-26, which corrects the earlier
+    /// note here that they were digits. Neither alphabet contains `#`.
     static let occurrenceSeparator: Character = "#"
 
     // MARK: Identity
@@ -137,6 +140,25 @@ enum TodoItemMapper {
         guard let due = task.due else { return false }
         return isOverdue(
             due: due, isAllDay: task.isAllDay, now: now, calendar: calendar)
+    }
+
+    // MARK: Ordering
+
+    /// Most urgent first, so a connector's snapshot cap drops the least
+    /// urgent tasks rather than whatever the provider happened to answer last.
+    ///
+    /// Overdue before due-today before later before undated, then by due date,
+    /// then by title so the order is stable poll to poll. `nil` due dates sort
+    /// last rather than comparing as `.distantPast`.
+    nonisolated static func rank(_ tasks: [TodoTask]) -> [TodoTask] {
+        tasks.sorted { a, b in
+            switch (a.due, b.due) {
+            case let (x?, y?) where x != y: return x < y
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return a.title < b.title
+            }
+        }
     }
 
     // MARK: Assembly

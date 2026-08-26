@@ -261,6 +261,24 @@ struct SourceEditorSheet: View {
                 field.label, text: binding,
                 prompt: Text(
                     existing != nil ? "•••• saved — enter to replace" : field.placeholder))
+        } else if descriptor.id == "todoist", field.key == "projects" {
+            // Checkboxes over the account's real project names, for the same
+            // reason Reminders gets them — and here the picker is also what
+            // proves the token works, so it replaces a separate connection
+            // test rather than sitting beside one.
+            VStack(alignment: .leading, spacing: 4) {
+                Text(field.label)
+                TodoistProjectPicker(
+                    value: binding,
+                    typedToken: fieldValues["token"] ?? "",
+                    sourceID: existing?.id)
+                if !field.help.isEmpty {
+                    Text(field.help)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         } else if descriptor.id == "reminders", field.key == "lists" {
             // Checkboxes over the real list names instead of a text field: the
             // names have to match what Reminders calls them, and a typo would

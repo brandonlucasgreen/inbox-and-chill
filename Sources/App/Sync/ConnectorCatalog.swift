@@ -202,6 +202,37 @@ enum ConnectorCatalog {
             // only requires steps of sources that ask for a secret.
             authNote: "No token and nothing to sign in to: this reads the Reminders app on this Mac, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere."),
         .init(
+            id: "todoist", displayName: "Todoist", systemImage: "checkmark.circle",
+            fields: [
+                .init(
+                    key: "token", label: "API Token", isSecret: true,
+                    placeholder: "0123456789abcdef…",
+                    help: "Todoist → Settings → Integrations → Developer."),
+                .init(
+                    key: "dueToday", label: "Due today or overdue", isSecret: false,
+                    help: "Anything you're late on, plus anything due before midnight. Undated tasks are never included.",
+                    isToggle: true, defaultOn: true),
+                .init(
+                    key: "projects", label: "Projects", isSecret: false,
+                    help: "Everything open in the projects you tick."),
+                .init(
+                    key: "projectsIncludeUndated",
+                    label: "Include undated tasks from those projects",
+                    isSecret: false,
+                    help: "Off by default — a “someday” project is usually long enough to bury your other sources.",
+                    isToggle: true, defaultOn: false),
+            ],
+            setupSteps: [
+                "In Todoist, open Settings → Integrations → **Developer**.",
+                "Copy the **API token** shown there.",
+                "Paste it below, then pick what this source should watch.",
+            ],
+            setupURL: "https://app.todoist.com/app/settings/integrations/developer",
+            // Two facts only, each stated once (the 2026-08-26 copy note): why
+            // it is a token rather than a sign-in button, and the one thing
+            // about `C` that Todoist itself does differently from the row.
+            authNote: "Todoist's OAuth is built for apps distributed to other people — it wants a registered client and a redirect URL — so the personal API token is its own sanctioned path for your own account. The token is stored in your Keychain and never leaves this Mac.\n\nCompleting a repeating task with **C** reschedules it in Todoist rather than ticking it off, which is what Todoist itself does. Undo can't take that back."),
+        .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [
                 .init(
