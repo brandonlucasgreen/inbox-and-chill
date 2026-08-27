@@ -1,6 +1,14 @@
 # Topics — grouping one thing across sources (design plan)
 
-Status: **design only, nothing built.** Asked for 2026-08-26 by Brandon:
+Status: **BUILT 2026-08-26**, on `claude/notification-grouping-design-cd1bab`.
+All three decisions in §5, §8 and §9 were taken as recommended
+(*"Agree with all your recommendations on paper. Let's build this as you
+propose"*). Two things changed during the build and are corrected in place
+rather than tidied away: link tokens are read out of an item's whole text and
+not just its `url` field (§6, found by a failing test — the shared-link case is
+asymmetric by nature), and `G` on a topic header edits that topic rather than
+refusing. The migration in §11 has now been **run against the real store**:
+2,234 rows before and after. Asked for 2026-08-26 by Brandon:
 
 > I sometimes get an email, linear update, multiple slack messages, and a
 > reminder all about the same topic. It would be great to be able to group
@@ -13,7 +21,9 @@ Everything under **Measured** was read out of the live store on this Mac on
 2026-08-26 (a read-only copy of `store.sqlite` + `-wal`, 2,223 items with a
 timestamp). Everything else is design, and §11 lists what is still unverified.
 
-Three decisions are open and marked **DECISION**; each has a recommendation.
+Three decisions were open and are marked **DECISION** below. All three were
+taken as recommended on 2026-08-26 and are kept as written, because the
+reasoning is what a future reader will want, not the verdict on its own.
 
 ---
 
@@ -341,22 +351,32 @@ next-best is "Bundle".
 Insert them mid-file in `Tests/UnitTests.swift` and `Tests/TriageTests.swift`
 rather than appending — parallel sessions.
 
-## 11. Unverified
+## 11. Verification status (updated after the build)
 
-- **The SwiftData migration.** The container is a plain
-  `ModelContainer(for: Item.self, SourceConfig.self)` with no `VersionedSchema`
-  and no `MigrationPlan`. Adding a new model and one optional attribute is
-  documented as lightweight and should migrate in place, but **that has not
-  been run against his real 8.7MB store**, and the store holds 2,232 items he
-  cares about. First thing to do in the build: back the support directory up
-  (the precedent is in the safe-demo-data note), open the store with the new
-  schema, and confirm the row count is unchanged.
-- **Nothing here has been rendered.** The sketches in §3 are ASCII; the panel
-  is 420pt wide and a topic header plus a source-chip row plus four indented
-  members is a lot of vertical space for one entry. Worth an `ImageRenderer`
-  contact sheet before committing to the layout.
-- **Whether closing a topic on selection-exit feels right** is a hand feel
-  question, not a design one. Build it, use it for a day.
+**Verified:**
+
+- **The SwiftData migration, against the real store.** Support directory
+  backed up to `InboxAndChill.backup-pre-topics`, then the Release build
+  installed and launched: **2,234 `ZITEM` rows before and after**, `ZTOPIC`
+  created, `ZTOPICID` added to `ZITEM`, no migration error in the app's log.
+  Adding a model and one optional attribute is indeed lightweight here.
+- **515 tests pass**, including the eleven new suites in
+  `Tests/TopicTests.swift`.
+- **The change is in the installed binary** — two `strings` hits each for
+  `Catch new items mentioning` and `Nothing to group. Mark rows with Space`
+  (universal binary, so two is correct), and 0 for a control literal.
+- The app launches and runs against the migrated store.
+
+**Still unverified — and both are for Brandon rather than for a machine:**
+
+- **Nothing has been rendered or pressed.** No Screen Recording or
+  Accessibility here, so the panel has not been seen with a topic in it. The
+  one overflow risk found by reading — four or more source chips on a 420pt
+  row — is capped at three chips plus "+N", but the vertical weight of a topic
+  header (name + chip row) is a judgement call that needs eyes.
+- **Whether closing a topic on selection-exit feels right** is a hand-feel
+  question. It is one line to change if it grates
+  (`PanelView.select`).
 
 ## 12. Order of work
 

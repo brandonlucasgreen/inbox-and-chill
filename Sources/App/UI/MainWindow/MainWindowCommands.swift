@@ -82,6 +82,9 @@ struct MainWindowCommands: Commands {
         Button(label(actions?.pinTitle ?? "Pin")) { actions?.togglePin() }
             .keyboardShortcut("p", modifiers: .command)
             .disabled(!canAct)
+        Button(label("Group", suffix: "into a Topic…")) { actions?.group() }
+            .keyboardShortcut("g", modifiers: .command)
+            .disabled(!canAct)
         Button(label("Restore", suffix: "to Queue")) { actions?.restore() }
             .disabled(!(actions?.canRestore ?? false))
     }

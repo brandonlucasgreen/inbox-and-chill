@@ -680,6 +680,81 @@ covers *every* connector, because `SyncEngine` turns any thrown error into
 `UpdateController`. Reuse the sentence the user already sees; do not write a
 second one.
 
+## Topics — one thing across several sources (added 2026-08-26)
+
+`Sources/App/Models/Topic.swift`, `Sync/TopicMatcher.swift`, `UI/TopicRowView.swift`,
+`UI/TopicEditorView.swift`. Design and the measurements behind it:
+`docs/topic-grouping-plan.md`.
+
+A topic owns **a name and an optional rule (`terms`)**. Everything else —
+active, snoozed, done, pinned, high-signal, seen — is derived from its
+members, so there is no second state machine. Membership is `Item.topicID`, a
+plain string, matching how every other cross-entity link here works.
+
+The measurement that decides the design: **reminders carry an issue key 0
+times out of 22** in the real store, while mail does 21 of 50. So the member
+that matters most in a cross-source topic is the one auto-matching can never
+find — **manual membership is the primitive and auto-catch is the layer on
+top**, never the reverse. `[A-Z]{2,6}-\d+` is the token that actually crosses
+sources (14 topics, 118 items); a **bare `#1234` is not** and produced a false
+match on the first pass over real data, so only `owner/repo#123` is admitted.
+
+Five things that look like oversights and are not:
+
+- **`topicID` is deliberately absent from `Store.update(_:from:)`.** That
+  method refreshes nearly every field from the remote on every poll — `kind`
+  was *added* to it, correctly — so anything that must survive a poll has to
+  be left out by hand. `updateLeavesMembershipAlone` in `Tests/TopicTests.swift`
+  is the guard; without it a poll erases the feature overnight.
+- **Auto-catch runs on insert only.** Re-running it per poll would undo a
+  manual removal on the next refresh — the same "explicit beats rule"
+  invariant seen from the other side. Back-fill happens once, when a topic is
+  created or its terms are edited, and never steals a row already filed
+  elsewhere.
+- **A topic below `TopicPolicy.minimumVisibleMembers` (2) renders as an
+  ordinary row** carrying an "In a topic" chip. `.remoteTruth` erodes topics
+  to one member routinely, and a disclosure triangle over one item is a lie.
+- **An empty topic is a normal resting state, not garbage.** It is what lets
+  tomorrow's matching item re-form the group, so `purge` needs age *and*
+  emptiness before deleting one.
+- **The badge counts a topic as one** (`Store.badgeCounts`). Brandon's call,
+  2026-08-26. A badge still reading 54 while the queue shows one row would
+  make the queue the liar.
+
+### Batching is about motion, not throughput
+
+`Store.markDone(uids:)` / `snooze(uids:)` / `setPinned(uids:)` do **one**
+save. Four separate saves mean four `queueVersion` bumps, so one topic
+dismissal animates as four staggered row collapses instead of the single
+gesture `PanelMotion` exists to produce. The **write-throughs stay per item**
+in `SyncEngine.writeThrough` — each source has to be told separately and each
+can fail separately, so a failure is reported against the source it belongs
+to.
+
+`AppState.undoStack` is `[[String]]`: one entry per *action*, not per row.
+This also fixed a main-window bug nobody had filed — dismissing five selected
+rows there used to take five ⌘Z.
+
+### Two selection concepts in the panel, on purpose
+
+`Space` marks rows, `G` groups what is marked. **Only `G` reads the marks** —
+E/S/⌘P/C all still act on the single selection. Making the triage keys act on
+marks instead would mean the answer to "what does E do right now" depends on
+invisible state. Both keys were free: they fell through to type-to-filter, and
+they are taken behind the same `filterText.isEmpty && !isFiltering` guard the
+other letters use.
+
+`D` is now a level rather than a toggle, with two at-most-one flags:
+`openTopicID` (which topic shows its members) and `isFullyExpanded` (which row
+shows its whole message). A topic closes when the selection leaves it, same
+discipline as a full expansion. Esc peels: card → full message → open topic →
+marks → filter → archive → dismiss.
+
+The naming card is an **overlay, not a `.sheet`** — the panel is a
+`MenuBarExtra(.window)` whose window is not key by default (`PanelKeyboardFocus`),
+and a sheet there inherits every one of those problems. While it is up, the key
+monitor returns `false` for everything but Esc so its text fields get the keys.
+
 ## Already exists — do not rebuild
 
 - **Per-source badge toggles** (`SourcesPane`, honoured in `AppState`) — the

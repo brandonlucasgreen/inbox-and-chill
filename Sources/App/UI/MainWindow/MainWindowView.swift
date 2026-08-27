@@ -33,6 +33,8 @@ struct MainWindowView: View {
     /// Rows waiting on the "Pick Date…" popover — not necessarily the
     /// selection, since a right-click can target a single unselected row.
     @State private var snoozeTargetIDs: Set<PersistentIdentifier>?
+    @State private var topicEditor: TopicEditorRequest?
+    @Query(sort: \Topic.createdAt) private var allTopics: [Topic]
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -180,6 +182,18 @@ struct MainWindowView: View {
                 snoozeTargetIDs = nil
                 snooze(targets, until: date)
             }
+        }
+        .sheet(item: $topicEditor) { request in
+            TopicEditorView(
+                request: request,
+                members: items.filter { request.memberUIDs.contains($0.uid) },
+                existingTopics: allTopics.map {
+                    TopicChoice(id: $0.id, name: $0.name)
+                },
+                existingTerms: allTopics.first { $0.id == request.topicID }?
+                    .terms ?? [],
+                index: index,
+                onClose: { topicEditor = nil })
         }
         .onChange(of: rowIDs) { _, new in
             selection.formIntersection(new)
@@ -430,8 +444,9 @@ struct MainWindowView: View {
         for item in targets { appState.open(item) }
     }
 
+    /// One action, one undo — a five-row dismissal used to take five ⌘Z.
     private func done(_ targets: [Item]) {
-        for item in targets where !item.isDone { appState.markDone(item) }
+        appState.markDone(targets)
     }
 
     private func completeSelected() { complete(selectedItems) }
@@ -440,26 +455,26 @@ struct MainWindowView: View {
     /// reminder leaves the task open in Reminders, so finishing it later from
     /// the archive is exactly the case this has to serve.
     private func complete(_ targets: [Item]) {
-        for item in targets { appState.completeTask(item) }
+        appState.completeTask(targets)
     }
 
     private func snooze(_ targets: [Item], until date: Date) {
-        for item in targets where !item.isDone {
-            appState.snooze(item, until: date)
-        }
+        appState.snooze(targets, until: date)
     }
 
     /// Mixed selections normalize rather than flip each row: pin everything
-    /// unless it is already all pinned, in which case unpin everything.
+    /// unless it is already all pinned, in which case unpin everything. The
+    /// rule now lives in `AppState.setPinned`, shared with topics.
     private func togglePin(_ targets: [Item]) {
         guard !targets.isEmpty else { return }
-        if targets.allSatisfy(\.isPinned) {
-            for item in targets { appState.togglePin(item) }
-        } else {
-            for item in targets where !item.isPinned {
-                appState.togglePin(item)
-            }
-        }
+        appState.setPinned(targets, pinned: !targets.allSatisfy(\.isPinned))
+    }
+
+    /// ⌘G — group the selection into a topic.
+    private func groupSelected() {
+        let targets = selectedItems
+        guard !targets.isEmpty else { return }
+        topicEditor = .create(targets)
     }
 
     private func restore(_ targets: [Item]) {
@@ -505,6 +520,7 @@ struct MainWindowView: View {
             snooze: { snooze(selectedItems, until: $0.date()) },
             pickSnoozeDate: { snoozeTargetIDs = selection },
             togglePin: { togglePin(selectedItems) },
+            group: { groupSelected() },
             restore: { restore(selectedItems) },
             copy: { copySelected() },
             undoDone: { appState.undoDone() },

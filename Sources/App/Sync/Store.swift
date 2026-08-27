@@ -31,6 +31,7 @@ actor Store {
     ) throws -> ReconcileResult {
         var result = ReconcileResult()
         let existing = try items(sourceID: sourceID)
+        let rules = try topicRules()
         var seen = Set<String>()
 
         for remote in snapshot {
@@ -47,6 +48,7 @@ actor Store {
                     snippet: remote.snippet, urlString: remote.url,
                     actorName: remote.actorName, occurredAt: remote.occurredAt,
                     highSignal: remote.highSignal, payload: remote.payload)
+                item.topicID = Self.topicID(matching: remote, in: rules)
                 modelContext.insert(item)
                 result.inserted.append(summary(item))
             }
@@ -79,6 +81,7 @@ actor Store {
         case .upsert(let remotes):
             var result = ReconcileResult()
             let existing = try items(sourceID: sourceID)
+            let rules = try topicRules()
             for remote in remotes {
                 let uid = remote.uid(sourceKind: sourceKind)
                 if let item = existing.first(where: { $0.uid == uid }) {
@@ -93,6 +96,7 @@ actor Store {
                         actorName: remote.actorName,
                         occurredAt: remote.occurredAt,
                         highSignal: remote.highSignal, payload: remote.payload)
+                    item.topicID = Self.topicID(matching: remote, in: rules)
                     modelContext.insert(item)
                     result.inserted.append(summary(item))
                 }
@@ -221,6 +225,194 @@ actor Store {
         try item(uid: uid)?.seenAt
     }
 
+    // MARK: Batch triage
+
+    /// Mark several items done in **one** save.
+    ///
+    /// Not a loop over `markDone` at the call site, and the reason is motion
+    /// rather than throughput: each save bumps `queueVersion`, and four bumps
+    /// make a topic dismissal animate as four staggered row collapses instead
+    /// of the one coordinated gesture `PanelMotion` exists to produce.
+    ///
+    /// The *write-throughs* stay per item — every source still has to be told
+    /// individually, and that is `SyncEngine`'s job, not this one's.
+    func markDone(uids: [String], reason: String = DoneReason.user) throws {
+        guard !uids.isEmpty else { return }
+        let wanted = Set(uids)
+        for item in try items() where wanted.contains(item.uid) {
+            item.doneAt = .now
+            item.doneReason = reason
+            item.snoozedUntil = nil
+            item.updatedAt = .now
+        }
+        try modelContext.save()
+    }
+
+    func snooze(uids: [String], until: Date) throws {
+        guard !uids.isEmpty else { return }
+        let wanted = Set(uids)
+        for item in try items() where wanted.contains(item.uid) {
+            item.snoozedUntil = until
+            item.snoozeWakeNotifiedAt = nil
+            item.updatedAt = .now
+        }
+        try modelContext.save()
+    }
+
+    /// Pins or unpins several items to the *same* state.
+    ///
+    /// Normalizing rather than flipping each row: a mixed topic where ⌘P
+    /// flipped every member individually would stay mixed forever, and
+    /// "pin this topic" has to mean one thing. Same rule the main window
+    /// already applies to a mixed multi-selection.
+    func setPinned(uids: [String], pinned: Bool) throws {
+        guard !uids.isEmpty else { return }
+        let wanted = Set(uids)
+        for item in try items() where wanted.contains(item.uid) {
+            item.pinnedAt = pinned ? (item.pinnedAt ?? .now) : nil
+            item.updatedAt = .now
+        }
+        try modelContext.save()
+    }
+
+    /// Brings several done items back, reporting what each was done *for*.
+    ///
+    /// The per-uid reason is what lets one ⌘Z over a mixed topic un-complete
+    /// the Reminders member remotely while leaving the dismissed Slack member
+    /// untouched.
+    func undoDone(uids: [String]) throws -> [String: String] {
+        guard !uids.isEmpty else { return [:] }
+        let wanted = Set(uids)
+        var reasons: [String: String] = [:]
+        for item in try items() where wanted.contains(item.uid) {
+            if let reason = item.doneReason { reasons[item.uid] = reason }
+            item.doneAt = nil
+            item.doneReason = nil
+            item.updatedAt = .now
+        }
+        try modelContext.save()
+        return reasons
+    }
+
+    // MARK: Topics
+
+    /// Creates a topic and moves the given items into it.
+    ///
+    /// Terms **back-fill** over items that are not in a topic already: making
+    /// a topic for `EPD-1873` should gather the three other rows that already
+    /// mention it, not just the ones that happened to be marked. Items that
+    /// belong to another topic are left alone — an explicit member always
+    /// beats a rule.
+    /// - Parameter id: supplied by the caller so the UI can select the new
+    ///   topic in the same frame it asks for it, rather than waiting a round
+    ///   trip through this actor to learn what it just made.
+    @discardableResult
+    func createTopic(
+        id: String = UUID().uuidString, name: String, terms: [String] = [],
+        memberUIDs: [String] = []
+    ) throws -> String {
+        let topic = Topic(id: id, name: name, terms: sanitized(terms))
+        modelContext.insert(topic)
+        try assign(uids: memberUIDs, to: topic.id, save: false)
+        try backfill(topic: topic, save: false)
+        try modelContext.save()
+        return topic.id
+    }
+
+    func renameTopic(id: String, name: String, terms: [String]) throws {
+        guard let topic = try topic(id: id) else { return }
+        topic.name = name
+        topic.terms = sanitized(terms)
+        try backfill(topic: topic, save: false)
+        try modelContext.save()
+    }
+
+    /// Dissolves a topic. Members go back to their own source sections; not
+    /// one of them is done, dismissed or otherwise touched.
+    func deleteTopic(id: String) throws {
+        for item in try items() where item.topicID == id { item.topicID = nil }
+        if let topic = try topic(id: id) { modelContext.delete(topic) }
+        try modelContext.save()
+    }
+
+    func addToTopic(id: String, uids: [String]) throws {
+        guard try topic(id: id) != nil else { return }
+        try assign(uids: uids, to: id, save: true)
+    }
+
+    func removeFromTopic(uids: [String]) throws {
+        try assign(uids: uids, to: nil, save: true)
+    }
+
+    /// uid → topic id, for everything currently grouped. Cheap enough to read
+    /// per call: the panel already holds every queued item in memory.
+    func topicMembership() throws -> [String: String] {
+        try items().reduce(into: [:]) { map, item in
+            if let id = item.topicID { map[item.uid] = id }
+        }
+    }
+
+    private func assign(uids: [String], to topicID: String?, save: Bool) throws {
+        guard !uids.isEmpty else { return }
+        let wanted = Set(uids)
+        for item in try items() where wanted.contains(item.uid) {
+            item.topicID = topicID
+            // Deliberately not touching `updatedAt`: that tracks changes to
+            // the notification, and filing one is not a change to it.
+        }
+        if save { try modelContext.save() }
+    }
+
+    /// Pulls unassigned, undone items matching the topic's terms into it.
+    private func backfill(topic: Topic, save: Bool) throws {
+        guard !topic.terms.isEmpty else { return }
+        for item in try items()
+        where item.topicID == nil && item.doneAt == nil {
+            let fields = TopicMatcher.Fields(
+                title: item.title, snippet: item.snippet, url: item.urlString)
+            if TopicMatcher.matches(topic.terms, fields) {
+                item.topicID = topic.id
+            }
+        }
+        if save { try modelContext.save() }
+    }
+
+    private func sanitized(_ terms: [String]) -> [String] {
+        var seen = Set<String>()
+        return terms.map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    }
+
+    private func topic(id: String) throws -> Topic? {
+        var descriptor = FetchDescriptor<Topic>(
+            predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    /// The catch rules, as plain values — so the matching in `reconcile` and
+    /// `apply` never faults a model object per arriving item.
+    private func topicRules() throws -> [(id: String, terms: [String])] {
+        try modelContext.fetch(FetchDescriptor<Topic>())
+            .filter { !$0.terms.isEmpty }
+            .map { ($0.id, $0.terms) }
+    }
+
+    /// Which topic a *newly arriving* item joins, if any.
+    ///
+    /// Runs on insert only. Re-running it on every poll would undo a manual
+    /// removal on the next refresh — the user takes a row out of a topic and
+    /// the rule silently puts it back — which is the same "explicit beats
+    /// rule" invariant, seen from the other side.
+    nonisolated static func topicID(
+        matching remote: RemoteItem, in rules: [(id: String, terms: [String])]
+    ) -> String? {
+        guard !rules.isEmpty else { return nil }
+        let fields = TopicMatcher.Fields(
+            title: remote.title, snippet: remote.snippet, url: remote.url)
+        return rules.first { TopicMatcher.matches($0.terms, fields) }?.id
+    }
+
     // MARK: Maintenance
 
     /// Snoozes past their wake time that haven't fired a banner yet.
@@ -241,23 +433,62 @@ actor Store {
     /// Purge done items older than the 90-day retention. Pins are immortal.
     func purge(now: Date = .now) throws -> Int {
         let cutoff = TriagePolicy.purgeCutoff(now: now)
-        let victims = try items().filter {
+        let surviving = try items()
+        let victims = surviving.filter {
             !$0.isPinned && ($0.doneAt.map { $0 < cutoff } ?? false)
         }
         for item in victims { modelContext.delete(item) }
-        if !victims.isEmpty { try modelContext.save() }
+
+        // Topics are allowed to be empty — that is their resting state
+        // between the last member archiving and the next matching item
+        // arriving, and deleting one then would break the rule that a topic
+        // outlives its members. So emptiness alone is not grounds; age is
+        // the second half of the test.
+        let purged = Set(victims.map(\.uid))
+        let stillReferenced = Set(
+            surviving.filter { !purged.contains($0.uid) }
+                .compactMap(\.topicID))
+        let staleTopics = try modelContext.fetch(FetchDescriptor<Topic>())
+            .filter {
+                !stillReferenced.contains($0.id)
+                    && $0.createdAt < TopicPolicy.purgeCutoff(now: now)
+            }
+        for topic in staleTopics { modelContext.delete(topic) }
+
+        if !victims.isEmpty || !staleTopics.isEmpty { try modelContext.save() }
         return victims.count
     }
 
     // MARK: Counts (for the badge)
 
+    /// What the menu bar badge says is waiting.
+    ///
+    /// **A topic counts as one.** The badge answers "how much is waiting",
+    /// and the premise of grouping is that four notifications about one thing
+    /// are one thing — a badge still reading 54 while the queue shows a
+    /// single row would make the queue the liar. A topic is high-signal when
+    /// any of its active members is.
+    ///
+    /// A topic with a single active member counts one either way, which is
+    /// also exactly how it renders (`TopicPolicy.minimumVisibleMembers`).
     func badgeCounts(countedSourceIDs: Set<String>) throws -> (
         total: Int, highSignal: Int
     ) {
         let active = try items().filter {
             $0.isActive && countedSourceIDs.contains($0.sourceID)
         }
-        return (active.count, active.filter(\.highSignal).count)
+        let ungrouped = active.filter { $0.topicID == nil }
+        var topicIDs = Set<String>()
+        var loudTopicIDs = Set<String>()
+        for item in active {
+            guard let id = item.topicID else { continue }
+            topicIDs.insert(id)
+            if item.highSignal { loudTopicIDs.insert(id) }
+        }
+        return (
+            ungrouped.count + topicIDs.count,
+            ungrouped.filter(\.highSignal).count + loudTopicIDs.count
+        )
     }
 
     // MARK: Helpers

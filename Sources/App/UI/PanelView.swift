@@ -23,8 +23,23 @@ struct PanelView: View {
     private var items: [Item]
     @Query(sort: \SourceConfig.sortOrder)
     private var sourceConfigs: [SourceConfig]
+    @Query(sort: \Topic.createdAt)
+    private var allTopics: [Topic]
 
     @State private var selectedUID: String?
+    /// Which topic is showing its members. A second at-most-one flag beside
+    /// `isFullyExpanded`, not a replacement for it: D on a topic opens the
+    /// topic, D on a member opens that member's whole message, and the two
+    /// have to be independently true.
+    @State private var openTopicID: String?
+    /// Rows the user has marked with Space, waiting for G.
+    ///
+    /// A *second* selection concept, deliberately kept away from every other
+    /// verb: E/S/⌘P/C all still act on the single selection, and only G reads
+    /// this. Making the triage keys act on marks instead would mean the
+    /// answer to "what does E do right now" depends on invisible state.
+    @State private var marks: Set<String> = []
+    @State private var topicEditor: TopicEditorRequest?
     /// Whether the selected row is showing its whole message (D). One flag
     /// for the panel, not one per row: only the selected row can be open at
     /// all, and a row that loses the selection closes back to a line.
@@ -66,6 +81,9 @@ struct PanelView: View {
             footer(queue.index)
         }
         .frame(width: 420, height: 560)
+        .overlay { topicEditorOverlay(queue) }
+        .animation(
+            PanelMotion.queue(reduceMotion: reduceMotion), value: topicEditor)
         .background { commandShortcuts }
         .background { PanelKeyboardFocus() }
         .background { PanelKeyCapture(handle: handle) }
@@ -90,13 +108,50 @@ struct PanelView: View {
             // middle of the row-removal animation and stutter it. Waiting also
             // means arrowing straight past a row no longer counts as reading
             // it, which is the better reading of "seen" anyway.
-            guard let item = selectedItem, !item.isSeen else { return }
+            // A topic header stands for its members, so focusing it counts
+            // as having looked at them — otherwise the unseen dot a topic
+            // derives from its members could only ever be cleared by
+            // expanding it and arrowing through every one.
+            let unseen: [Item] =
+                selectedTopic.map { $0.members.filter { !$0.isSeen } }
+                ?? selectedItem.map { $0.isSeen ? [] : [$0] } ?? []
+            guard !unseen.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            appState.markSeen(item)
+            for item in unseen { appState.markSeen(item) }
         }
         .onChange(of: filterText) { _, new in
             if new.isEmpty && focus != .filter { isFiltering = false }
+        }
+    }
+
+    /// The naming card, over a dimmed queue.
+    ///
+    /// An overlay rather than a `.sheet`: the panel is a
+    /// `MenuBarExtra(.window)` whose window is not key by default (see
+    /// `PanelKeyboardFocus`), and a real sheet there inherits every one of
+    /// those problems for no gain at this size.
+    @ViewBuilder private func topicEditorOverlay(_ queue: PanelQueue) -> some View {
+        if let request = topicEditor {
+            ZStack {
+                Rectangle()
+                    .fill(.black.opacity(0.28))
+                    .onTapGesture { closeEditor() }
+                TopicEditorView(
+                    request: request,
+                    members: items.filter {
+                        request.memberUIDs.contains($0.uid)
+                    },
+                    existingTopics: allTopics.map {
+                        TopicChoice(id: $0.id, name: $0.name)
+                    },
+                    existingTerms: allTopics.first {
+                        $0.id == request.topicID
+                    }?.terms ?? [],
+                    index: queue.index,
+                    onClose: { closeEditor() })
+            }
+            .transition(.opacity)
         }
     }
 
@@ -112,18 +167,38 @@ struct PanelView: View {
                         alignment: .leading, spacing: 0,
                         pinnedViews: [.sectionHeaders]
                     ) {
-                        if !queue.pinned.isEmpty {
+                        if !queue.pinned.isEmpty || !queue.pinnedTopics.isEmpty {
                             Section {
-                                rows(queue.pinned, index: queue.index)
+                                topicRows(queue.pinnedTopics, queue: queue)
+                                rows(
+                                    queue.pinned, index: queue.index,
+                                    topicOf: queue.topicOf)
                             } header: {
                                 PanelSectionHeader(
                                     title: "Pinned", systemImage: "pin.fill",
-                                    count: queue.pinned.count)
+                                    count: queue.pinned.count
+                                        + queue.pinnedTopics.count)
+                            }
+                        }
+                        // Above the source sections and below Pinned: a topic
+                        // spans sources, so it cannot live inside one of
+                        // their headers, and burying it under them would hide
+                        // the one row that stands for four.
+                        if !queue.topics.isEmpty {
+                            Section {
+                                topicRows(queue.topics, queue: queue)
+                            } header: {
+                                PanelSectionHeader(
+                                    title: "Topics",
+                                    systemImage: "square.stack.3d.up",
+                                    count: queue.topics.count)
                             }
                         }
                         ForEach(queue.groups) { group in
                             Section {
-                                rows(group.items, index: queue.index)
+                                rows(
+                                    group.items, index: queue.index,
+                                    topicOf: queue.topicOf)
                             } header: {
                                 PanelSectionHeader(
                                     title: group.source.name,
@@ -131,7 +206,11 @@ struct PanelView: View {
                                     count: group.items.count)
                             }
                         }
-                        if !queue.snoozed.isEmpty { snoozedSection(queue) }
+                        if !queue.snoozed.isEmpty
+                            || !queue.snoozedTopics.isEmpty
+                        {
+                            snoozedSection(queue)
+                        }
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 4)
@@ -197,27 +276,66 @@ struct PanelView: View {
     }
 
     @ViewBuilder private func rows(
-        _ list: [Item], index: SourceIndex
+        _ list: [Item], index: SourceIndex, indented: Bool = false,
+        topicOf: [String: String] = [:]
     ) -> some View {
         ForEach(list) { item in
             ItemRowView(
                 item: item, display: index.display(for: item),
                 isSelected: selectedUID == item.uid,
                 isFullyExpanded: isFullyExpanded,
+                isMarked: marks.contains(item.uid),
+                isTopicMember: indented,
+                // A row showing as a plain row while still belonging to a
+                // topic — one member left after the others archived, or a
+                // source filter dissolving the group — says so, rather than
+                // looking like it was never grouped at all.
+                showsTopicChip: !indented && topicOf[item.uid] != nil,
                 snoozeTargetUID: $snoozeTargetUID,
                 onSelect: {
                     select(item.uid)
                     focus = .list
                 },
-                onToggleFull: { toggleFull(item.uid) })
+                onToggleFull: { toggleFull(item.uid) },
+                onToggleMark: { toggleMark(item.uid) },
+                onGroup: { beginGrouping(with: item) })
                 .id(item.uid)
+                .padding(.leading, indented ? 22 : 0)
                 .transition(PanelMotion.row)
         }
     }
 
+    /// A topic header, plus its members when it is the open one.
+    @ViewBuilder private func topicRows(
+        _ list: [TopicGroup], queue: PanelQueue
+    ) -> some View {
+        ForEach(list) { topic in
+            TopicRowView(
+                topic: topic,
+                isSelected: selectedUID == topic.rowID,
+                isOpen: openTopicID == topic.id,
+                snoozeTargetUID: $snoozeTargetUID,
+                onSelect: {
+                    select(topic.rowID)
+                    focus = .list
+                },
+                onToggleOpen: { toggleTopic(topic) },
+                onEdit: { topicEditor = .edit(topic) })
+                .id(topic.rowID)
+                .transition(PanelMotion.row)
+            if openTopicID == topic.id {
+                rows(topic.members, index: queue.index, indented: true)
+            }
+        }
+    }
+
     private func snoozedSection(_ queue: PanelQueue) -> some View {
-        Section {
-            if showSnoozed { rows(queue.snoozed, index: queue.index) }
+        let count = queue.snoozed.count + queue.snoozedTopics.count
+        return Section {
+            if showSnoozed {
+                topicRows(queue.snoozedTopics, queue: queue)
+                rows(queue.snoozed, index: queue.index)
+            }
         } header: {
             Button {
                 withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
@@ -226,13 +344,13 @@ struct PanelView: View {
             } label: {
                 PanelSectionHeader(
                     title: "Snoozed", systemImage: "clock",
-                    count: queue.snoozed.count,
+                    count: count,
                     disclosureExpanded: showSnoozed)
             }
             .buttonStyle(.plain)
             .help(showSnoozed ? "Hide snoozed items" : "Show snoozed items")
             .accessibilityLabel(
-                "Snoozed, ^[\(queue.snoozed.count) item](inflect: true)")
+                "Snoozed, ^[\(count) item](inflect: true)")
             .accessibilityAddTraits(showSnoozed ? [.isSelected] : [])
         }
     }
@@ -455,6 +573,18 @@ struct PanelView: View {
             .isEmpty
         else { return false }
 
+        // While the topic card is up it owns the keyboard: every press but
+        // Esc falls through to its text fields. Handling Esc here rather than
+        // leaving it to `.onExitCommand` keeps it deterministic — this
+        // monitor sees the event before SwiftUI does either way.
+        if topicEditor != nil {
+            if input == .escape {
+                topicEditor = nil
+                return true
+            }
+            return false
+        }
+
         if input == .escape {
             if snoozeTargetUID != nil {
                 snoozeTargetUID = nil
@@ -464,6 +594,13 @@ struct PanelView: View {
             // selection to undo one press of D.
             } else if isFullyExpanded {
                 isFullyExpanded = false
+            // An open topic is the next layer down: closing the panel out
+            // from under one would lose the filter and the selection to undo
+            // a single press of D.
+            } else if openTopicID != nil {
+                openTopicID = nil
+            } else if !marks.isEmpty {
+                marks.removeAll()
             } else if isFiltering || !filterText.isEmpty {
                 clearFilter()
             } else if showArchive {
@@ -525,7 +662,9 @@ struct PanelView: View {
             return true
         case "s" where filterText.isEmpty && !isFiltering,
             "S" where filterText.isEmpty && !isFiltering:
-            if selectedItem != nil { snoozeTargetUID = selectedUID }
+            if selectedItem != nil || selectedTopic != nil {
+                snoozeTargetUID = selectedUID
+            }
             return true
         case "u" where filterText.isEmpty && !isFiltering,
             "U" where filterText.isEmpty && !isFiltering:
@@ -534,6 +673,16 @@ struct PanelView: View {
         case "d" where filterText.isEmpty && !isFiltering,
             "D" where filterText.isEmpty && !isFiltering:
             expandSelected()
+            return true
+        // Space marks a row for G. Safe to take: a leading space means
+        // nothing to a filter that trims whitespace, and the same
+        // "filter hasn't started" guard the other letters use applies.
+        case " " where filterText.isEmpty && !isFiltering:
+            toggleMarkSelected()
+            return true
+        case "g" where filterText.isEmpty && !isFiltering,
+            "G" where filterText.isEmpty && !isFiltering:
+            beginGrouping()
             return true
         // Complete, as distinct from dismiss. Only to-do sources can, and the
         // key says so rather than doing nothing when they can't — a silent
@@ -602,6 +751,28 @@ struct PanelView: View {
         selectedUID = uid
         isFullyExpanded = false
         appState.clearContext()
+        // A topic closes when the selection leaves it, for the same reason
+        // `isFullyExpanded` does: the panel has to fit the queue on one
+        // screen, and a trail of open topics behind you defeats that.
+        if let open = openTopicID, !rowBelongs(uid, toTopic: open) {
+            openTopicID = nil
+        }
+    }
+
+    /// Whether a row id is the topic's own header or one of its members.
+    private func rowBelongs(_ rowID: String?, toTopic topicID: String) -> Bool {
+        guard let rowID else { return false }
+        if QueueRowID.topicID(from: rowID) == topicID { return true }
+        return items.first { $0.uid == rowID }?.topicID == topicID
+    }
+
+    /// D on a topic header, and the header's own disclosure button.
+    private func toggleTopic(_ topic: TopicGroup) {
+        if selectedUID != topic.rowID {
+            select(topic.rowID)
+            focus = .list
+        }
+        openTopicID = openTopicID == topic.id ? nil : topic.id
     }
 
     /// D, and the row's own expand button. Takes the selection first when
@@ -626,8 +797,65 @@ struct PanelView: View {
     /// D against whatever holds the selection — nothing to open on an
     /// empty queue.
     private func expandSelected() {
+        if let topic = selectedTopic {
+            toggleTopic(topic)
+            return
+        }
         guard let selectedUID else { return }
         toggleFull(selectedUID)
+    }
+
+    // MARK: Marks and grouping
+
+    private func toggleMarkSelected() {
+        guard let selectedUID else { return }
+        // Marking a topic header would mean "group a group", which has no
+        // meaning yet. Say so rather than doing nothing — a key that
+        // silently no-ops reads as broken (rule 5).
+        guard selectedTopic == nil else {
+            appState.openProblem =
+                "A topic can't be marked. Mark individual rows with Space, then press G."
+            return
+        }
+        toggleMark(selectedUID)
+    }
+
+    private func toggleMark(_ uid: String) {
+        if marks.contains(uid) {
+            marks.remove(uid)
+        } else {
+            marks.insert(uid)
+        }
+    }
+
+    /// G — group whatever is marked, or the selected row when nothing is.
+    ///
+    /// On a topic header with nothing marked it edits that topic instead:
+    /// "group this" has no meaning for something already grouped, and an
+    /// error message where an obvious action exists is just a worse button.
+    private func beginGrouping(with item: Item? = nil) {
+        var uids = marks
+        if let item { uids.insert(item.uid) }
+        if uids.isEmpty, let topic = selectedTopic {
+            topicEditor = .edit(topic)
+            return
+        }
+        if uids.isEmpty, let selectedUID, selectedTopic == nil {
+            uids.insert(selectedUID)
+        }
+        let targets = items.filter { uids.contains($0.uid) }
+        guard !targets.isEmpty else {
+            appState.openProblem =
+                "Nothing to group. Mark rows with Space, then press G."
+            return
+        }
+        topicEditor = .create(targets)
+    }
+
+    private func closeEditor() {
+        topicEditor = nil
+        marks.removeAll()
+        focus = .list
     }
 
     /// Keeps the selection meaningful when a row leaves the queue (done,
@@ -651,12 +879,28 @@ struct PanelView: View {
     // MARK: Actions
 
     private func openSelected(andDone: Bool) {
+        if let topic = selectedTopic {
+            // A topic has no single link, so ⏎ opens the *topic*. ⌘⏎ says so
+            // rather than picking a member and hoping — the same "refuse out
+            // loud" the `C` key already does on a row that can't complete.
+            if andDone {
+                appState.openProblem =
+                    "A topic has no single link. Press ⏎ to see what's in it, then ⌘⏎ on a member."
+            } else {
+                toggleTopic(topic)
+            }
+            return
+        }
         guard let item = selectedItem else { return }
         appState.open(item)
         if andDone { appState.markDone(item) }
     }
 
     private func doneSelected() {
+        if let topic = selectedTopic {
+            appState.markDone(topic.members, topicName: topic.name)
+            return
+        }
         guard let item = selectedItem else { return }
         appState.markDone(item)
     }
@@ -668,16 +912,28 @@ struct PanelView: View {
     /// keeps the "which sources can do this" answer in one place instead of
     /// duplicating the capability check here.
     private func completeSelected() {
+        if let topic = selectedTopic {
+            appState.completeTask(topic.members, topicName: topic.name)
+            return
+        }
         guard let item = selectedItem else { return }
         appState.completeTask(item)
     }
 
     private func pinSelected() {
+        if let topic = selectedTopic {
+            appState.setPinned(topic.members, pinned: !topic.isPinned)
+            return
+        }
         guard let item = selectedItem else { return }
         appState.togglePin(item)
     }
 
     private func copySelected() {
+        if let topic = selectedTopic {
+            PanelPasteboard.copy(title: topic.name, url: nil)
+            return
+        }
         guard let item = selectedItem else { return }
         PanelPasteboard.copy(title: item.title, url: item.url)
     }
@@ -712,9 +968,10 @@ struct PanelView: View {
     /// evaluation and passed down — never re-read inside a loop.
     private var queue: PanelQueue {
         PanelQueue(
-            queued: items, configs: sourceConfigs,
+            queued: items, configs: sourceConfigs, allTopics: allTopics,
             sourceFilter: appState.selectedSourceFilter,
-            filterText: filterText, showSnoozed: showSnoozed)
+            filterText: filterText, showSnoozed: showSnoozed,
+            openTopicID: openTopicID)
     }
 
     private var sourceFilterBinding: Binding<String?> {
@@ -729,6 +986,14 @@ struct PanelView: View {
     private var selectedItem: Item? {
         guard let selectedUID else { return nil }
         return items.first { $0.uid == selectedUID }
+    }
+
+    /// The topic holding the selection, when the selected row is a header.
+    private var selectedTopic: TopicGroup? {
+        guard let selectedUID,
+            QueueRowID.topicID(from: selectedUID) != nil
+        else { return nil }
+        return queue.topic(rowID: selectedUID)
     }
 
     private func statusSources(_ index: SourceIndex) -> [SourceDisplay] {

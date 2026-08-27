@@ -20,7 +20,14 @@ final class AppState {
     var badgeText: String?
     var statuses: [String: ConnectorStatus] = [:]
     /// uids of user-done items, most recent last (⌘Z pops).
-    var undoStack: [String] = []
+    /// ⌘Z history, one **entry** per user action rather than one per row.
+    ///
+    /// Dismissing a topic is one gesture and has to be one undo, so an entry
+    /// is a list of uids. It was a flat `[String]` while every action touched
+    /// exactly one row; a multi-selection in the main window has always
+    /// pushed one entry per item, which meant undoing a five-row dismissal
+    /// took five ⌘Z. That is fixed by the same change.
+    var undoStack: [[String]] = []
     var launchAtLoginError: String?
 
     /// Why the last ⏎ landed somewhere other than where the item pointed.
@@ -150,7 +157,7 @@ final class AppState {
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true)
             container = try ModelContainer(
-                for: Item.self, SourceConfig.self,
+                for: Item.self, SourceConfig.self, Topic.self,
                 configurations: ModelConfiguration(url: url))
         } catch {
             fatalError("Cannot open store: \(error)")
@@ -314,6 +321,26 @@ final class AppState {
                 sourceName: sourceName(forID: item.sourceID),
                 title: item.title, url: item.url?.absoluteString, detail: detail)
         ])
+    }
+
+    /// The batch form, carrying the same `journalLogActions` guard.
+    ///
+    /// One line per item, not one per gesture: the journal is a record of
+    /// notifications, and folding four of them into "dismissed a topic" would
+    /// lose the four things that were actually dealt with.
+    private func journal(
+        _ action: JournalAction, items: [Item],
+        detail: (Item) -> String? = { _ in nil }
+    ) {
+        guard journalEnabled, journalLogActions else { return }
+        journal(
+            items.map { item in
+                JournalEntry(
+                    at: .now, action: action,
+                    sourceName: sourceName(forID: item.sourceID),
+                    title: item.title, url: item.url?.absoluteString,
+                    detail: detail(item))
+            })
     }
 
     private func sourceName(forID sourceID: String) -> String {
@@ -816,7 +843,7 @@ final class AppState {
     private static func handlesSlackScheme() -> Bool { slackSchemeHandled }
 
     func markDone(_ item: Item) {
-        undoStack.append(item.uid)
+        undoStack.append([item.uid])
         journal(
             .done, item: item,
             detail: JournalWriter.waited(from: item.firstSeenAt, to: .now))
@@ -826,6 +853,23 @@ final class AppState {
             await engine.markDone(
                 uid: uid, sourceID: sourceID, externalID: ext, payload: payload)
         }
+    }
+
+    /// Dismiss several rows as one action — a topic, or a multi-selection.
+    ///
+    /// One undo entry, one store write, and one journal line per member: the
+    /// journal records notifications, not UI gestures, so a grouped dismissal
+    /// still leaves four lines. `detail` names the topic when there is one,
+    /// which is what makes those four lines legible later.
+    func markDone(_ items: [Item], topicName: String? = nil) {
+        let targets = items.filter { !$0.isDone }
+        guard !targets.isEmpty else { return }
+        undoStack.append(targets.map(\.uid))
+        journal(.done, items: targets) { item in
+            Self.waited(item, topicName: topicName)
+        }
+        let batch = targets.map(target(for:))
+        Task { await engine.markDone(batch: batch) }
     }
 
     /// Sources whose rows can be completed with `C`.
@@ -856,7 +900,7 @@ final class AppState {
                 "Only to-do sources can be completed. Press E to dismiss this instead."
             return
         }
-        undoStack.append(item.uid)
+        undoStack.append([item.uid])
         journal(
             .completed, item: item,
             detail: JournalWriter.waited(from: item.firstSeenAt, to: .now))
@@ -868,9 +912,149 @@ final class AppState {
         }
     }
 
+    /// `C` over several rows — all or nothing.
+    ///
+    /// Refuses a mixed set out loud rather than half-finishing it: completing
+    /// three of four members and silently skipping the Slack one is the
+    /// rule-5 failure this app exists to avoid.
+    func completeTask(_ items: [Item], topicName: String? = nil) {
+        guard canCompleteAll(items) else {
+            openProblem =
+                items.isEmpty
+                ? "Nothing to complete."
+                : "Only to-do sources can be completed, and not every item here is one. Press E to dismiss them instead."
+            return
+        }
+        undoStack.append(items.map(\.uid))
+        journal(.completed, items: items) { item in
+            Self.waited(item, topicName: topicName)
+        }
+        let batch = items.map(target(for:))
+        Task { await engine.completeTask(batch: batch) }
+    }
+
+    func snooze(_ items: [Item], until: Date, topicName: String? = nil) {
+        let targets = items.filter { !$0.isDone }
+        guard !targets.isEmpty else { return }
+        let when = Self.journalDateFormatter.string(from: until)
+        journal(.snoozed, items: targets) { _ in
+            topicName.map { "until \(when) · \($0)" } ?? "until \(when)"
+        }
+        let batch = targets.map(target(for:))
+        Task { await engine.snooze(batch: batch, until: until) }
+    }
+
+    /// Pins or unpins several rows to the same state.
+    ///
+    /// Normalizing rather than flipping each: "pin this topic" has to mean
+    /// one thing, and a mixed topic flipped member-by-member stays mixed
+    /// forever. Same rule the main window already applies to a mixed
+    /// selection — it now shares this implementation.
+    func setPinned(_ items: [Item], pinned: Bool) {
+        let targets = items.filter { $0.isPinned != pinned }
+        guard !targets.isEmpty else { return }
+        journal(pinned ? .pinned : .unpinned, items: targets)
+        let uids = targets.map(\.uid)
+        Task {
+            try? await store.setPinned(uids: uids, pinned: pinned)
+            await MainActor.run { queueVersion += 1 }
+            await refreshBadge()
+        }
+    }
+
+    /// ⌘Z — undo the last action, however many rows it touched.
     func undoDone() {
-        guard let uid = undoStack.popLast() else { return }
-        restore(uid: uid)
+        guard let entry = undoStack.popLast() else { return }
+        guard entry.count > 1 else {
+            if let uid = entry.first { restore(uid: uid, popped: true) }
+            return
+        }
+        let restored = entry.compactMap(item(forUID:))
+        if journalEnabled, journalLogActions, !restored.isEmpty {
+            journal(.restored, items: restored)
+        }
+        let batch = entry.map { uid in
+            item(forUID: uid).map(target(for:))
+                ?? SyncEngine.Target(
+                    uid: uid, sourceID: sourceID(forUID: uid),
+                    externalID: "", payload: nil)
+        }
+        Task { await engine.undoDone(batch: batch) }
+    }
+
+    // MARK: Topics
+
+    /// Groups items under a new topic, and reports its id.
+    ///
+    /// The terms back-fill inside the store, so making a topic for
+    /// `EPD-1873` gathers the rows already mentioning it rather than only the
+    /// ones that happened to be marked.
+    @discardableResult
+    func createTopic(
+        name: String, terms: [String], members: [Item]
+    ) -> String {
+        let id = UUID().uuidString
+        let uids = members.map(\.uid)
+        Task {
+            _ = try? await store.createTopic(
+                id: id, name: name, terms: terms, memberUIDs: uids)
+            await MainActor.run { queueVersion += 1 }
+            await refreshBadge()
+        }
+        return id
+    }
+
+    func addToTopic(id: String, members: [Item]) {
+        let uids = members.map(\.uid)
+        Task {
+            try? await store.addToTopic(id: id, uids: uids)
+            await MainActor.run { queueVersion += 1 }
+            await refreshBadge()
+        }
+    }
+
+    func removeFromTopic(_ members: [Item]) {
+        let uids = members.map(\.uid)
+        Task {
+            try? await store.removeFromTopic(uids: uids)
+            await MainActor.run { queueVersion += 1 }
+            await refreshBadge()
+        }
+    }
+
+    func renameTopic(id: String, name: String, terms: [String]) {
+        Task {
+            try? await store.renameTopic(id: id, name: name, terms: terms)
+            await MainActor.run { queueVersion += 1 }
+            await refreshBadge()
+        }
+    }
+
+    /// Dissolves a topic. Members go back to their source sections — nothing
+    /// is dismissed, and this is the reason "Ungroup" can be offered without
+    /// a confirmation.
+    func deleteTopic(id: String) {
+        Task {
+            try? await store.deleteTopic(id: id)
+            await MainActor.run { queueVersion += 1 }
+            await refreshBadge()
+        }
+    }
+
+    private func target(for item: Item) -> SyncEngine.Target {
+        SyncEngine.Target(
+            uid: item.uid, sourceID: item.sourceID,
+            externalID: externalID(of: item), payload: item.payload)
+    }
+
+    /// "waited 4m" for a lone row, "waited 4m · EPD-1873" inside a topic.
+    private static func waited(
+        _ item: Item, topicName: String?
+    ) -> String? {
+        let waited = JournalWriter.waited(from: item.firstSeenAt, to: .now)
+        guard let topicName else { return waited }
+        guard let waited else { return topicName }
+        return "\(waited) · \(topicName)"
     }
 
     /// Bring a done item back to the queue (⌘Z and archive Restore).
@@ -879,12 +1063,21 @@ final class AppState {
     /// row that was *completed* rather than dismissed has to be reopened in
     /// its source too — the engine decides which, from the reason the store
     /// recorded. Restoring a dismissal is unaffected; nothing is written.
-    func restore(uid: String) {
+    func restore(uid: String, popped: Bool = false) {
         let restored = item(forUID: uid)
         if journalEnabled, journalLogActions, let restored {
             journal(.restored, item: restored)
         }
-        undoStack.removeAll { $0 == uid }
+        // Restoring a row from the archive has to take it out of every undo
+        // entry it appears in, or a later ⌘Z would "undo" a row that is
+        // already back. An entry emptied that way is dropped rather than
+        // left as a ⌘Z that does nothing.
+        if !popped {
+            for index in undoStack.indices {
+                undoStack[index].removeAll { $0 == uid }
+            }
+            undoStack.removeAll(where: \.isEmpty)
+        }
         let sourceID = restored?.sourceID ?? sourceID(forUID: uid)
         let ext = restored.map(externalID(of:)) ?? ""
         let payload = restored?.payload

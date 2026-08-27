@@ -14,6 +14,15 @@ struct ItemRowView: View {
     /// the panel rather than here so it can only ever be true of one row,
     /// and so moving the selection puts it back.
     var isFullyExpanded: Bool = false
+    /// Marked with Space, waiting for G.
+    var isMarked: Bool = false
+    /// Rendered inside an open topic — the source glyph is doing the job of
+    /// the section header this row no longer sits under.
+    var isTopicMember: Bool = false
+    /// In a topic, but showing as a plain row anyway: the last member left
+    /// after the others archived, or a source filter dissolving the group.
+    /// Without the chip that row looks like it was never grouped.
+    var showsTopicChip: Bool = false
     /// Which row currently owns the snooze popover (S key or "Pick Date…").
     @Binding var snoozeTargetUID: String?
     var onSelect: () -> Void
@@ -23,6 +32,8 @@ struct ItemRowView: View {
     /// event — the panel closes a full expansion whenever the selection
     /// moves, so a separate `onSelect()` first would undo the toggle.
     var onToggleFull: () -> Void = {}
+    var onToggleMark: () -> Void = {}
+    var onGroup: () -> Void = {}
 
     @State private var isHovering = false
 
@@ -64,6 +75,9 @@ struct ItemRowView: View {
             .accessibilityAction(
                 named: isShowingFull ? "Show less" : "Show full message"
             ) { onToggleFull() }
+            .accessibilityAction(named: isMarked ? "Unmark" : "Mark for grouping") {
+                onToggleMark()
+            }
     }
 
     // MARK: Layout
@@ -79,11 +93,7 @@ struct ItemRowView: View {
     private var row: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 8) {
-                Circle()
-                    .fill(item.isSeen ? .clear : Color.accentColor)
-                    .frame(width: 6, height: 6)
-                    .padding(.top, 6)
-                    .accessibilityHidden(true)
+                marker
                 Image(systemName: display.systemImage)
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
@@ -108,6 +118,7 @@ struct ItemRowView: View {
                             animation: expansion)
                             .foregroundStyle(.secondary)
                     }
+                    if showsTopicChip { topicChip }
                     if isShowingFull {
                         RowContextView(phase: contextPhase)
                             .transition(.opacity)
@@ -126,6 +137,42 @@ struct ItemRowView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .background(background)
+    }
+
+    /// The unseen dot, or the mark checkbox once this row is marked.
+    ///
+    /// One column, two meanings, never both at once: a marked row is
+    /// unambiguously about to be grouped, and an unmarked one is back to
+    /// saying whether it has been read.
+    @ViewBuilder private var marker: some View {
+        if isMarked {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 6, height: 6)
+                .padding(.top, 6)
+                .accessibilityHidden(true)
+        } else {
+            Circle()
+                .fill(item.isSeen ? .clear : Color.accentColor)
+                .frame(width: 6, height: 6)
+                .padding(.top, 6)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var topicChip: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 9))
+            Text("In a topic")
+                .font(.system(size: 10))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(Capsule().fill(.quaternary))
+        .accessibilityLabel("In a topic")
     }
 
     private var timeOrPin: some View {
@@ -196,6 +243,15 @@ struct ItemRowView: View {
                 item.isPinned ? "Unpin (⌘P)" : "Pin (⌘P)",
                 item.isPinned ? "Unpin" : "Pin"
             ) { appState.togglePin(item) }
+            actionButton(
+                isMarked ? "checkmark.circle.fill" : "square.stack.3d.up",
+                key: "G",
+                isTopicMember
+                    ? "Move to another topic (G)"
+                    : (isMarked
+                        ? "Marked — press G to group" : "Group this (G)"),
+                isTopicMember ? "Move to another topic" : "Group"
+            ) { onGroup() }
         }
         .font(.system(size: 14))
         .buttonStyle(.borderless)
@@ -255,6 +311,14 @@ struct ItemRowView: View {
             appState.toggleSeen(item)
         }
         Button(item.isPinned ? "Unpin" : "Pin") { appState.togglePin(item) }
+        Divider()
+        Button(isMarked ? "Unmark" : "Mark for Grouping") { onToggleMark() }
+        Button(isTopicMember ? "Move to Another Topic…" : "Group…") {
+            onGroup()
+        }
+        if isTopicMember {
+            Button("Remove from Topic") { appState.removeFromTopic([item]) }
+        }
         Divider()
         Button("Copy") {
             PanelPasteboard.copy(title: item.title, url: item.url)
