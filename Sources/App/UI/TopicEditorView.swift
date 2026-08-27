@@ -78,13 +78,19 @@ struct TopicEditorView: View {
         }
         .padding(16)
         .frame(width: 356)
+        // An **opaque** ground, spelled with an NSColor rather than the
+        // `.background` shape style. Inside a `MenuBarExtra(.window)` the
+        // panel is a vibrant surface, and `.background` resolves there to
+        // something translucent — the first build of this card let the whole
+        // queue show straight through it and was unreadable. Anything
+        // floating over the queue has to bring its own opaque backing.
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.background))
+                .fill(Color(nsColor: .windowBackgroundColor)))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 1))
-        .shadow(radius: 24, y: 8)
+                .strokeBorder(.separator, lineWidth: 1))
+        .shadow(color: .black.opacity(0.45), radius: 30, y: 10)
         .onAppear(perform: prepare)
         .onExitCommand(perform: onClose)
     }
@@ -261,6 +267,14 @@ struct TopicEditorView: View {
     private var subtitle: String {
         guard !members.isEmpty else {
             return "This topic has nothing in it right now."
+        }
+        // The single-item case is almost always someone who has not found
+        // marking yet, so the card is where that gets taught — it is the
+        // screen they are looking at when the question occurs to them.
+        if members.count == 1, !request.isEditing {
+            let name = index.display(for: members[0]).name
+            return "1 item · \(name). To add more, cancel and ⌘-click or press "
+                + "Space on the other rows, then press G."
         }
         let sources = index.ordered(ids: Set(members.map(\.sourceID)))
             .map(\.name)

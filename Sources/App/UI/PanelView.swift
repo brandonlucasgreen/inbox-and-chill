@@ -77,6 +77,7 @@ struct PanelView: View {
             }
             Divider()
             LicenseNotice()
+            marksNotice
             openProblemNotice
             footer(queue.index)
         }
@@ -421,6 +422,47 @@ struct PanelView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(.red.opacity(0.08))
+            Divider()
+        }
+    }
+
+    /// What marking currently means, while any row is marked.
+    ///
+    /// Without this the mark set is invisible state: a checkmark on two rows
+    /// and no indication of what happens next, or of how to get out. It names
+    /// the count, the key that acts on it and the key that clears it —
+    /// which is also the only place the panel ever teaches G.
+    @ViewBuilder private var marksNotice: some View {
+        let live = marks.intersection(items.map(\.uid))
+        if !live.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.accentColor)
+                Text(
+                    live.count == 1
+                        ? "1 row marked" : "\(live.count) rows marked")
+                    .font(.system(size: 11, weight: .medium))
+                Text("Space to mark more")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button("Group") { beginGrouping() }
+                    .font(.system(size: 11))
+                Button {
+                    marks.removeAll()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Clear marks (Esc)")
+                .accessibilityLabel("Clear marks")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.accentColor.opacity(0.10))
             Divider()
         }
     }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One queue row: source glyph, title, snippet/actor, relative time, and
@@ -45,7 +46,16 @@ struct ItemRowView: View {
                 onSelect()
                 appState.open(item)
             }
-            .onTapGesture { onSelect() }
+            .onTapGesture {
+                // ⌘-click extends a selection everywhere else on this
+                // platform, so it marks here too. Space is the keyboard
+                // equivalent; both feed the same set, which only G reads.
+                if NSEvent.modifierFlags.contains(.command) {
+                    onToggleMark()
+                } else {
+                    onSelect()
+                }
+            }
             .onHover { isHovering = $0 }
             .contextMenu { contextMenu }
             .popover(isPresented: snoozePopoverBinding, arrowEdge: .trailing) {
@@ -139,26 +149,38 @@ struct ItemRowView: View {
         .background(background)
     }
 
-    /// The unseen dot, or the mark checkbox once this row is marked.
+    /// The unseen dot — and, on hover, the control that marks this row for
+    /// grouping.
     ///
-    /// One column, two meanings, never both at once: a marked row is
-    /// unambiguously about to be grouped, and an unmarked one is back to
-    /// saying whether it has been read.
+    /// Marking had no visible affordance in the first build: it was Space and
+    /// nothing else, so the first person to look for multi-select did not
+    /// find it. A hollow circle appearing under the cursor in a column that
+    /// is already there costs no layout and makes the gesture discoverable
+    /// the way everything else in this row is — by hovering it.
     @ViewBuilder private var marker: some View {
-        if isMarked {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 6, height: 6)
-                .padding(.top, 6)
-                .accessibilityHidden(true)
-        } else {
-            Circle()
-                .fill(item.isSeen ? .clear : Color.accentColor)
-                .frame(width: 6, height: 6)
-                .padding(.top, 6)
-                .accessibilityHidden(true)
+        Group {
+            if isMarked {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.accentColor)
+            } else if isHovering {
+                Image(systemName: "circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                Circle()
+                    .fill(item.isSeen ? .clear : Color.accentColor)
+                    .frame(width: 6, height: 6)
+            }
         }
+        // One fixed column whatever is in it, so the title never shifts
+        // sideways as the cursor crosses the row.
+        .frame(width: 14, height: 14)
+        .padding(.top, 2)
+        .contentShape(.rect)
+        .onTapGesture { onToggleMark() }
+        .help(isMarked ? "Marked — press G to group (Space)" : "Mark for grouping (Space)")
+        .accessibilityHidden(true)
     }
 
     private var topicChip: some View {
