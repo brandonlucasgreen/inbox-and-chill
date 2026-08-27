@@ -755,6 +755,22 @@ The naming card is an **overlay, not a `.sheet`** — the panel is a
 and a sheet there inherits every one of those problems. While it is up, the key
 monitor returns `false` for everything but Esc so its text fields get the keys.
 
+**`.fill(.background)` is TRANSLUCENT in the panel.** The panel is a vibrant
+surface, so the `.background` shape style resolves there to something you can
+see straight through — the first build of the naming card let the entire queue
+show through it and shipped unreadable. Anything floating over the queue must
+bring its own opaque ground: `Color(nsColor: .windowBackgroundColor)`. Nothing
+catches this in a build, in tests, or in an `ImageRenderer` sheet (which has no
+vibrant surface to get wrong) — only opening the panel does.
+
+**And a keyboard-only gesture has no discoverability at all.** Marking shipped
+as `Space` and nothing else, and the first person to look for multi-select
+reported there was no way to do it. Anything new that is not a letter on an
+existing hover button needs a *visible* affordance: `ItemRowView.marker` turns
+the unseen dot into a clickable circle on hover, ⌘-click marks (the platform
+idiom), and `PanelView.marksNotice` names the count and the keys while any row
+is marked. Copy that pattern rather than adding a second invisible key.
+
 ## Already exists — do not rebuild
 
 - **Per-source badge toggles** (`SourcesPane`, honoured in `AppState`) — the
