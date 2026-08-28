@@ -7,7 +7,10 @@ cask "inbox-and-chill" do
   version "0.4.0"
   sha256 "7d0d856701c559bbb5831ff40621b7250ee6597c7f997c3ca6bae644fe296381"
 
-  url "https://github.com/brandonlucasgreen/inbox-and-chill/releases/download/v#{version}/InboxAndChill-#{version}.dmg"
+  # The DMG's filename carries no version, so the *asset* link is stable across
+  # releases; the tag in the path still pins this cask to the release it names,
+  # which is what `version` and `sha256` above are describing.
+  url "https://github.com/brandonlucasgreen/inbox-and-chill/releases/download/v#{version}/InboxAndChill.dmg"
   name "Inbox & Chill"
   desc "Menu bar triage queue for Slack, Linear, GitHub and terminal notifications"
   homepage "https://github.com/brandonlucasgreen/inbox-and-chill"

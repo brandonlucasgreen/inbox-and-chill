@@ -287,10 +287,20 @@ echo "==> Gatekeeper assessment"
 spctl -a -vvv --type execute "$APP" 2>&1 | sed 's/^/    /'
 
 # --- Distributable archive ------------------------------------------------
+# The name carries no version, deliberately: it makes
+# releases/latest/download/InboxAndChill.zip a link that keeps working, which
+# is worth more than a filename that repeats what the bundle already knows.
+# VERSION is still read, because the dSYM and the DMG do carry it — those are
+# kept side by side across releases, and the zip is not.
+#
+# Nothing downstream reads the version out of this filename. generate_appcast
+# takes it from the Info.plist inside the archive (verified 2026-08-26: two
+# rounds with a fixed name kept both entries — it keys on version, not on the
+# file), and appcast.sh's tag rewrite reads each item's shortVersionString.
 OUT_DIR="dist"
 mkdir -p "$OUT_DIR"
 VERSION=$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "0.0.0")
-OUT="$OUT_DIR/InboxAndChill-$VERSION.zip"
+OUT="$OUT_DIR/InboxAndChill.zip"
 rm -f "$OUT"
 ditto -c -k --keepParent "$APP" "$OUT"
 
@@ -338,7 +348,17 @@ if [ "$SKIP_DMG" -eq 0 ]; then
   # release.
   DMG_DIR="$OUT_DIR/dmg"
   mkdir -p "$DMG_DIR"
-  DMG="$DMG_DIR/InboxAndChill-$VERSION.dmg"
+  # Unversioned for the same reason as the zip: it makes
+  # releases/latest/download/InboxAndChill.dmg a link that keeps working, and
+  # that is the link a *person* clicks. The cask still pins the exact version
+  # and sha256, and its URL still carries the tag, so brew downloads the
+  # release it means rather than whatever is newest.
+  #
+  # The dSYM above keeps its version, deliberately: it is the one artifact
+  # that accumulates in dist/ across releases, and a dSYM whose build you
+  # cannot name is useless — it is matched to a binary by UUID and nothing
+  # else in the file says which release it belongs to.
+  DMG="$DMG_DIR/InboxAndChill.dmg"
   STAGE=$(mktemp -d)
   cp -R "$APP" "$STAGE/"
   ln -s /Applications "$STAGE/Applications"

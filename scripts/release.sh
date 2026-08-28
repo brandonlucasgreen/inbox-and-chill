@@ -10,7 +10,7 @@
 # are notarized and stapled; the dSYM is not code and needs neither.
 #
 # Why this exists: before it, "releasing" meant running notarize.sh and then
-# hand-sending `dist/InboxAndChill-<version>.zip` to someone. There were no
+# hand-sending `dist/InboxAndChill.zip` to someone. There were no
 # git tags and no GitHub releases at all, so nothing recorded which source a
 # given zip was built from — and `dist/` held a 0.3.1 zip that predated two
 # commits on main. A downloader had no way to tell, and neither did we.
@@ -94,8 +94,13 @@ if [ -n "$PREV_TAG" ]; then
   fi
 fi
 
-ZIP="dist/InboxAndChill-$VERSION.zip"
-DMG="dist/dmg/InboxAndChill-$VERSION.dmg"
+# Deliberately no version in the zip's name: the asset URL is then the same
+# every release, so https://github.com/<repo>/releases/latest/download/
+# InboxAndChill.zip is a link that keeps working and can be published once.
+# The DMG and the dSYM still carry theirs — they sit side by side in dist/
+# across releases, and are told apart by nothing else.
+ZIP="dist/InboxAndChill.zip"
+DMG="dist/dmg/InboxAndChill.dmg"
 # Attached to the release so a crash report from a shipped build can still be
 # resolved to a line months later. It cannot be regenerated after the fact:
 # the dSYM is matched to a binary by UUID, and rebuilding produces a new one.
@@ -133,10 +138,27 @@ fi
 # --- Build the artifact the tag will describe -----------------------------
 echo "==> Notarizing (this rebuilds Release from the current source)"
 scripts/notarize.sh
-[ -f "$ZIP" ] || die "notarize.sh finished but $ZIP is missing.
-    Its version comes from the built Info.plist; if that disagrees with
-    project.yml's MARKETING_VERSION, regenerate the project: xcodegen generate"
+[ -f "$ZIP" ] || die "notarize.sh finished but $ZIP is missing."
 [ -f "$DMG" ] || die "notarize.sh finished but $DMG is missing."
+
+# Asked of the bundle rather than inferred from a filename, and now the ONLY
+# thing asking. While the artifacts were named InboxAndChill-<version>.{zip,dmg}
+# a build whose version disagreed with project.yml simply left those paths
+# missing, and the two checks above caught it by accident; fixed names cannot.
+# So ask the built Info.plist directly — this is the stale-.xcodeproj failure
+# that cost the first attempt at cutting 0.4.0, and it is worth catching before
+# the tag is pushed rather than after.
+# The exact path, not a glob. `*/Contents/Info.plist` also matches the four
+# nested bundles in there — Sparkle's Updater.app, both of its XPC services,
+# and the KeyboardShortcuts resource bundle — and unzip's wildcards cross `/`,
+# so `unzip -p` would emit all five concatenated with the app's own LAST.
+BUILT_VERSION=$(unzip -p "$ZIP" "Inbox & Chill.app/Contents/Info.plist" \
+  | plutil -extract CFBundleShortVersionString raw -o - - 2>/dev/null || true)
+[ "$BUILT_VERSION" = "$VERSION" ] || die "version mismatch — not tagging.
+    the built app says  ${BUILT_VERSION:-unreadable}
+    this release is     $VERSION
+    The built Info.plist is generated from project.yml, so a stale
+    .xcodeproj is the usual cause: xcodegen generate"
 
 # --- Tag, then publish ----------------------------------------------------
 echo "==> Tagging $TAG"
@@ -230,6 +252,8 @@ cat <<EOF
 
     The zip and the dmg are notarized and stapled, so they open on a Mac that
     has never seen this app — the only test that means anything (CLAUDE.md).
+    The zip is always named InboxAndChill.zip, so this link stays valid:
+      https://github.com/$REPO/releases/latest/download/InboxAndChill.zip
     The dSYM is attached for you, not for anyone downloading: keep it, because
     it is matched to this exact binary by UUID and rebuilding makes a new one.
 EOF

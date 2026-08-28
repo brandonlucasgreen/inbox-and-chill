@@ -850,7 +850,7 @@ pins it to the file keychain instead, where `security` can see it and Time
 Machine backs it up.
 
 `scripts/notarize.sh` does the rest: preflights the four things above, submits,
-staples, and writes `dist/InboxAndChill-<version>.zip`. Its credential check
+staples, and writes `dist/InboxAndChill.zip`. Its credential check
 retries once and explains the above rather than asserting the credentials are
 gone. It needs credentials
 stored once via `notarytool store-credentials` — a person has to do that, it is
@@ -894,7 +894,7 @@ nothing about what a downloader sees. Test the artifact the way it will
 arrive — extract the dist zip and mark it quarantined first:
 
 ```bash
-ditto -x -k dist/InboxAndChill-<version>.zip /tmp/gk && \
+ditto -x -k dist/InboxAndChill.zip /tmp/gk && \
   xattr -w com.apple.quarantine "0083;00000000;Safari;" "/tmp/gk/Inbox & Chill.app" && \
   spctl -a -vvv --type execute "/tmp/gk/Inbox & Chill.app"
 ```
@@ -997,9 +997,40 @@ Two more facts about the feed:
   one fixed prefix, so `appcast.sh` inserts `v<version>/` per enclosure
   afterwards. That is safe because `edSignature` signs the archive bytes, not
   the URL. It is idempotent, and it refuses to write a feed with an un-tagged
-  URL left in it. The zip's filename must carry the same version as the bundle
-  inside it — which holds, because `notarize.sh` names it from the built
-  `Info.plist`.
+  URL left in it. The tag comes from each item's `sparkle:shortVersionString`,
+  **not** from the filename.
+- **The zip is `InboxAndChill.zip` in every release — no version in the name**
+  (changed 2026-08-26), so
+  `releases/latest/download/InboxAndChill.zip` is a link that survives
+  releases. Two things had to be checked before doing it, and both hold:
+  `generate_appcast` keys entries by version rather than by file, so a
+  same-named archive does **not** clobber the previous release's entry
+  (measured: two rounds with a fixed name kept both items); and the tag
+  rewrite in `appcast.sh` now reads the version from the item instead of the
+  name.
+- **The DMG is `InboxAndChill.dmg` too**, same date and same reason —
+  `releases/latest/download/InboxAndChill.dmg` is the link a *person* clicks,
+  so it is the one most worth keeping stable. The cask is unaffected: its
+  `url` still interpolates `v#{version}/`, and `version` + `sha256` still pin
+  the exact bytes, so brew downloads the release the cask names.
+- **The dSYM keeps its version, deliberately.** It is the one artifact that
+  accumulates in `dist/` across releases, and nothing inside it says which
+  build it belongs to — it is matched to a binary by UUID. An unversioned
+  dSYM would be a file you cannot attribute.
+- **Two accidental checks were lost, and one replaced both.** A build whose
+  version disagreed with `project.yml` used to surface as
+  `dist/InboxAndChill-<version>.zip` (or `.dmg`) being missing after
+  `notarize.sh` — that is the stale-`.xcodeproj` failure that cost the first
+  attempt at cutting 0.4.0. Fixed names cannot fail that way, so `release.sh`
+  reads `CFBundleShortVersionString` out of the zip and compares it before
+  pushing the tag. Read it by the **exact** path: `unzip -p "$ZIP"
+  "*/Contents/Info.plist"` matches five plists (Sparkle's `Updater.app`, both
+  XPC services, the KeyboardShortcuts bundle, and the app's own **last**),
+  because unzip's wildcards cross `/`.
+  The other lost check was `homebrew-cask.sh`'s: `dist/dmg/InboxAndChill.dmg`
+  no longer proves which version it holds. Its published-asset comparison
+  catches a stale one on every path that publishes — but `--local-only` skips
+  that, so a cask written that way proves nothing until the full run.
 
 ### The signing key lives in the *login* keychain
 
