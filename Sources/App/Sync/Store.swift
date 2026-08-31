@@ -294,6 +294,32 @@ actor Store {
         return reasons
     }
 
+    /// Marks several items read or unread, normalized to the same state.
+    ///
+    /// Normalizing rather than flipping each, for the same reason as
+    /// `setPinned`: "mark these read" has to mean one thing, and a mixed set
+    /// flipped row-by-row stays mixed forever.
+    ///
+    /// Marking unread also sets `unreadHeldAt`, which is what makes the
+    /// choice stick against the auto-seen `markSeen` the next time the
+    /// selection lands on the row.
+    func setSeen(uids: [String], seen: Bool, at date: Date = .now) throws {
+        guard !uids.isEmpty else { return }
+        let wanted = Set(uids)
+        for item in try items() where wanted.contains(item.uid) {
+            if seen {
+                item.seenAt = item.seenAt ?? date
+                item.unreadHeldAt = nil
+            } else {
+                item.seenAt = nil
+                item.unreadHeldAt = date
+            }
+        }
+        // Deliberately not touching `updatedAt`: reading a notification is
+        // not a change to the notification.
+        try modelContext.save()
+    }
+
     // MARK: Topics
 
     /// Creates a topic and moves the given items into it.

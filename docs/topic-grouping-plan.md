@@ -229,6 +229,15 @@ feature that requires opening a window will not get used.
   so nothing about triage changes and there is no "which one does E use?"
   ambiguity.
 
+  **Superseded 2026-08-27.** Brandon, the day after first use: *"now that we
+  have a way of multi-selecting notifications - bulk actions. I should be able
+  to select multiple notifications, and not only group them, but also dismiss
+  them all with the E key, or mark them read/unread with U."* `E`, `S`, `U`,
+  `C` and `⌘P` now act on the marks too. The objection above was sound about
+  the build it was written for — marking had no affordance then — and expired
+  the moment marking became visible. The rule that replaced it: the mouse acts
+  on what it points at, the keyboard acts on what is marked.
+
 Verified against the key handler: `Space` and `g` both currently fall into the
 type-to-filter default, and both are safe to take behind the same
 `filterText.isEmpty && !isFiltering` guard that `E`/`S`/`U`/`D`/`C` already

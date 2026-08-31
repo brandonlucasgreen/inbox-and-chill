@@ -982,6 +982,17 @@ final class AppState {
         Task { await engine.undoDone(batch: batch) }
     }
 
+    /// `U` over several rows, normalized to the same state.
+    func setSeen(_ items: [Item], seen: Bool) {
+        let targets = items.filter { $0.isSeen != seen }
+        guard !targets.isEmpty else { return }
+        let uids = targets.map(\.uid)
+        Task {
+            try? await store.setSeen(uids: uids, seen: seen)
+            await MainActor.run { queueVersion += 1 }
+        }
+    }
+
     // MARK: Topics
 
     /// Groups items under a new topic, and reports its id.

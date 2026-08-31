@@ -405,6 +405,26 @@ struct TopicStoreTests {
             try await store.badgeCounts(countedSourceIDs: ["s"]).total == 2)
     }
 
+    @Test("Marking a batch read normalizes, and unread sticks")
+    func batchSeenNormalizes() async throws {
+        let store = try makeStore()
+        try await seed(store, [
+            remote("a", title: "One"), remote("b", title: "Two"),
+        ])
+        try await store.markSeen(uid: "test:a")
+
+        // Mixed → all read. A flip-each would have unread `a` again.
+        try await store.setSeen(uids: ["test:a", "test:b"], seen: true)
+        #expect(try await store.seenAt(uid: "test:a") != nil)
+        #expect(try await store.seenAt(uid: "test:b") != nil)
+
+        // All read → all unread, and the hold is what makes it survive the
+        // next time the selection lands on the row.
+        try await store.setSeen(uids: ["test:a", "test:b"], seen: false)
+        #expect(try await store.seenAt(uid: "test:a") == nil)
+        #expect(try await store.markSeen(uid: "test:a") == false)
+    }
+
     @Test("An empty topic survives; an old empty one is purged")
     func purgeRules() async throws {
         // A topic outliving its members is the resting state that lets

@@ -426,45 +426,97 @@ struct PanelView: View {
         }
     }
 
+    /// The snooze popover's owner when the marks, not a row, are the target.
+    static let marksSnoozeTarget = "marks:snooze"
+
     /// What marking currently means, while any row is marked.
     ///
-    /// Without this the mark set is invisible state: a checkmark on two rows
-    /// and no indication of what happens next, or of how to get out. It names
-    /// the count, the key that acts on it and the key that clears it —
-    /// which is also the only place the panel ever teaches G.
+    /// This bar is what makes bulk mode legible, and that is load-bearing
+    /// rather than decorative: the keyboard verbs act on the marks while it
+    /// is up, so it has to name the count, the verbs and the way out. Without
+    /// it, E would act on invisible state — which is the exact objection that
+    /// kept the triage keys away from the marks in the first build.
     @ViewBuilder private var marksNotice: some View {
-        let live = marks.intersection(items.map(\.uid))
+        let live = markedItems
         if !live.isEmpty {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.accentColor)
-                Text(
-                    live.count == 1
-                        ? "1 row marked" : "\(live.count) rows marked")
-                    .font(.system(size: 11, weight: .medium))
-                Text("Space to mark more")
-                    .font(.system(size: 11))
+            let allSeen = live.allSatisfy(\.isSeen)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.accentColor)
+                    Text(
+                        live.count == 1
+                            ? "1 row marked" : "\(live.count) rows marked")
+                        .font(.system(size: 11, weight: .semibold))
+                    Spacer(minLength: 0)
+                    bulkButton("Dismiss", "E") {
+                        appState.markDone(live)
+                        afterBulk()
+                    }
+                    bulkButton("Snooze", "S") {
+                        snoozeTargetUID = Self.marksSnoozeTarget
+                    }
+                    bulkButton(allSeen ? "Unread" : "Read", "U") {
+                        appState.setSeen(live, seen: !allSeen)
+                        afterBulk()
+                    }
+                    bulkButton("Group", "G") { beginGrouping() }
+                    Button {
+                        marks.removeAll()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .frame(width: 18, height: 18)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Button("Group") { beginGrouping() }
-                    .font(.system(size: 11))
-                Button {
-                    marks.removeAll()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
+                    .help("Clear marks (Esc)")
+                    .accessibilityLabel("Clear marks")
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Clear marks (Esc)")
-                .accessibilityLabel("Clear marks")
+                Text("These keys act on all \(live.count) — Space marks more, Esc clears.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(Color.accentColor.opacity(0.10))
+            .popover(
+                isPresented: marksSnoozeBinding, arrowEdge: .top
+            ) {
+                SnoozePopover(
+                    title: "\(live.count) marked rows"
+                ) { date in
+                    snoozeTargetUID = nil
+                    appState.snooze(live, until: date)
+                    afterBulk()
+                }
+            }
             Divider()
         }
+    }
+
+    private func bulkButton(
+        _ title: String, _ key: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(title).font(.system(size: 11))
+                KeyCap(key)
+            }
+            .padding(.horizontal, 3)
+            .frame(height: 20)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("\(title) every marked row (\(key))")
+    }
+
+    private var marksSnoozeBinding: Binding<Bool> {
+        Binding(
+            get: { snoozeTargetUID == Self.marksSnoozeTarget },
+            set: { if !$0 { snoozeTargetUID = nil } })
     }
 
     private func footer(_ index: SourceIndex) -> some View {
@@ -704,7 +756,9 @@ struct PanelView: View {
             return true
         case "s" where filterText.isEmpty && !isFiltering,
             "S" where filterText.isEmpty && !isFiltering:
-            if selectedItem != nil || selectedTopic != nil {
+            if !marks.isEmpty {
+                snoozeTargetUID = Self.marksSnoozeTarget
+            } else if selectedItem != nil || selectedTopic != nil {
                 snoozeTargetUID = selectedUID
             }
             return true
@@ -765,8 +819,24 @@ struct PanelView: View {
         appState.selectedSourceFilter = options[next]
     }
 
-    /// Flips the selected row between read and unread (`U`).
+    /// `U` — read/unread, on the marks when there are any.
+    ///
+    /// A mixed set normalizes rather than flipping each row, the same rule
+    /// pinning uses: mark everything read unless it is already all read, in
+    /// which case mark everything unread. Flipping row-by-row would leave a
+    /// mixed set mixed forever.
     private func unreadSelected() {
+        let marked = markedItems
+        if !marked.isEmpty {
+            appState.setSeen(marked, seen: !marked.allSatisfy(\.isSeen))
+            afterBulk()
+            return
+        }
+        if let topic = selectedTopic {
+            let members = topic.members
+            appState.setSeen(members, seen: !members.allSatisfy(\.isSeen))
+            return
+        }
         guard let item = selectedItem else { return }
         appState.toggleSeen(item)
     }
@@ -862,6 +932,37 @@ struct PanelView: View {
         toggleMark(selectedUID)
     }
 
+    /// The marked rows still in the queue.
+    ///
+    /// Filtered against the live query rather than trusted: a poll can
+    /// archive a marked row, and acting on a uid that has left the queue is
+    /// how a bulk verb quietly does less than it says.
+    private var markedItems: [Item] {
+        guard !marks.isEmpty else { return [] }
+        return items.filter { marks.contains($0.uid) }
+    }
+
+    /// What a keyboard triage verb should act on.
+    ///
+    /// **Marks win when there are any.** The mouse acts on what it points at;
+    /// the keyboard has no pointer, so it acts on what is marked. That is only
+    /// safe because marking is visible now — a checkmark per row and a bar
+    /// naming the count and the verbs — which is exactly what it was not when
+    /// this deliberately read the selection instead.
+    private func triageTargets() -> [Item] {
+        let marked = markedItems
+        if !marked.isEmpty { return marked }
+        if let topic = selectedTopic { return topic.members }
+        return selectedItem.map { [$0] } ?? []
+    }
+
+    /// Bulk verbs consume the marks. Leaving them set would point at rows
+    /// that have just left the queue, and the next E would act on a set the
+    /// user no longer has in mind.
+    private func afterBulk() {
+        if !marks.isEmpty { marks.removeAll() }
+    }
+
     private func toggleMark(_ uid: String) {
         if marks.contains(uid) {
             marks.remove(uid)
@@ -939,6 +1040,12 @@ struct PanelView: View {
     }
 
     private func doneSelected() {
+        let marked = markedItems
+        if !marked.isEmpty {
+            appState.markDone(marked)
+            afterBulk()
+            return
+        }
         if let topic = selectedTopic {
             appState.markDone(topic.members, topicName: topic.name)
             return
@@ -954,6 +1061,19 @@ struct PanelView: View {
     /// keeps the "which sources can do this" answer in one place instead of
     /// duplicating the capability check here.
     private func completeSelected() {
+        let marked = markedItems
+        if !marked.isEmpty {
+            // `completeTask` refuses a mixed set out loud and leaves the
+            // marks alone, so a refusal doesn't also throw away the selection
+            // the user spent five keystrokes building.
+            guard appState.canCompleteAll(marked) else {
+                appState.completeTask(marked)
+                return
+            }
+            appState.completeTask(marked)
+            afterBulk()
+            return
+        }
         if let topic = selectedTopic {
             appState.completeTask(topic.members, topicName: topic.name)
             return
@@ -963,6 +1083,13 @@ struct PanelView: View {
     }
 
     private func pinSelected() {
+        let marked = markedItems
+        if !marked.isEmpty {
+            appState.setPinned(
+                marked, pinned: !marked.allSatisfy(\.isPinned))
+            afterBulk()
+            return
+        }
         if let topic = selectedTopic {
             appState.setPinned(topic.members, pinned: !topic.isPinned)
             return

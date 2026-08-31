@@ -737,12 +737,32 @@ rows there used to take five ⌘Z.
 
 ### Two selection concepts in the panel, on purpose
 
-`Space` marks rows, `G` groups what is marked. **Only `G` reads the marks** —
-E/S/⌘P/C all still act on the single selection. Making the triage keys act on
-marks instead would mean the answer to "what does E do right now" depends on
-invisible state. Both keys were free: they fell through to type-to-filter, and
-they are taken behind the same `filterText.isEmpty && !isFiltering` guard the
-other letters use.
+`Space` marks rows; `E`, `S`, `U`, `C`, `⌘P` and `G` then act on **all** of
+them. Both keys were free: they fell through to type-to-filter, and they are
+taken behind the same `filterText.isEmpty && !isFiltering` guard the other
+letters use.
+
+The rule that keeps this unambiguous: **the mouse acts on what it points at,
+the keyboard acts on what is marked.** A row's own hover buttons are always
+about that row — you are pointing at it — while the keyboard has no pointer,
+so it reads the mark set when there is one and the selection otherwise. The
+marks bar above the footer carries bulk buttons for the same verbs, because
+that bar is the one place a click is unambiguously about the marks.
+
+**This reverses the first build's rule, and why it reversed is the useful
+part.** Marks originally drove `G` alone, because letting `E` act on them
+would have meant the answer to "what does E do right now" depended on
+invisible state. That objection was correct *about that build* — marking had
+no affordance at all: no checkmark, no bar, Space and nothing else. Once
+marking became visible the objection expired, and Brandon asked for the bulk
+verbs the next day. The lesson is not that the rule was wrong; it is that **a
+rule can be load-bearing only because of a UI gap, and has to be revisited
+when the gap closes.**
+
+Bulk verbs **consume the marks** (`PanelView.afterBulk`) — except a refused
+`C`, which leaves them, so a mixed set isn't silently thrown away along with
+the error. `U` and `⌘P` **normalize** a mixed set rather than flipping each
+row, or a mixed set would stay mixed forever.
 
 `D` is now a level rather than a toggle, with two at-most-one flags:
 `openTopicID` (which topic shows its members) and `isFullyExpanded` (which row
