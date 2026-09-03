@@ -57,6 +57,15 @@ final class Item {
     var unreadHeldAt: Date?
     /// Source-specific extras (e.g. Slack channel id, Linear notification id).
     var payload: Data?
+    /// The `Topic` this item belongs to, or nil.
+    ///
+    /// **Local state, like `pinnedAt`, `seenAt` and `unreadHeldAt` — and so
+    /// deliberately absent from `Store.update(_:from:)`.** That method
+    /// refreshes nearly every field from the remote on every poll (`kind` was
+    /// added to it recently and correctly), so a field that must survive a
+    /// poll has to be left out of it by hand. A poll dissolving the topic the
+    /// user just built is the regression this comment exists to prevent.
+    var topicID: String?
 
     init(
         uid: String, sourceID: String, sourceKind: String, kind: String,

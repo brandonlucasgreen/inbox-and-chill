@@ -44,6 +44,8 @@ struct TriageActions {
     var snooze: @MainActor (SnoozePreset) -> Void
     var pickSnoozeDate: @MainActor () -> Void
     var togglePin: @MainActor () -> Void
+    /// ⌘G — file the selection under a topic.
+    var group: @MainActor () -> Void
     var restore: @MainActor () -> Void
     var copy: @MainActor () -> Void
     var undoDone: @MainActor () -> Void

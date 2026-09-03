@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One queue row: source glyph, title, snippet/actor, relative time, and
@@ -14,6 +15,13 @@ struct ItemRowView: View {
     /// the panel rather than here so it can only ever be true of one row,
     /// and so moving the selection puts it back.
     var isFullyExpanded: Bool = false
+    /// Rendered inside an open topic — the source glyph is doing the job of
+    /// the section header this row no longer sits under.
+    var isTopicMember: Bool = false
+    /// In a topic, but showing as a plain row anyway: the last member left
+    /// after the others archived, or a source filter dissolving the group.
+    /// Without the chip that row looks like it was never grouped.
+    var showsTopicChip: Bool = false
     /// Which row currently owns the snooze popover (S key or "Pick Date…").
     @Binding var snoozeTargetUID: String?
     var onSelect: () -> Void
@@ -23,18 +31,42 @@ struct ItemRowView: View {
     /// event — the panel closes a full expansion whenever the selection
     /// moves, so a separate `onSelect()` first would undo the toggle.
     var onToggleFull: () -> Void = {}
+    var onToggleMark: () -> Void = {}
+    var onGroup: () -> Void = {}
+
+    /// Marked for a bulk verb. Read from the panel's `PanelMarks` rather
+    /// than passed in, so a toggle re-renders this row and nothing above it.
+    /// Optional because the main window and the archive render rows too,
+    /// with no marks in their environment.
+    @Environment(PanelMarks.self) private var marks: PanelMarks?
 
     @State private var isHovering = false
+
+    private var isMarked: Bool { marks?.contains(item.uid) ?? false }
 
     var body: some View {
         draggableContent
             .contentShape(.rect)
-            // Double-tap must be declared first to win over the single tap.
-            .onTapGesture(count: 2) {
+            // One tap gesture, not a double-tap declared ahead of a single.
+            // Stacking the two makes SwiftUI hold every single click until
+            // the double-click interval (0.5s by default) has passed and the
+            // second click has not come — so selecting and ⌘-marking rows
+            // each landed half a second after the mouse went up. AppKit
+            // already counts clicks; the event says whether this is the
+            // second of a pair, and the first has been acted on by then.
+            .onTapGesture {
+                // ⌘-click extends a selection everywhere else on this
+                // platform, so it marks here too. Space is the keyboard
+                // equivalent; both feed the same set.
+                if NSEvent.modifierFlags.contains(.command) {
+                    onToggleMark()
+                    return
+                }
                 onSelect()
-                appState.open(item)
+                if NSApp.currentEvent?.clickCount == 2 {
+                    appState.open(item)
+                }
             }
-            .onTapGesture { onSelect() }
             .onHover { isHovering = $0 }
             .contextMenu { contextMenu }
             .popover(isPresented: snoozePopoverBinding, arrowEdge: .trailing) {
@@ -64,6 +96,9 @@ struct ItemRowView: View {
             .accessibilityAction(
                 named: isShowingFull ? "Show less" : "Show full message"
             ) { onToggleFull() }
+            .accessibilityAction(named: isMarked ? "Unmark" : "Mark for grouping") {
+                onToggleMark()
+            }
     }
 
     // MARK: Layout
@@ -79,11 +114,7 @@ struct ItemRowView: View {
     private var row: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 8) {
-                Circle()
-                    .fill(item.isSeen ? .clear : Color.accentColor)
-                    .frame(width: 6, height: 6)
-                    .padding(.top, 6)
-                    .accessibilityHidden(true)
+                marker
                 Image(systemName: display.systemImage)
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
@@ -108,6 +139,7 @@ struct ItemRowView: View {
                             animation: expansion)
                             .foregroundStyle(.secondary)
                     }
+                    if showsTopicChip { topicChip }
                     if isShowingFull {
                         RowContextView(phase: contextPhase)
                             .transition(.opacity)
@@ -126,6 +158,51 @@ struct ItemRowView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .background(background)
+    }
+
+    /// The unseen dot — and, on hover, the checkbox that marks this row for
+    /// a bulk verb.
+    ///
+    /// Marking had no visible affordance in the first build: it was Space and
+    /// nothing else, so the first person to look for multi-select did not
+    /// find it. A checkbox appearing under the cursor in a column that is
+    /// already there costs no layout and makes the gesture discoverable the
+    /// way everything else in this row is — by hovering it.
+    @ViewBuilder private var marker: some View {
+        Group {
+            if isMarked || isHovering {
+                MarkBox(isMarked: isMarked, size: 13)
+            } else {
+                Circle()
+                    .fill(item.isSeen ? .clear : Color.accentColor)
+                    .frame(width: 6, height: 6)
+            }
+        }
+        // One fixed column whatever is in it, so the title never shifts
+        // sideways as the cursor crosses the row.
+        .frame(width: 14, height: 14)
+        .padding(.top, 2)
+        // The box is 13pt; the target is not. Growing the hit area past the
+        // glyph costs no layout and stops a bulk pass from being a run of
+        // precision clicks.
+        .contentShape(.rect.inset(by: -5))
+        .onTapGesture { onToggleMark() }
+        .help(isMarked ? "Marked (Space, or ⌘-click)" : "Mark (Space, or ⌘-click)")
+        .accessibilityHidden(true)
+    }
+
+    private var topicChip: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 9))
+            Text("In a topic")
+                .font(.system(size: 10))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(Capsule().fill(.quaternary))
+        .accessibilityLabel("In a topic")
     }
 
     private var timeOrPin: some View {
@@ -196,6 +273,15 @@ struct ItemRowView: View {
                 item.isPinned ? "Unpin (⌘P)" : "Pin (⌘P)",
                 item.isPinned ? "Unpin" : "Pin"
             ) { appState.togglePin(item) }
+            actionButton(
+                isMarked ? "checkmark.square.fill" : "square.stack.3d.up",
+                key: "G",
+                isTopicMember
+                    ? "Move to another topic (G)"
+                    : (isMarked
+                        ? "Marked — press G to group" : "Group this (G)"),
+                isTopicMember ? "Move to another topic" : "Group"
+            ) { onGroup() }
         }
         .font(.system(size: 14))
         .buttonStyle(.borderless)
@@ -255,6 +341,14 @@ struct ItemRowView: View {
             appState.toggleSeen(item)
         }
         Button(item.isPinned ? "Unpin" : "Pin") { appState.togglePin(item) }
+        Divider()
+        Button(isMarked ? "Unmark" : "Mark for Grouping") { onToggleMark() }
+        Button(isTopicMember ? "Move to Another Topic…" : "Group…") {
+            onGroup()
+        }
+        if isTopicMember {
+            Button("Remove from Topic") { appState.removeFromTopic([item]) }
+        }
         Divider()
         Button("Copy") {
             PanelPasteboard.copy(title: item.title, url: item.url)

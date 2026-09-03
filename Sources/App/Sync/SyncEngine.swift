@@ -63,6 +63,105 @@ actor SyncEngine {
 
     // MARK: Triage write-through
 
+    /// Everything the engine needs to act on one row without holding the
+    /// `Item` itself, which is not `Sendable`.
+    struct Target: Sendable {
+        var uid: String
+        var sourceID: String
+        var externalID: String
+        var payload: Data?
+    }
+
+    /// Dismiss several rows — a topic, or a main-window multi-selection.
+    ///
+    /// **One local write, N write-throughs.** The store save is batched
+    /// because each save bumps `queueVersion`, and four bumps turn one topic
+    /// dismissal into four staggered row collapses (`PanelMotion`). The
+    /// write-throughs cannot be batched and must not be: each source has to
+    /// be told separately, and each can fail separately — a failure is
+    /// reported against the source it belongs to, so one dead connector in a
+    /// mixed topic names itself rather than tainting the rest.
+    func markDone(batch targets: [Target]) async {
+        guard !targets.isEmpty else { return }
+        try? await store.markDone(uids: targets.map(\.uid))
+        await writeThrough(targets, capability: .markDone) { connector, target in
+            try await connector.markDone(
+                externalID: target.externalID, payload: target.payload)
+        }
+    }
+
+    func completeTask(batch targets: [Target]) async {
+        guard !targets.isEmpty else { return }
+        try? await store.markDone(
+            uids: targets.map(\.uid), reason: Store.DoneReason.completed)
+        await writeThrough(targets, capability: .completesTask) {
+            connector, target in
+            try await connector.complete(
+                externalID: target.externalID, payload: target.payload)
+        }
+    }
+
+    func snooze(batch targets: [Target], until: Date) async {
+        guard !targets.isEmpty else { return }
+        try? await store.snooze(uids: targets.map(\.uid), until: until)
+        await writeThrough(targets, capability: .remoteSnooze) {
+            connector, target in
+            try await connector.snooze(
+                externalID: target.externalID, until: until,
+                payload: target.payload)
+        }
+    }
+
+    /// One ⌘Z over a batch, honouring what each row was done *for*.
+    ///
+    /// The store reports the reason per uid, so a mixed topic un-completes
+    /// its Reminders member in Reminders while leaving the dismissed Slack
+    /// member alone — the same rule the single-row path already follows,
+    /// applied per member rather than to the batch as a whole.
+    func undoDone(batch targets: [Target]) async {
+        guard !targets.isEmpty else { return }
+        let reasons =
+            (try? await store.undoDone(uids: targets.map(\.uid))) ?? [:]
+        let completed = targets.filter {
+            reasons[$0.uid] == Store.DoneReason.completed
+                && !$0.externalID.isEmpty
+        }
+        await writeThrough(completed, capability: .completesTask) {
+            connector, target in
+            try await connector.uncomplete(
+                externalID: target.externalID, payload: target.payload)
+        }
+        // Rows that were merely dismissed still moved, so the queue has to
+        // hear about it even when nothing was written anywhere.
+        if completed.isEmpty { notify(sourceID: "") }
+    }
+
+    /// Runs one write-through per target, grouped so each source's outcome is
+    /// reported against that source.
+    private func writeThrough(
+        _ targets: [Target], capability: ConnectorCapabilities,
+        _ body: (any Connector, Target) async throws -> Void
+    ) async {
+        var failures: [String: String] = [:]
+        var touched: [String] = []
+        for target in targets {
+            if !touched.contains(target.sourceID) {
+                touched.append(target.sourceID)
+            }
+            guard let connector = connectors[target.sourceID],
+                connector.capabilities.contains(capability)
+            else { continue }
+            do {
+                try await body(connector, target)
+            } catch {
+                failures[target.sourceID] = String(describing: error)
+            }
+        }
+        for sourceID in touched {
+            notify(sourceID: sourceID, writeThroughFailure: failures[sourceID])
+        }
+    }
+
     func markDone(uid: String, sourceID: String, externalID: String, payload: Data?) async {
         try? await store.markDone(uid: uid)
         var failure: String?
