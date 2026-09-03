@@ -10,25 +10,32 @@ means which cause.
 
 ---
 
-## Where things stand (2026-08-26)
+## Where things stand (2026-09-03)
 
-**0.4.0 is a feature release**, and the first `.x` bump since to-do support
-landed: Apple Reminders (#33) and Todoist (#35) are new source kinds, and #34
-added crash and error reporting in Settings › Diagnostics.
+**0.5.0 is a feature release**: Topics (#41) group one thing across sources
+into a single queue row, and the same PR brought bulk marking — the hover
+checkbox, ⌘-click, Space and ⇧↑/⇧↓ — with `E`, `S`, `U`, `C`, `⌘P` and `G`
+acting on every marked row.
 
-`v0.3.5` shipped `CURRENT_PROJECT_VERSION` **8**. 0.4.0 ships **9**, which
+`v0.4.0` shipped `CURRENT_PROJECT_VERSION` **9**. 0.5.0 ships **10**, which
 `release.sh` enforces.
 
-**0.4.0 is the first release that archives a dSYM.** Nothing before it has
-one, and none can be recovered — a dSYM is matched to a binary by UUID and a
-rebuild produces a different one. So a crash report from 0.3.5 or earlier
-resolves to function names (the shipped binary keeps its Swift symbols) but not
-to line numbers. From here on, `notarize.sh` writes
-`dist/dsym/InboxAndChill-<version>.dSYM.zip` and `release.sh` attaches it.
+**0.5.0 is the first release cut with unversioned artifact names** (#40):
+`dist/InboxAndChill.zip` and `dist/dmg/InboxAndChill.dmg`, so
+`releases/latest/download/InboxAndChill.dmg` survives releases. The dSYM keeps
+its version. The zip-version check that replaced the old filename check in
+`release.sh`, and `notarize.sh`'s `xcodegen generate` (#39), both run for real
+for the first time here — the 0.4.0 attempt that died on a stale `.xcodeproj`
+is what #39 fixed.
 
-**The in-app update path has still never been observed working end to end.**
-0.3.4 → 0.3.5 was the first pair that could have tested it and nobody has
-confirmed a Check Now finding it. `UpdateController.checkInterval` is 86,400 —
+**0.4.0 was the first release to archive a dSYM.** Nothing before it has one,
+and none can be recovered — a dSYM is matched to a binary by UUID and a rebuild
+produces a different one. So a crash report from 0.3.5 or earlier resolves to
+function names (the shipped binary keeps its Swift symbols) but not to line
+numbers.
+
+**The in-app update path is proven.** Brandon upgraded 0.3.5 → 0.4.0 through
+Check Now on 2026-08-26. `UpdateController.checkInterval` is still 86,400 —
 once a day — so "no update came through" usually means the check has not run
 yet, not that the release is broken.
 
