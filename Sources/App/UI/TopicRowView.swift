@@ -27,8 +27,13 @@ struct TopicRowView: View {
     var body: some View {
         row
             .contentShape(.rect)
-            .onTapGesture(count: 2) { onToggleOpen() }
-            .onTapGesture { onSelect() }
+            // One gesture reading the click count, for the same reason as
+            // `ItemRowView`: a double-tap stacked on a single tap holds the
+            // single click for the whole double-click interval.
+            .onTapGesture {
+                onSelect()
+                if NSApp.currentEvent?.clickCount == 2 { onToggleOpen() }
+            }
             .onHover { isHovering = $0 }
             .contextMenu { contextMenu }
             .popover(isPresented: snoozePopoverBinding, arrowEdge: .trailing) {

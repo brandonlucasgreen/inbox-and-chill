@@ -787,9 +787,37 @@ vibrant surface to get wrong) — only opening the panel does.
 as `Space` and nothing else, and the first person to look for multi-select
 reported there was no way to do it. Anything new that is not a letter on an
 existing hover button needs a *visible* affordance: `ItemRowView.marker` turns
-the unseen dot into a clickable circle on hover, ⌘-click marks (the platform
-idiom), and `PanelView.marksNotice` names the count and the keys while any row
-is marked. Copy that pattern rather than adding a second invisible key.
+the unseen dot into a clickable checkbox on hover (`MarkBox` — a
+continuous-corner square, because the circle it first shipped as read as a
+radio button, Brandon 2026-09-03), ⌘-click marks (the platform idiom), and
+`MarksBar` names the count and the keys while any row is marked. Copy that
+pattern rather than adding a second invisible key.
+
+### Marking has to be cheap, and two things made it not (2026-09-03)
+
+Brandon: *"the bulk select feature … is very sluggish"*. Two causes, one
+measured and one not:
+
+- **A double-tap declared ahead of a single tap holds every single click for
+  the double-click interval** — 0.5s by default on this Mac
+  (`NSEvent.doubleClickInterval`) — so SwiftUI can be sure the second click
+  is not coming. Row selection had carried that since the first commit and
+  nobody noticed, because the panel is driven from the keyboard; ⌘-click
+  marking was the first mouse-heavy flow through it. Rows now attach **one**
+  tap gesture and read `NSApp.currentEvent?.clickCount` for the double —
+  select on the first click, open on the second. *Not* measured here: SwiftUI
+  tap gestures ignore synthetic `NSEvent`s posted in-process (a `Button` in
+  the same window fires, `onTapGesture` never does), so with no Accessibility
+  grant for Claude Code the delay is known from SwiftUI's behaviour, not
+  timed on this machine. If double-click-to-open ever stops working, this is
+  the line to suspect.
+- **`marks` was a `Set` in `@State` on `PanelView`**, so every toggle re-ran
+  the whole panel body — queue rebuilt, filter bar, footer and every visible
+  row re-evaluated. The queue build itself measured only ~1ms at his 186
+  items, so this was the smaller half. `PanelMarks` is `@Observable` and the
+  panel body never reads its contents; rows and `MarksBar` do, through the
+  environment. Keep it that way: a `marks.uids` read anywhere in
+  `PanelView.body` silently brings the full re-render back.
 
 ## Already exists — do not rebuild
 

@@ -15,8 +15,6 @@ struct ItemRowView: View {
     /// the panel rather than here so it can only ever be true of one row,
     /// and so moving the selection puts it back.
     var isFullyExpanded: Bool = false
-    /// Marked with Space, waiting for G.
-    var isMarked: Bool = false
     /// Rendered inside an open topic — the source glyph is doing the job of
     /// the section header this row no longer sits under.
     var isTopicMember: Bool = false
@@ -36,24 +34,37 @@ struct ItemRowView: View {
     var onToggleMark: () -> Void = {}
     var onGroup: () -> Void = {}
 
+    /// Marked for a bulk verb. Read from the panel's `PanelMarks` rather
+    /// than passed in, so a toggle re-renders this row and nothing above it.
+    /// Optional because the main window and the archive render rows too,
+    /// with no marks in their environment.
+    @Environment(PanelMarks.self) private var marks: PanelMarks?
+
     @State private var isHovering = false
+
+    private var isMarked: Bool { marks?.contains(item.uid) ?? false }
 
     var body: some View {
         draggableContent
             .contentShape(.rect)
-            // Double-tap must be declared first to win over the single tap.
-            .onTapGesture(count: 2) {
-                onSelect()
-                appState.open(item)
-            }
+            // One tap gesture, not a double-tap declared ahead of a single.
+            // Stacking the two makes SwiftUI hold every single click until
+            // the double-click interval (0.5s by default) has passed and the
+            // second click has not come — so selecting and ⌘-marking rows
+            // each landed half a second after the mouse went up. AppKit
+            // already counts clicks; the event says whether this is the
+            // second of a pair, and the first has been acted on by then.
             .onTapGesture {
                 // ⌘-click extends a selection everywhere else on this
                 // platform, so it marks here too. Space is the keyboard
-                // equivalent; both feed the same set, which only G reads.
+                // equivalent; both feed the same set.
                 if NSEvent.modifierFlags.contains(.command) {
                     onToggleMark()
-                } else {
-                    onSelect()
+                    return
+                }
+                onSelect()
+                if NSApp.currentEvent?.clickCount == 2 {
+                    appState.open(item)
                 }
             }
             .onHover { isHovering = $0 }
@@ -149,24 +160,18 @@ struct ItemRowView: View {
         .background(background)
     }
 
-    /// The unseen dot — and, on hover, the control that marks this row for
-    /// grouping.
+    /// The unseen dot — and, on hover, the checkbox that marks this row for
+    /// a bulk verb.
     ///
     /// Marking had no visible affordance in the first build: it was Space and
     /// nothing else, so the first person to look for multi-select did not
-    /// find it. A hollow circle appearing under the cursor in a column that
-    /// is already there costs no layout and makes the gesture discoverable
-    /// the way everything else in this row is — by hovering it.
+    /// find it. A checkbox appearing under the cursor in a column that is
+    /// already there costs no layout and makes the gesture discoverable the
+    /// way everything else in this row is — by hovering it.
     @ViewBuilder private var marker: some View {
         Group {
-            if isMarked {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.accentColor)
-            } else if isHovering {
-                Image(systemName: "circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+            if isMarked || isHovering {
+                MarkBox(isMarked: isMarked, size: 13)
             } else {
                 Circle()
                     .fill(item.isSeen ? .clear : Color.accentColor)
@@ -177,9 +182,12 @@ struct ItemRowView: View {
         // sideways as the cursor crosses the row.
         .frame(width: 14, height: 14)
         .padding(.top, 2)
-        .contentShape(.rect)
+        // The box is 13pt; the target is not. Growing the hit area past the
+        // glyph costs no layout and stops a bulk pass from being a run of
+        // precision clicks.
+        .contentShape(.rect.inset(by: -5))
         .onTapGesture { onToggleMark() }
-        .help(isMarked ? "Marked — press G to group (Space)" : "Mark for grouping (Space)")
+        .help(isMarked ? "Marked (Space, or ⌘-click)" : "Mark (Space, or ⌘-click)")
         .accessibilityHidden(true)
     }
 
@@ -266,7 +274,7 @@ struct ItemRowView: View {
                 item.isPinned ? "Unpin" : "Pin"
             ) { appState.togglePin(item) }
             actionButton(
-                isMarked ? "checkmark.circle.fill" : "square.stack.3d.up",
+                isMarked ? "checkmark.square.fill" : "square.stack.3d.up",
                 key: "G",
                 isTopicMember
                     ? "Move to another topic (G)"

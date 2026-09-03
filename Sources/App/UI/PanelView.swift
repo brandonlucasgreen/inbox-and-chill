@@ -32,13 +32,14 @@ struct PanelView: View {
     /// topic, D on a member opens that member's whole message, and the two
     /// have to be independently true.
     @State private var openTopicID: String?
-    /// Rows the user has marked with Space, waiting for G.
+    /// Rows the user has marked — with Space, ⌘-click or the row's checkbox —
+    /// for the bulk verbs to act on.
     ///
-    /// A *second* selection concept, deliberately kept away from every other
-    /// verb: E/S/⌘P/C all still act on the single selection, and only G reads
-    /// this. Making the triage keys act on marks instead would mean the
-    /// answer to "what does E do right now" depends on invisible state.
-    @State private var marks: Set<String> = []
+    /// An object rather than a `Set` in `@State`, and the body below never
+    /// reads its contents: the rows and `MarksBar` do, through the
+    /// environment, so a toggle re-renders those and leaves the rest of the
+    /// panel alone. The key handlers read it freely — see `PanelMarks`.
+    @State private var marks = PanelMarks()
     @State private var topicEditor: TopicEditorRequest?
     /// Whether the selected row is showing its whole message (D). One flag
     /// for the panel, not one per row: only the selected row can be open at
@@ -77,11 +78,14 @@ struct PanelView: View {
             }
             Divider()
             LicenseNotice()
-            marksNotice
+            MarksBar(
+                items: items, snoozeTargetUID: $snoozeTargetUID,
+                onGroup: { beginGrouping() })
             openProblemNotice
             footer(queue.index)
         }
         .frame(width: 420, height: 560)
+        .environment(marks)
         .overlay { topicEditorOverlay(queue) }
         .animation(
             PanelMotion.queue(reduceMotion: reduceMotion), value: topicEditor)
@@ -285,7 +289,6 @@ struct PanelView: View {
                 item: item, display: index.display(for: item),
                 isSelected: selectedUID == item.uid,
                 isFullyExpanded: isFullyExpanded,
-                isMarked: marks.contains(item.uid),
                 isTopicMember: indented,
                 // A row showing as a plain row while still belonging to a
                 // topic — one member left after the others archived, or a
@@ -427,97 +430,7 @@ struct PanelView: View {
     }
 
     /// The snooze popover's owner when the marks, not a row, are the target.
-    static let marksSnoozeTarget = "marks:snooze"
-
-    /// What marking currently means, while any row is marked.
-    ///
-    /// This bar is what makes bulk mode legible, and that is load-bearing
-    /// rather than decorative: the keyboard verbs act on the marks while it
-    /// is up, so it has to name the count, the verbs and the way out. Without
-    /// it, E would act on invisible state — which is the exact objection that
-    /// kept the triage keys away from the marks in the first build.
-    @ViewBuilder private var marksNotice: some View {
-        let live = markedItems
-        if !live.isEmpty {
-            let allSeen = live.allSatisfy(\.isSeen)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.accentColor)
-                    Text(
-                        live.count == 1
-                            ? "1 row marked" : "\(live.count) rows marked")
-                        .font(.system(size: 11, weight: .semibold))
-                    Spacer(minLength: 0)
-                    bulkButton("Dismiss", "E") {
-                        appState.markDone(live)
-                        afterBulk()
-                    }
-                    bulkButton("Snooze", "S") {
-                        snoozeTargetUID = Self.marksSnoozeTarget
-                    }
-                    bulkButton(allSeen ? "Unread" : "Read", "U") {
-                        appState.setSeen(live, seen: !allSeen)
-                        afterBulk()
-                    }
-                    bulkButton("Group", "G") { beginGrouping() }
-                    Button {
-                        marks.removeAll()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .semibold))
-                            .frame(width: 18, height: 18)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Clear marks (Esc)")
-                    .accessibilityLabel("Clear marks")
-                }
-                Text("These keys act on all \(live.count) — Space marks more, Esc clears.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Color.accentColor.opacity(0.10))
-            .popover(
-                isPresented: marksSnoozeBinding, arrowEdge: .top
-            ) {
-                SnoozePopover(
-                    title: "\(live.count) marked rows"
-                ) { date in
-                    snoozeTargetUID = nil
-                    appState.snooze(live, until: date)
-                    afterBulk()
-                }
-            }
-            Divider()
-        }
-    }
-
-    private func bulkButton(
-        _ title: String, _ key: String, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                Text(title).font(.system(size: 11))
-                KeyCap(key)
-            }
-            .padding(.horizontal, 3)
-            .frame(height: 20)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help("\(title) every marked row (\(key))")
-    }
-
-    private var marksSnoozeBinding: Binding<Bool> {
-        Binding(
-            get: { snoozeTargetUID == Self.marksSnoozeTarget },
-            set: { if !$0 { snoozeTargetUID = nil } })
-    }
+    static let marksSnoozeTarget = MarksBar.snoozeTarget
 
     private func footer(_ index: SourceIndex) -> some View {
         HStack(spacing: 8) {
@@ -694,7 +607,7 @@ struct PanelView: View {
             } else if openTopicID != nil {
                 openTopicID = nil
             } else if !marks.isEmpty {
-                marks.removeAll()
+                marks.clear()
             } else if isFiltering || !filterText.isEmpty {
                 clearFilter()
             } else if showArchive {
@@ -932,15 +845,8 @@ struct PanelView: View {
         toggleMark(selectedUID)
     }
 
-    /// The marked rows still in the queue.
-    ///
-    /// Filtered against the live query rather than trusted: a poll can
-    /// archive a marked row, and acting on a uid that has left the queue is
-    /// how a bulk verb quietly does less than it says.
-    private var markedItems: [Item] {
-        guard !marks.isEmpty else { return [] }
-        return items.filter { marks.contains($0.uid) }
-    }
+    /// The marked rows still in the queue — see `PanelMarks.live(in:)`.
+    private var markedItems: [Item] { marks.live(in: items) }
 
     /// What a keyboard triage verb should act on.
     ///
@@ -960,15 +866,11 @@ struct PanelView: View {
     /// that have just left the queue, and the next E would act on a set the
     /// user no longer has in mind.
     private func afterBulk() {
-        if !marks.isEmpty { marks.removeAll() }
+        marks.clear()
     }
 
     private func toggleMark(_ uid: String) {
-        if marks.contains(uid) {
-            marks.remove(uid)
-        } else {
-            marks.insert(uid)
-        }
+        marks.toggle(uid)
     }
 
     /// G — group whatever is marked, or the selected row when nothing is.
@@ -977,7 +879,7 @@ struct PanelView: View {
     /// "group this" has no meaning for something already grouped, and an
     /// error message where an obvious action exists is just a worse button.
     private func beginGrouping(with item: Item? = nil) {
-        var uids = marks
+        var uids = marks.uids
         if let item { uids.insert(item.uid) }
         if uids.isEmpty, let topic = selectedTopic {
             topicEditor = .edit(topic)
@@ -997,7 +899,7 @@ struct PanelView: View {
 
     private func closeEditor() {
         topicEditor = nil
-        marks.removeAll()
+        marks.clear()
         focus = .list
     }
 
