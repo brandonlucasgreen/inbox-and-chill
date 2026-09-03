@@ -622,11 +622,13 @@ struct PanelView: View {
         if showArchive { return false }
 
         switch input {
+        // ⇧ held: mark every row the selection passes over, anchored where
+        // the run began — the platform's Shift-arrow, so reversing shrinks.
         case .up:
-            moveSelection(-1)
+            moveSelection(-1, extendingMarks: modifiers.contains(.shift))
             return true
         case .down:
-            moveSelection(1)
+            moveSelection(1, extendingMarks: modifiers.contains(.shift))
             return true
         // ←/→ step through the source filter chips. "All" is part of the
         // cycle rather than a separate mode, so repeated presses always get
@@ -754,12 +756,17 @@ struct PanelView: View {
         appState.toggleSeen(item)
     }
 
-    private func moveSelection(_ delta: Int) {
+    private func moveSelection(_ delta: Int, extendingMarks: Bool = false) {
+        let visible = queue.visibleUIDs
         guard
             let next = PanelSelection.next(
-                from: selectedUID, in: queue.visibleUIDs, by: delta)
+                from: selectedUID, in: visible, by: delta)
         else { return }
-        select(next)
+        let previous = selectedUID
+        select(next, extendingMarks: extendingMarks)
+        if extendingMarks, let previous {
+            marks.extendRange(from: previous, to: next, in: visible)
+        }
         focus = .list
     }
 
@@ -771,8 +778,11 @@ struct PanelView: View {
     /// Reset here rather than in an `onChange`: a click on a row's D button
     /// selects and expands in the same event, and an `onChange` observer
     /// would run after both and close what the click just opened.
-    private func select(_ uid: String?) {
+    private func select(_ uid: String?, extendingMarks: Bool = false) {
         guard uid != selectedUID else { return }
+        // Every move but a ⇧-arrow ends a Shift-selection run — see
+        // `PanelMarks.extendRange`.
+        if !extendingMarks { marks.endRange() }
         selectedUID = uid
         isFullyExpanded = false
         appState.clearContext()

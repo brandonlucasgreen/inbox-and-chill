@@ -18,13 +18,59 @@ final class PanelMarks {
 
     func contains(_ uid: String) -> Bool { uids.contains(uid) }
 
+    /// An explicit toggle (Space, ⌘-click, the checkbox) also ends any ⇧-run,
+    /// so the next ⇧-arrow builds on what is marked now rather than on what
+    /// was marked when the run began.
     func toggle(_ uid: String) {
+        endRange()
         if uids.remove(uid) == nil { uids.insert(uid) }
     }
 
     func clear() {
+        endRange()
         guard !uids.isEmpty else { return }
         uids.removeAll()
+    }
+
+    // MARK: Shift-selection
+
+    /// Where a ⇧↑/⇧↓ run started, and what was marked before it did. The
+    /// marks are always `rangeBase ∪ range(anchor…selection)`, which is what
+    /// lets ⇧↑ after ⇧↓ take a row back out rather than pile on — the same
+    /// contract as Shift-arrow in every list on the platform.
+    private var rangeAnchor: String?
+    private var rangeBase: Set<String> = []
+
+    /// ⇧↑/⇧↓: the selection has just moved from `previous` to `target`.
+    /// Starts a run at `previous` if one isn't in progress.
+    func extendRange(from previous: String, to target: String, in visible: [String]) {
+        if rangeAnchor == nil {
+            rangeAnchor = previous
+            rangeBase = uids
+        }
+        uids = rangeBase.union(
+            Self.range(in: visible, from: rangeAnchor ?? previous, to: target))
+    }
+
+    /// Any selection move that is not a ⇧-arrow ends the run, so the next one
+    /// starts from wherever the selection is then.
+    func endRange() {
+        rangeAnchor = nil
+        rangeBase = []
+    }
+
+    /// The item rows between two row ids, inclusive, in on-screen order.
+    /// Topic headers are skipped: a header stands for its members and cannot
+    /// itself be marked (see `PanelView.toggleMarkSelected`). An anchor that
+    /// has left the queue collapses the range to the target alone.
+    nonisolated static func range(
+        in visible: [String], from anchor: String, to target: String
+    ) -> [String] {
+        guard let t = visible.firstIndex(of: target) else { return [] }
+        let a = visible.firstIndex(of: anchor) ?? t
+        return visible[min(a, t)...max(a, t)].filter {
+            QueueRowID.topicID(from: $0) == nil
+        }
     }
 
     /// The marked rows still in `items`.

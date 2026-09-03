@@ -58,7 +58,7 @@ struct MarksBar: View {
                     .help("Clear marks (Esc)")
                     .accessibilityLabel("Clear marks")
                 }
-                Text("These keys act on all \(live.count) — Space marks more, Esc clears.")
+                Text("These keys act on all \(live.count) — Space or ⇧↑↓ mark more, Esc clears.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }

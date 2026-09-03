@@ -737,7 +737,12 @@ rows there used to take five ⌘Z.
 
 ### Two selection concepts in the panel, on purpose
 
-`Space` marks rows; `E`, `S`, `U`, `C`, `⌘P` and `G` then act on **all** of
+`Space` marks rows — as do ⌘-click, the hover checkbox, and **⇧↑/⇧↓**, which
+mark every row the selection passes (added 2026-09-03, Brandon: *"if i hold
+shift key while moving up or down, it should select each notification i tab
+through"*). The Shift run is anchored where it began, so reversing shrinks it
+(`PanelMarks.extendRange`); any other selection move ends the run. `E`, `S`,
+`U`, `C`, `⌘P` and `G` then act on **all** of
 them. Both keys were free: they fell through to type-to-filter, and they are
 taken behind the same `filterText.isEmpty && !isFiltering` guard the other
 letters use.
