@@ -3,6 +3,12 @@ import SwiftUI
 /// The header row for a topic: disclosure triangle, name, the sources it
 /// spans, and the same triage verbs a row has.
 ///
+/// Also the header for an auto-grouping **fold** (`TopicGroup.isFold`),
+/// with two differences: the second line is the newest member's title
+/// rather than source chips — a fold is single-source, so `#deploys` says
+/// where and the preview says what — and `G` makes a topic of it rather
+/// than editing one, because a fold is never stored.
+///
 /// It is a *row*, not a section header, and that is the load-bearing choice.
 /// `E` on it dismisses every member — if it only folded four rows up and left
 /// them behind, there would be no reason to have built any of this. So it
@@ -77,7 +83,11 @@ struct TopicRowView: View {
                         expandedLines: RowExpansion.titleLines,
                         isExpanded: isSelected,
                         animation: PanelMotion.queue(reduceMotion: reduceMotion))
-                    sourceChips
+                    if topic.isFold {
+                        preview
+                    } else {
+                        sourceChips
+                    }
                 }
                 Spacer(minLength: 4)
                 if !isHovering { countAndTime }
@@ -124,6 +134,17 @@ struct TopicRowView: View {
         }
         .lineLimit(1)
         .accessibilityHidden(true)
+    }
+
+    /// What is newest inside a fold. One line, so a header stays a header.
+    @ViewBuilder private var preview: some View {
+        if let preview = topic.preview {
+            Text(preview)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityHidden(true)
+        }
     }
 
     private var countAndTime: some View {
@@ -179,9 +200,16 @@ struct TopicRowView: View {
                 topic.isPinned ? "Unpin topic (⌘P)" : "Pin topic (⌘P)",
                 topic.isPinned ? "Unpin" : "Pin"
             ) { appState.setPinned(topic.members, pinned: !topic.isPinned) }
-            actionButton(
-                "square.and.pencil", key: "G", "Edit topic (G)", "Edit topic"
-            ) { onEdit() }
+            if topic.isFold {
+                actionButton(
+                    "square.stack.3d.up", key: "G", "Make a topic of these (G)",
+                    "Group into topic"
+                ) { onEdit() }
+            } else {
+                actionButton(
+                    "square.and.pencil", key: "G", "Edit topic (G)", "Edit topic"
+                ) { onEdit() }
+            }
         }
         .font(.system(size: 14))
         .buttonStyle(.borderless)
@@ -226,14 +254,18 @@ struct TopicRowView: View {
             Divider()
             Button("Pick Date…") { snoozeTargetUID = topic.rowID }
         }
-        Button(topic.isPinned ? "Unpin Topic" : "Pin Topic") {
+        Button(topic.isPinned ? "Unpin All" : "Pin All") {
             appState.setPinned(topic.members, pinned: !topic.isPinned)
         }
         Divider()
-        Button("Edit Topic…") { onEdit() }
-        // Safe to offer without a confirmation: ungrouping dismisses nothing.
-        // Every member goes back to its own source section intact.
-        Button("Ungroup") { appState.deleteTopic(id: topic.id) }
+        if topic.isFold {
+            Button("Group into Topic…") { onEdit() }
+        } else {
+            Button("Edit Topic…") { onEdit() }
+            // Safe to offer without a confirmation: ungrouping dismisses
+            // nothing. Every member goes back to its own source section intact.
+            Button("Ungroup") { appState.deleteTopic(id: topic.id) }
+        }
     }
 
     // MARK: Derived
@@ -258,7 +290,8 @@ struct TopicRowView: View {
     }
 
     private var accessibilityLabel: String {
-        var text = "Topic: \(topic.name), ^[\(topic.activeCount) item](inflect: true)"
+        var text =
+            "\(topic.isFold ? "Group" : "Topic"): \(topic.name), ^[\(topic.activeCount) item](inflect: true)"
         text += " from \(topic.sources.map(\.name).formatted(.list(type: .and)))"
         text += ", \(PanelFormat.relative(topic.newest)) ago"
         if topic.isPinned { text += ", pinned" }

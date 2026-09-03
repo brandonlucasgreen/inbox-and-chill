@@ -1016,6 +1016,7 @@ actor SlackConnector: Connector {
                 ?? event["bot_profile"]["name"].nonEmptyString ?? "A bot"
         }
         let channelLabel = await channelName(channel)
+        let grouping = Self.channelGrouping(channel: channel, label: channelLabel)
         return RemoteItem(
             externalID: "mention-\(channel)-\(ts)",
             kind: "mention",
@@ -1025,7 +1026,8 @@ actor SlackConnector: Connector {
             actorName: who,
             occurredAt: SlackTS.date(ts) ?? .now,
             highSignal: true,
-            payload: Self.payload(channel: channel, ts: ts))
+            payload: Self.payload(channel: channel, ts: ts),
+            groupKey: grouping?.key, groupLabel: grouping?.label)
     }
 
     /// A saved message.
@@ -1045,11 +1047,12 @@ actor SlackConnector: Connector {
         if let text { await resolveReferences(in: text) }
         var who: String?
         if let author { who = await displayName(userID: author) }
+        let channelLabel = await channelName(channel)
+        let grouping = Self.channelGrouping(channel: channel, label: channelLabel)
         return RemoteItem(
             externalID: "save-\(channel)-\(ts)",
             kind: "emoji_save",
-            title: Self.saveTitle(
-                channelLabel: await channelName(channel)),
+            title: Self.saveTitle(channelLabel: channelLabel),
             snippet: Self.truncate(renderText(text), Self.snippetLimit),
             // Prefer a native deep link built from the permalink; the
             // permalink itself rides along in the payload as the fallback
@@ -1060,7 +1063,8 @@ actor SlackConnector: Connector {
             actorName: who,
             occurredAt: SlackTS.date(ts) ?? .now,
             highSignal: false,
-            payload: Self.payload(channel: channel, ts: ts, permalink: permalink))
+            payload: Self.payload(channel: channel, ts: ts, permalink: permalink),
+            groupKey: grouping?.key, groupLabel: grouping?.label)
     }
 
     /// `slack://` opens the native client and jumps straight to the message,

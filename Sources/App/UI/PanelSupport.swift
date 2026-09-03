@@ -60,10 +60,51 @@ struct SourceIndex {
 }
 
 /// One rendered source section of the active queue.
+///
+/// A section holds loose rows and **folds** — rows sharing a
+/// `groupKey` when the source's auto-grouping is on — as one list sorted
+/// newest first, so a fold with a fresh member rises past an older loose row
+/// exactly as the row itself would have. A fold is a `TopicGroup` of kind
+/// `.fold`, so every verb, hover action and key a topic header answers to
+/// works on it unchanged; it lives *inside* its source section rather than
+/// under Topics because it is single-source by construction, and a source
+/// filter must keep it rather than dissolve it.
 struct SourceGroup: Identifiable {
     var id: String { source.id }
     let source: SourceDisplay
+    /// Rows not in any fold, in queue order.
     let items: [Item]
+    /// Folds of two or more rows, newest first.
+    let folds: [TopicGroup]
+    /// Screen order: folds and loose rows interleaved by date.
+    let rows: [SectionRow]
+
+    init(source: SourceDisplay, items: [Item], folds: [TopicGroup] = []) {
+        self.source = source
+        self.items = items
+        self.folds = folds
+        let dated: [(Date, SectionRow)] =
+            items.map { ($0.occurredAt, .item($0)) }
+            + folds.map { ($0.newest, .fold($0)) }
+        rows = dated.sorted { $0.0 > $1.0 }.map(\.1)
+    }
+
+    /// What the section header counts: one per row and one per fold, which
+    /// is exactly what is drawn under it.
+    var rowCount: Int { items.count + folds.count }
+}
+
+/// One line of a source section.
+enum SectionRow: Identifiable {
+    case item(Item)
+    case fold(TopicGroup)
+
+    var id: String {
+        switch self {
+        case .item(let item): return item.uid
+        case .fold(let fold): return fold.rowID
+        }
+    }
 }
 
 /// Compact, panel-sized date formatting ("2h", "3d") plus full strings for

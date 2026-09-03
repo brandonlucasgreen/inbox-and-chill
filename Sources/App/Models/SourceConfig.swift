@@ -19,6 +19,14 @@ final class SourceConfig {
     /// Non-secret connector settings as JSON (e.g. Slack save emoji,
     /// ntfy server and topics, JSON poller mapping).
     var settingsJSON: Data?
+    /// Fold this source's rows by `Item.groupKey` in the panel.
+    ///
+    /// `nil` means "the kind's default" (`ConnectorKindDescriptor.grouping`),
+    /// the same reading `Field.boolValue(in:)` gives an unwritten toggle. It
+    /// is optional rather than defaulted so no existing row has to be given
+    /// a value at migration, and so a to-do source — whose default is off
+    /// because a to-do is work, not noise — comes in as off without a fix-up.
+    var autoGroups: Bool?
 
     init(
         id: String = UUID().uuidString, kind: String, displayName: String,

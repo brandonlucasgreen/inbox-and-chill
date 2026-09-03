@@ -12,6 +12,15 @@ struct RemoteItem: Sendable, Equatable {
     var occurredAt: Date
     var highSignal: Bool = false
     var payload: Data? = nil
+    /// What this item is about *within its source* — the Slack channel id,
+    /// the Linear issue key, the repository, the ntfy topic. Rows sharing a
+    /// key fold into one when the source's auto-grouping is on. The key is
+    /// the stable identifier and `groupLabel` the human name, so a channel
+    /// rename changes how the fold reads and not what is in it. nil means
+    /// "nothing to fold by" — a Slack DM, which is already one row per
+    /// conversation, or a source with no natural key.
+    var groupKey: String? = nil
+    var groupLabel: String? = nil
 
     func uid(sourceKind: String) -> String { "\(sourceKind):\(externalID)" }
 }

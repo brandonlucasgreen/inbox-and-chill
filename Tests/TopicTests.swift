@@ -263,6 +263,172 @@ struct PanelTopicLayoutTests {
     }
 }
 
+// MARK: - Auto-grouping folds (Sources/App/UI/PanelQueue.swift)
+
+/// A fold is `TopicGroup.fold`: one source's rows sharing a `groupKey`,
+/// computed by the layout and never stored. These pin down where it lands
+/// (inside its source section), what dissolves it (nothing a topic's rules
+/// would — a source filter *keeps* it), and the one invariant: a row filed
+/// in a topic by hand is never folded.
+struct PanelFoldLayoutTests {
+    private let configs = [
+        SourceConfig(id: "a", kind: "test", displayName: "Alpha", sortOrder: 0),
+        SourceConfig(id: "b", kind: "test", displayName: "Beta", sortOrder: 1),
+    ]
+
+    private func item(
+        _ uid: String, source: String = "a", title: String = "T",
+        key: String? = nil, label: String? = nil, topic: String? = nil,
+        minutesAgo: Int = 0, pinned: Bool = false
+    ) -> Item {
+        let item = Item(
+            uid: uid, sourceID: source, sourceKind: "test", kind: "mention",
+            title: title,
+            occurredAt: Date(timeIntervalSinceNow: TimeInterval(-60 * minutesAgo)),
+            groupKey: key, groupLabel: label ?? key.map { "#\($0)" })
+        item.topicID = topic
+        if pinned { item.pinnedAt = .now }
+        item.seenAt = .now
+        return item
+    }
+
+    private func layout(
+        _ items: [Item], grouping: Set<String> = ["a", "b"],
+        filter: String? = nil, text: String = "", open: String? = nil
+    ) -> PanelQueue {
+        PanelQueue(
+            queued: items, configs: configs,
+            allTopics: [Topic(id: "t", name: "Topic")],
+            sourceFilter: filter, filterText: text, showSnoozed: false,
+            openTopicID: open, groupingSourceIDs: grouping)
+    }
+
+    private func fold(_ queue: PanelQueue, source: String = "a") -> [TopicGroup] {
+        queue.groups.first { $0.id == source }?.folds ?? []
+    }
+
+    @Test("Rows sharing a key fold inside their source section, nowhere else")
+    func foldsLandInsideTheirSection() {
+        let queue = layout([
+            item("1", key: "c1", minutesAgo: 1), item("2", key: "c1", minutesAgo: 2),
+            item("3", key: "c2", minutesAgo: 3), item("4", source: "b", key: "c1"),
+        ])
+        #expect(queue.topics.isEmpty)
+        let folds = fold(queue)
+        #expect(folds.map(\.id) == [TopicGroup.foldID(sourceID: "a", key: "c1")])
+        #expect(folds[0].isFold)
+        #expect(folds[0].name == "#c1")
+        #expect(folds[0].members.map(\.uid) == ["1", "2"])
+        // Loose: the single-key row here, and Beta's lone row — a key is
+        // per source, so Beta's "c1" never joins Alpha's.
+        #expect(queue.groups[0].items.map(\.uid) == ["3"])
+        #expect(queue.groups[1].items.map(\.uid) == ["4"])
+        #expect(fold(queue, source: "b").isEmpty)
+    }
+
+    @Test("Folds and loose rows share one list, newest first")
+    func sectionOrderIsByDate() {
+        let queue = layout([
+            item("old-fold-1", key: "c1", minutesAgo: 30),
+            item("old-fold-2", key: "c1", minutesAgo: 40),
+            item("loose-new", minutesAgo: 5),
+            item("loose-old", minutesAgo: 60),
+        ])
+        #expect(
+            queue.groups[0].rows.map(\.id) == [
+                "loose-new", QueueRowID.topic(TopicGroup.foldID(sourceID: "a", key: "c1")),
+                "loose-old",
+            ])
+        #expect(queue.groups[0].rowCount == 3)
+        #expect(queue.visibleUIDs == queue.groups[0].rows.map(\.id))
+    }
+
+    @Test("A source filter keeps folds — a same-source fold answers 'show me Slack'")
+    func sourceScopeKeepsFolds() {
+        let items = [item("1", key: "c1"), item("2", key: "c1"), item("3", source: "b")]
+        #expect(fold(layout(items, filter: "a")).count == 1)
+        #expect(layout(items, filter: "a").groups.count == 1)
+    }
+
+    @Test("One row with a key is a row, with no chip")
+    func aSingleRowStaysLoose() {
+        let queue = layout([item("1", key: "c1"), item("2", key: "c2")])
+        #expect(fold(queue).isEmpty)
+        #expect(queue.groups[0].items.map(\.uid) == ["1", "2"])
+        #expect(queue.topicOf.isEmpty)
+    }
+
+    @Test("Explicit beats rule: a row filed in a topic is never folded")
+    func topicMembershipWins() {
+        let queue = layout([
+            item("1", key: "c1", topic: "t"), item("2", key: "c1", topic: "t"),
+            item("3", key: "c1", minutesAgo: 1), item("4", key: "c1", minutesAgo: 2),
+        ])
+        #expect(queue.topics.map(\.id) == ["t"])
+        #expect(fold(queue)[0].members.map(\.uid) == ["3", "4"])
+    }
+
+    @Test("Grouping off gives back the loose rows in queue order")
+    func toggleOffIsLossless() {
+        let items = [
+            item("1", key: "c1", minutesAgo: 1), item("2", key: "c1", minutesAgo: 2),
+            item("3", minutesAgo: 3),
+        ]
+        let off = layout(items, grouping: [])
+        #expect(off.groups[0].folds.isEmpty)
+        #expect(off.groups[0].items.map(\.uid) == ["1", "2", "3"])
+        #expect(off.visibleUIDs == ["1", "2", "3"])
+    }
+
+    @Test("An open fold splices its members into the traversal order")
+    func openFoldSplicesMembers() {
+        let id = TopicGroup.foldID(sourceID: "a", key: "c1")
+        let queue = layout(
+            [item("1", key: "c1", minutesAgo: 1), item("2", key: "c1", minutesAgo: 2), item("3", minutesAgo: 9)],
+            open: id)
+        #expect(queue.visibleUIDs == [QueueRowID.topic(id), "1", "2", "3"])
+        #expect(queue.topic(rowID: QueueRowID.topic(id))?.id == id)
+    }
+
+    @Test("The header reads by the newest member's label, and previews its title")
+    func headerFollowsTheNewestMember() {
+        let queue = layout([
+            item("1", title: "Latest", key: "c1", label: "#renamed", minutesAgo: 1),
+            item("2", title: "Older", key: "c1", label: "#old-name", minutesAgo: 5),
+        ])
+        #expect(fold(queue)[0].name == "#renamed")
+        #expect(fold(queue)[0].preview == "Latest")
+    }
+
+    @Test("Typing a fold's label finds its members")
+    func textFilterMatchesTheLabel() {
+        let queue = layout(
+            [item("1", title: "x", key: "c1", label: "#deploys"), item("2", title: "y", key: "c1", label: "#deploys")],
+            text: "deploys")
+        #expect(queue.matchCount == 2)
+        #expect(fold(queue).count == 1)
+    }
+
+    @Test("Pinned rows stay loose in Pinned rather than folding")
+    func pinnedRowsAreNotFolded() {
+        let queue = layout([
+            item("1", key: "c1", pinned: true), item("2", key: "c1", pinned: true),
+        ])
+        #expect(queue.pinned.map(\.uid).sorted() == ["1", "2"])
+        #expect(queue.groups.isEmpty)
+    }
+
+    @Test("A fold id round-trips through its parts, colons in the key included")
+    func foldIDParts() throws {
+        let id = TopicGroup.foldID(sourceID: "src", key: "issue:EPD-1873")
+        let parts = try #require(TopicGroup.foldParts(id))
+        #expect(parts.sourceID == "src")
+        #expect(parts.key == "issue:EPD-1873")
+        #expect(TopicGroup.foldParts("topic:abc") == nil)
+        #expect(TopicGroup.foldParts("fold:nokey") == nil)
+    }
+}
+
 // MARK: - Topics in the store (Sources/App/Sync/Store.swift)
 
 @MainActor
@@ -275,11 +441,12 @@ struct TopicStoreTests {
     }
 
     private func remote(
-        _ id: String, title: String, at: Date = .now
+        _ id: String, title: String, at: Date = .now, group: String? = nil,
+        loud: Bool = false
     ) -> RemoteItem {
         RemoteItem(
             externalID: id, kind: "mention", title: title, occurredAt: at,
-            highSignal: false)
+            highSignal: loud, groupKey: group, groupLabel: group)
     }
 
     private func seed(_ store: Store, _ remotes: [RemoteItem]) async throws {
@@ -301,6 +468,45 @@ struct TopicStoreTests {
 
         try await seed(store, [remote("a", title: "One, edited")])
         #expect(try await store.topicMembership()["test:a"] == id)
+    }
+
+    @Test("A poll DOES refresh the group key — the source owns it")
+    func updateRefreshesGroupKey() async throws {
+        // The inverse of `updateLeavesMembershipAlone`, on purpose: a fold
+        // is the source's fact about an item, so a renamed channel or a
+        // re-filed message has to follow the source on the next poll.
+        let store = try makeStore()
+        try await seed(store, [
+            remote("a", title: "One", group: "c1"), remote("b", title: "Two", group: "c1"),
+        ])
+        var counts = try await store.badgeCounts(
+            countedSourceIDs: ["s"], groupingSourceIDs: ["s"])
+        #expect(counts.total == 1)
+        try await seed(store, [
+            remote("a", title: "One", group: "c1"), remote("b", title: "Two", group: nil),
+        ])
+        counts = try await store.badgeCounts(
+            countedSourceIDs: ["s"], groupingSourceIDs: ["s"])
+        #expect(counts.total == 2)
+    }
+
+    @Test("The badge counts a fold as one, and a fold is loud if any member is")
+    func badgeCountsAFoldAsOne() async throws {
+        let store = try makeStore()
+        try await seed(store, [
+            remote("a", title: "One", group: "c1"),
+            remote("b", title: "Two", group: "c1", loud: true),
+            remote("c", title: "Three", group: "c2"),
+            remote("d", title: "Four"),
+        ])
+        let folded = try await store.badgeCounts(
+            countedSourceIDs: ["s"], groupingSourceIDs: ["s"])
+        #expect(folded.total == 3)  // c1 fold, c2 alone, d
+        #expect(folded.highSignal == 1)
+        // Grouping off for the source: every row counts.
+        let flat = try await store.badgeCounts(countedSourceIDs: ["s"])
+        #expect(flat.total == 4)
+        #expect(flat.highSignal == 1)
     }
 
     @Test("Terms back-fill when the topic is made")

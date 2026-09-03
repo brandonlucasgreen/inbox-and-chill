@@ -256,7 +256,9 @@ actor SentryConnector: Connector {
             // Stat chips for the D expansion, built from fields the list
             // response already carries — the lazy half (stack frames) is
             // fetched in `context()` only when the user asks.
-            payload: contextData(for: issue))
+            payload: contextData(for: issue),
+            groupKey: issue.project?.slug ?? issue.project?.name,
+            groupLabel: issue.project?.slug ?? issue.project?.name)
     }
 
     // MARK: Context (D expansion)

@@ -154,6 +154,15 @@ private struct SourceRow: View {
                         await appState.refreshBadge()
                     }
                 }
+            // Only for kinds with something to fold by — a checkbox that
+            // does nothing is worse than none.
+            if let grouping = descriptor?.grouping {
+                Toggle("Group", isOn: groupBinding(default: grouping.defaultOn))
+                    .toggleStyle(.checkbox)
+                    .help(
+                        "Fold this source's rows by \(grouping.noun) in the queue. Turn it off to see every row on its own."
+                    )
+            }
             Button("Edit", action: onEdit)
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
@@ -164,5 +173,17 @@ private struct SourceRow: View {
             .help("Delete this source")
         }
         .padding(.vertical, 6)
+    }
+
+    /// nil in the store means "the kind's default", so the checkbox shows
+    /// the default until the user takes a position.
+    private func groupBinding(default defaultOn: Bool) -> Binding<Bool> {
+        Binding(
+            get: { source.autoGroups ?? defaultOn },
+            set: { on in
+                source.autoGroups = on
+                // A fold counts as one, so the badge changes with the fold.
+                Task { await appState.refreshBadge() }
+            })
     }
 }

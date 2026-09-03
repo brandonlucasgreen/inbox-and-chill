@@ -49,6 +49,22 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
     /// provider is paste-a-token rather than OAuth (PLAN §6.9 verdicts).
     var authNote: String = ""
 
+    /// How this kind's rows fold in the panel when auto-grouping is on, or
+    /// nil when there is nothing to fold by (a Claude Code session is already
+    /// one row; a custom JSON feed has no natural key). A kind with a
+    /// `Grouping` gets a "Group" checkbox in the Sources pane; one without
+    /// gets no checkbox rather than one that does nothing.
+    struct Grouping: Sendable {
+        /// What one fold is — "channel", "issue", "repository" — for the one
+        /// sentence of help the checkbox carries.
+        var noun: String
+        /// On for the sources whose folds are noise (a channel's keyword
+        /// hits, a repository's threads); off for to-do sources, where a
+        /// fold hides work.
+        var defaultOn: Bool
+    }
+    var grouping: Grouping? = nil
+
     struct SetupPayload: Sendable {
         var label: String
         var text: String
@@ -71,7 +87,8 @@ enum ConnectorCatalog {
                 "Paste it below.",
             ],
             setupURL: "https://linear.app/settings/api",
-            authNote: "Why no “Sign in with Linear”? It existed and was removed: OAuth still required registering your own Linear application and pasting its client ID, so it traded one paste for a longer setup and a token that expires. The personal API key is Linear's own sanctioned path for personal use. The key is stored in your Keychain and never leaves this Mac."),
+            authNote: "Why no “Sign in with Linear”? It existed and was removed: OAuth still required registering your own Linear application and pasting its client ID, so it traded one paste for a longer setup and a token that expires. The personal API key is Linear's own sanctioned path for personal use. The key is stored in your Keychain and never leaves this Mac.",
+            grouping: .init(noun: "issue or project", defaultOn: true)),
         .init(
             id: "github", displayName: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right",
             fields: [
@@ -91,7 +108,8 @@ enum ConnectorCatalog {
                 "Paste it below.",
             ],
             setupURL: "https://github.com/settings/tokens",
-            authNote: "Why no “Sign in with GitHub”? GitHub's notifications API only accepts classic personal access tokens — it rejects OAuth app tokens and fine-grained PATs outright. The token is stored in your Keychain and never leaves this Mac."),
+            authNote: "Why no “Sign in with GitHub”? GitHub's notifications API only accepts classic personal access tokens — it rejects OAuth app tokens and fine-grained PATs outright. The token is stored in your Keychain and never leaves this Mac.",
+            grouping: .init(noun: "repository", defaultOn: true)),
         .init(
             id: "slack", displayName: "Slack", systemImage: "number",
             fields: [
@@ -125,7 +143,8 @@ enum ConnectorCatalog {
             ],
             setupURL: "https://api.slack.com/apps",
             setupPayload: .init(label: "App Manifest", text: slackAppManifest),
-            authNote: "Why paste tokens? Your workspace app's install page *is* Slack's OAuth flow — it ends by displaying the user token. A native app can't run Slack's OAuth itself: the token exchange requires your client secret (Slack has no PKCE public-client mode), and redirect URLs must be HTTPS, so there's no loopback to come back to. The app-level token never comes from OAuth at all.\n\nOnly the user token is required. Adding the app-level token turns on Socket Mode, which is the only supported way to receive channel mentions — Slack publishes no API for “messages that mention me”, so without it you get DM unreads, emoji saves and read-state auto-clear, but not mentions. Both tokens live in your Keychain and never leave this Mac."),
+            authNote: "Why paste tokens? Your workspace app's install page *is* Slack's OAuth flow — it ends by displaying the user token. A native app can't run Slack's OAuth itself: the token exchange requires your client secret (Slack has no PKCE public-client mode), and redirect URLs must be HTTPS, so there's no loopback to come back to. The app-level token never comes from OAuth at all.\n\nOnly the user token is required. Adding the app-level token turns on Socket Mode, which is the only supported way to receive channel mentions — Slack publishes no API for “messages that mention me”, so without it you get DM unreads, emoji saves and read-state auto-clear, but not mentions. Both tokens live in your Keychain and never leave this Mac.",
+            grouping: .init(noun: "channel", defaultOn: true)),
         .init(
             id: "sentry", displayName: "Sentry", systemImage: "ladybug",
             fields: [
@@ -153,7 +172,8 @@ enum ConnectorCatalog {
                 "Paste it below, along with your organization slug.",
             ],
             setupURL: "https://sentry.io/settings/account/api/auth-tokens/",
-            authNote: "Why paste a token? Sentry's own user auth tokens are the sanctioned path for acting as yourself — there is no app to register and nothing to approve. The token is stored in your Keychain and never leaves this Mac.\n\nSentry's REST API is available on every plan including the free Developer tier; what the paid tiers buy is event quota and higher rate limits, not API access."),
+            authNote: "Why paste a token? Sentry's own user auth tokens are the sanctioned path for acting as yourself — there is no app to register and nothing to approve. The token is stored in your Keychain and never leaves this Mac.\n\nSentry's REST API is available on every plan including the free Developer tier; what the paid tiers buy is event quota and higher rate limits, not API access.",
+            grouping: .init(noun: "project", defaultOn: true)),
         .init(
             id: "appleMail", displayName: "Apple Mail", systemImage: "envelope",
             fields: [
@@ -176,7 +196,8 @@ enum ConnectorCatalog {
                 "macOS will ask once for permission to control Mail. **Allow it**, or the source stays permanently empty.",
                 "Flag a message in Mail and it appears here on the next refresh.",
             ],
-            authNote: "No token, and nothing to sign in to: this reads the Mail app on this Mac over AppleScript, so it covers every account Mail has — **including Gmail**, which is why there is no separate Gmail source. Nothing is sent anywhere.\n\nmacOS gates this behind Privacy & Security → Automation. If you decline, Mail looks permanently empty rather than broken, so this source says so explicitly instead of showing you an empty queue.\n\nThe first refresh after Mail has been idle can take around ten seconds — that's Mail waking up, not a failure."),
+            authNote: "No token, and nothing to sign in to: this reads the Mail app on this Mac over AppleScript, so it covers every account Mail has — **including Gmail**, which is why there is no separate Gmail source. Nothing is sent anywhere.\n\nmacOS gates this behind Privacy & Security → Automation. If you decline, Mail looks permanently empty rather than broken, so this source says so explicitly instead of showing you an empty queue.\n\nThe first refresh after Mail has been idle can take around ten seconds — that's Mail waking up, not a failure.",
+            grouping: .init(noun: "sender", defaultOn: true)),
         .init(
             id: "reminders", displayName: "Apple Reminders", systemImage: "checklist",
             fields: [
@@ -200,7 +221,8 @@ enum ConnectorCatalog {
             // directly below them — which is exactly the duplication Brandon
             // called out on 2026-08-26. `credentialSourcesExplainThemselves`
             // only requires steps of sources that ask for a secret.
-            authNote: "No token and nothing to sign in to: this reads the Reminders app on this Mac, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere."),
+            authNote: "No token and nothing to sign in to: this reads the Reminders app on this Mac, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere.",
+            grouping: .init(noun: "list", defaultOn: false)),
         .init(
             id: "todoist", displayName: "Todoist", systemImage: "checkmark.circle",
             fields: [
@@ -231,7 +253,8 @@ enum ConnectorCatalog {
             // Two facts only, each stated once (the 2026-08-26 copy note): why
             // it is a token rather than a sign-in button, and the one thing
             // about `C` that Todoist itself does differently from the row.
-            authNote: "Todoist's OAuth is built for apps distributed to other people — it wants a registered client and a redirect URL — so the personal API token is its own sanctioned path for your own account. The token is stored in your Keychain and never leaves this Mac.\n\nCompleting a repeating task with **C** reschedules it in Todoist rather than ticking it off, which is what Todoist itself does. Undo can't take that back."),
+            authNote: "Todoist's OAuth is built for apps distributed to other people — it wants a registered client and a redirect URL — so the personal API token is its own sanctioned path for your own account. The token is stored in your Keychain and never leaves this Mac.\n\nCompleting a repeating task with **C** reschedules it in Todoist rather than ticking it off, which is what Todoist itself does. Undo can't take that back.",
+            grouping: .init(noun: "project", defaultOn: false)),
         .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [
@@ -280,7 +303,8 @@ enum ConnectorCatalog {
                 "Only if your server protects the topic: add a token, or a username and password.",
             ],
             setupURL: "https://ntfy.sh",
-            authNote: "No OAuth needed, and none to skip: ntfy has no accounts on unprotected topics — publishing to a topic is the whole API. Priority 4–5 messages arrive as high-signal; `click` becomes the item's link.\n\nFor a protected topic, use either an access token or a username and password — whichever your server is set up for. A token wins if you fill in both, since it's the narrower credential and can be revoked without touching your account password. The token and password are stored in your Keychain and never leave this Mac."),
+            authNote: "No OAuth needed, and none to skip: ntfy has no accounts on unprotected topics — publishing to a topic is the whole API. Priority 4–5 messages arrive as high-signal; `click` becomes the item's link.\n\nFor a protected topic, use either an access token or a username and password — whichever your server is set up for. A token wins if you fill in both, since it's the narrower credential and can be revoked without touching your account password. The token and password are stored in your Keychain and never leave this Mac.",
+            grouping: .init(noun: "topic", defaultOn: true)),
         .init(
             id: "local", displayName: "Local (Terminal & Claude Code)", systemImage: "terminal",
             fields: [], bannersDefaultOn: true,
@@ -365,5 +389,15 @@ extension ConnectorKindDescriptor.Field {
         // checkbox is showing.
         guard let raw = settings[key], !raw.isEmpty else { return defaultOn }
         return raw == "true"
+    }
+}
+
+extension SourceConfig {
+    /// Whether the panel folds this source's rows: the stored choice, else
+    /// the kind's default, else off for a kind with nothing to fold by.
+    var groupsAutomatically: Bool {
+        autoGroups
+            ?? ConnectorCatalog.descriptor(for: kind)?.grouping?.defaultOn
+            ?? false
     }
 }

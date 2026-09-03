@@ -721,6 +721,54 @@ Five things that look like oversights and are not:
   2026-08-26. A badge still reading 54 while the queue shows one row would
   make the queue the liar.
 
+### Auto-grouping folds are a view, not a record (added 2026-09-03)
+
+`Item.groupKey` / `groupLabel` (source-authoritative: the Slack channel id,
+`issue:EPD-1873`, `owner/repo`, the ntfy topic, a mail sender's address),
+`SourceConfig.autoGroups` (`Bool?`, nil = the kind's default from
+`ConnectorKindDescriptor.grouping`), `PanelQueue.folded`, and a "Group"
+checkbox beside On / Badge / Banners in the Sources pane. Design and the
+measurements behind it: `docs/auto-grouping-plan.md`.
+
+A **fold** is a `TopicGroup` of kind `.fold`, computed by `PanelQueue` from
+rows of one source that share a `groupKey`, and **never written to the
+store**. That one choice is why there is no naming, no purge, no back-fill
+when the checkbox flips, and why every verb a topic header answers to works
+on a fold with no new code: the panel routes `D`/`E`/`S`/`U`/`C`/`⌘P`
+through `selectedTopic` and does not care which kind it holds.
+
+Four things that look like oversights and are not:
+
+- **`groupKey`/`groupLabel` are IN `Store.update`, the opposite of
+  `topicID`.** A topic is yours and a poll must not dissolve it; a channel
+  label is the source's, and a poll is how a renamed channel comes to read
+  correctly. `updateRefreshesGroupKey` and `updateLeavesMembershipAlone` sit
+  side by side in `Tests/TopicTests.swift` and guard the two directions.
+- **Folds render inside their source section, not under TOPICS, and a
+  source filter keeps them.** Topics dissolve under a filter because a
+  cross-source row is not an answer to "show me Slack"; a same-source fold
+  is exactly that answer. `SourceGroup.rows` interleaves folds and loose
+  rows by date so a fold with a fresh member rises like the row would have.
+- **A row with a `topicID` is never folded** — explicit beats rule, and the
+  whole invariant is one comparison in `PanelQueue.folded`. `G` on a fold
+  header opens the naming card with the members, which is the path from a
+  fold to a topic; there is no edit and no "ungroup", because there is
+  nothing stored to edit.
+- **To-do kinds are offered and default off** (`Grouping.defaultOn`). 18
+  active reminders in 4 lists fold to 4 rows and a badge of 4, and a to-do
+  is work rather than noise. `local`, `jsonPoller` and `fake` have no
+  `Grouping` and get **no checkbox** — one that does nothing is the
+  copy-volume problem in another shape.
+
+Two connector rules: **the key is the stable id and the label the human
+name** (channel id + `#name`; project URL + project name; sender address +
+display name), and **no key for a row that is already the group** — a Slack
+DM is `dm-<channel>`, one row per conversation, and an unnamed channel gets
+nil rather than a header reading `C0AP7Q92ZPB` (`channelGrouping`). The
+badge counts a fold as one (`badgeCounts(groupingSourceIDs:)`), so expect it
+to drop hard the first time a busy Slack folds — measured 188 → 49 over one
+week — and check that before suspecting the count.
+
 ### Batching is about motion, not throughput
 
 `Store.markDone(uids:)` / `snooze(uids:)` / `setPinned(uids:)` do **one**
