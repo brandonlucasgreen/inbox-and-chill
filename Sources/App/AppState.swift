@@ -665,6 +665,29 @@ final class AppState {
         Task { await refreshBadge() }
     }
 
+    /// The second half of removing a source: its rows go with it.
+    ///
+    /// Ordering matters at the call site — the connector is unregistered
+    /// *before* this runs, so a poll cannot land after the delete and put the
+    /// rows straight back. A failure here is the bug this exists to fix
+    /// (rule 5), so it is written down rather than swallowed.
+    func forgetItems(sourceID: String, sourceLabel: String) async {
+        do {
+            let removed = try await store.deleteItems(sourceID: sourceID)
+            Self.sourcesLog.info(
+                "Removed source \(sourceLabel, privacy: .public) and \(removed) of its items")
+        } catch {
+            ProblemLog.note(
+                .sync,
+                "Removed the source, but its items are still in the queue: \(error.localizedDescription) Archive them by hand, or restart the app and remove the source again.",
+                sourceID: sourceID, sourceLabel: sourceLabel)
+        }
+        queueVersion += 1
+        await refreshBadge()
+    }
+
+    private static let sourcesLog = AppLog.logger(.sync)
+
     func refreshBadge() async {
         let badge = badge
         guard badge.showsTotal || badge.showsHighSignal else {

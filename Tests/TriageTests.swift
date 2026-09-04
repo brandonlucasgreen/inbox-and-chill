@@ -42,6 +42,35 @@ struct TriageTests {
         #expect(counts.total == 2 && counts.highSignal == 1)
     }
 
+    /// Removing a source removes its rows — every state, including done and
+    /// pinned — and nobody else's. Before this, removing Reminders left every
+    /// reminder in the queue to be archived by hand (Brandon, 2026-09-04).
+    @Test func deletingASourceDeletesItsItems() async throws {
+        let store = try makeStore()
+        func remote(_ id: String) -> RemoteItem {
+            RemoteItem(externalID: id, kind: "task", title: id, occurredAt: .now, highSignal: false)
+        }
+        _ = try await store.reconcile(
+            snapshot: [remote("r1"), remote("r2"), remote("r3")],
+            sourceID: "reminders", sourceKind: "reminders", remoteTruth: true)
+        _ = try await store.reconcile(
+            snapshot: [remote("m1")], sourceID: "mail", sourceKind: "appleMail",
+            remoteTruth: true)
+        let reminderUIDs = try await store.badgeCounts(countedSourceIDs: ["reminders"])
+        #expect(reminderUIDs.total == 3)
+        // One done, one pinned: both still belong to the source and both go.
+        try await store.markDone(uids: ["reminders:r1"])
+        try await store.setPinned(uids: ["reminders:r2"], pinned: true)
+
+        let removed = try await store.deleteItems(sourceID: "reminders")
+        #expect(removed == 3)
+        #expect(try await store.badgeCounts(countedSourceIDs: ["reminders"]).total == 0)
+        // The other source is untouched.
+        #expect(try await store.badgeCounts(countedSourceIDs: ["mail"]).total == 1)
+        // Idempotent: a second removal has nothing to do and says so.
+        #expect(try await store.deleteItems(sourceID: "reminders") == 0)
+    }
+
     @Test func pinnedItemsSurviveRemoteClearAndPurge() async throws {
         let store = try makeStore()
         let a = RemoteItem(
