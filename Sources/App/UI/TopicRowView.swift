@@ -64,10 +64,15 @@ struct TopicRowView: View {
     private var row: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 8) {
+                // The same 14pt column `ItemRowView.marker` occupies, so the
+                // chevron lines up under the source glyphs. A bare 6pt dot
+                // here put the whole header 8pt to the left of the rows
+                // around it (Brandon, 2026-09-03).
                 Circle()
                     .fill(topic.isSeen ? .clear : Color.accentColor)
                     .frame(width: 6, height: 6)
-                    .padding(.top, 6)
+                    .frame(width: 14, height: 14)
+                    .padding(.top, 2)
                     .accessibilityHidden(true)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .bold))
