@@ -984,9 +984,9 @@ measured and one not:
   (`SlackConnector.snippetLimit`, `LinearConnector.snippetLimit`) exist to
   keep something behind that ellipsis — a cap at the visible line makes the
   expansion reveal whitespace. **Since D (below) the target changed from "a
-  paragraph" to "the message": Slack's cap is 4,000, and Linear's is still
-  320, which means D on a long Linear comment still stops at an ellipsis it
-  cannot get past.**
+  paragraph" to "the message": Slack's cap is 4,000, and Linear's matched it
+  on 2026-09-04 — at 320, D on a long Linear comment stopped at an ellipsis
+  it could not get past.**
 - **D on the selected row shows the whole message** — a third state on the
   same view (`ExpandingText.isFull`), owned by one `isFullyExpanded` flag on
   `PanelView` so it can only ever be true of one row and closes whenever the

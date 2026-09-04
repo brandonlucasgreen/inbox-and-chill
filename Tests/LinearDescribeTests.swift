@@ -83,10 +83,18 @@ struct LinearDescribeTests {
     }
 
     @Test func aLongCommentIsCappedRatherThanCarriedWhole() {
-        let body = String(repeating: "word ", count: 200)
+        let body = String(repeating: "word ", count: 1_000)
         let snippet = LinearConnector.snippetText(body)
         #expect((snippet?.count ?? 0) <= LinearConnector.snippetLimit)
         #expect(snippet?.hasSuffix("…") == true)
+    }
+
+    /// The cap is what D can reach. At 320 a long comment stopped at an
+    /// ellipsis nothing could open; Slack's test pins the same floor.
+    @Test func theCapReachesTheWholeComment() {
+        #expect(LinearConnector.snippetLimit >= 4_000)
+        let body = String(repeating: "word ", count: 200)
+        #expect(LinearConnector.snippetText(body)?.hasSuffix("…") == false)
     }
 
     @Test func emptyAndWhitespaceOnlyBodiesProduceNoSnippet() {

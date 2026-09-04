@@ -31,9 +31,14 @@ struct SourceEditorSheet: View {
     /// Why the last Save didn't go through. Non-nil keeps the sheet open.
     @State private var saveErrorText: String?
 
-    init(existing: SourceConfig? = nil) {
+    /// `initialKind` preselects a kind in add mode — the welcome's buttons
+    /// pass one; the Sources pane's own Add button passes nil.
+    init(existing: SourceConfig? = nil, initialKind: String? = nil) {
         self.existing = existing
-        let initialKind = existing?.kind ?? ConnectorCatalog.all.first!.id
+        let initialKind =
+            existing?.kind
+            ?? initialKind.flatMap { ConnectorCatalog.descriptor(for: $0)?.id }
+            ?? ConnectorCatalog.all.first!.id
         _selectedKindID = State(initialValue: initialKind)
         _name = State(
             initialValue: existing?.displayName
@@ -79,6 +84,13 @@ struct SourceEditorSheet: View {
                             fieldValues = [:]
                             copiedPayload = false
                         }
+                        // What this kind will ask of you, before any field
+                        // asks it — so Slack's five steps are a choice made
+                        // knowingly rather than discovered halfway down.
+                        Text(descriptor.setupCostLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else {
                         LabeledContent("Kind") {
                             Label(descriptor.displayName, systemImage: descriptor.systemImage)

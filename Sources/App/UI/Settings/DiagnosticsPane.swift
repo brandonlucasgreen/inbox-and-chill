@@ -121,6 +121,8 @@ struct DiagnosticsPane: View {
                     .disabled(isWorking)
                 Button("Report on GitHub") { reportOnGitHub() }
                     .disabled(isWorking)
+                Button("Email Support") { emailSupport() }
+                    .disabled(isWorking)
                 if diagnostics.crashReportURL != nil {
                     Button("Reveal Crash Report") { revealCrashReport() }
                 }
@@ -129,7 +131,8 @@ struct DiagnosticsPane: View {
             }
             Text(
                 "Report on GitHub opens a new issue with this report filled in. "
-                + "Nothing is sent until you post it."
+                + "Email Support copies the report and opens a message to "
+                + "\(SupportContact.email). Nothing is sent until you post or send it."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -253,6 +256,24 @@ struct DiagnosticsPane: View {
                 try? await Task.sleep(for: .seconds(2))
                 copied = false
             }
+        }
+    }
+
+    /// Copies the report, then opens a message with the subject filled in.
+    /// The body says the report is on the clipboard rather than carrying it
+    /// — see `DiagnosticsReport.supportMailURL`.
+    private func emailSupport() {
+        withSnapshot { snapshot in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(
+                DiagnosticsReport.text(snapshot), forType: .string)
+            guard let url = DiagnosticsReport.supportMailURL(snapshot) else {
+                exportProblem = "Couldn't open a mail message. The report is on your "
+                    + "clipboard — paste it into an e-mail to \(SupportContact.email)."
+                return
+            }
+            exportProblem = nil
+            NSWorkspace.shared.open(url)
         }
     }
 

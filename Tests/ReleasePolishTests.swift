@@ -1,0 +1,151 @@
+import Foundation
+import Testing
+
+@testable import InboxAndChill
+
+// MARK: - First run (Sources/App/UI/FirstRun.swift)
+
+/// A fresh install used to read "You're all caught up ☺" — finished rather
+/// than unstarted. These pin the policy that decides which it is.
+@Suite("First run")
+struct FirstRunTests {
+
+    @Test("Only the built-in local source means no source yet")
+    func needsFirstSource() {
+        #expect(FirstRun.needsFirstSource(kinds: []))
+        #expect(FirstRun.needsFirstSource(kinds: ["local"]))
+        #expect(!FirstRun.needsFirstSource(kinds: ["local", "appleMail"]))
+        #expect(!FirstRun.needsFirstSource(kinds: ["reminders"]))
+    }
+
+    /// Existence, not enablement: someone who switched everything off on
+    /// purpose is not greeted like a stranger. The policy takes kinds only,
+    /// so it cannot even see `isEnabled`.
+    @Test("The panel opens itself once, and only for an install with no source")
+    func opensPanelOnce() {
+        #expect(FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: false, needsFirstSource: true))
+        #expect(!FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: true, needsFirstSource: true))
+        // An upgrade is not a first run.
+        #expect(!FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: false, needsFirstSource: false))
+    }
+
+    @Test("The welcome offers the two kinds that need no credential, and they exist")
+    func zeroSetupKindsAreReal() {
+        #expect(FirstRun.zeroSetupKinds == ["appleMail", "reminders"])
+        for kind in FirstRun.zeroSetupKinds {
+            let descriptor = ConnectorCatalog.descriptor(for: kind)
+            #expect(descriptor != nil, "\(kind)")
+            #expect(descriptor?.fields.contains(where: \.isSecret) == false, "\(kind)")
+        }
+    }
+
+    /// Asking twice for the same kind must read as two requests, or the
+    /// `onChange` observer in `SourcesPane` fires once and never again.
+    @Test("Two add requests for the same kind are distinct")
+    func addRequestsAreDistinct() {
+        let first = AppState.AddSourceRequest(kind: "appleMail")
+        let second = AppState.AddSourceRequest(kind: "appleMail")
+        #expect(first.kind == second.kind)
+        #expect(first != second)
+    }
+}
+
+// MARK: - Setup cost (ConnectorKindDescriptor.setupCostLabel)
+
+@Suite("Setup cost line")
+struct SetupCostTests {
+
+    @Test("Every kind says what it will ask for, in one short line")
+    func everyKindHasALine() {
+        for descriptor in ConnectorCatalog.all {
+            let line = descriptor.setupCostLabel
+            #expect(!line.isEmpty, "\(descriptor.id)")
+            #expect(line.count <= 160, "\(descriptor.id)")
+        }
+    }
+
+    /// The derivation: a secret field means a token; no secret means nothing.
+    @Test("Zero-setup kinds say so; token kinds name the token")
+    func derivedLines() {
+        #expect(ConnectorCatalog.descriptor(for: "appleMail")?.setupCostLabel.contains("Nothing to set up") == true)
+        #expect(ConnectorCatalog.descriptor(for: "reminders")?.setupCostLabel.contains("Nothing to set up") == true)
+        #expect(ConnectorCatalog.descriptor(for: "linear")?.setupCostLabel.contains("token") == true)
+        #expect(ConnectorCatalog.descriptor(for: "todoist")?.setupCostLabel.contains("Todoist") == true)
+    }
+
+    /// Slack is the one a first-time buyer must not pick blind.
+    @Test("Slack says an app comes first; the feed and ntfy say what they take")
+    func overrides() {
+        #expect(ConnectorCatalog.descriptor(for: "slack")?.setupCostLabel.contains("Slack app") == true)
+        #expect(ConnectorCatalog.descriptor(for: "slack")?.setupCostLabel.contains("admin") == true)
+        #expect(ConnectorCatalog.descriptor(for: "jsonPoller")?.setupCostLabel.contains("URL") == true)
+        #expect(ConnectorCatalog.descriptor(for: "ntfy")?.setupCostLabel.contains("topic") == true)
+        #expect(ConnectorCatalog.descriptor(for: "github")?.setupCostLabel.contains("classic") == true)
+    }
+}
+
+// MARK: - Trial nudges (Sources/App/Support/Licensing.swift)
+
+@Suite("Trial nudges")
+struct TrialNudgeTests {
+
+    @Test("Three days and one day, once each, smallest first")
+    func schedule() {
+        #expect(TrialNudge.due(daysLeft: 14, sent: []) == nil)
+        #expect(TrialNudge.due(daysLeft: 4, sent: []) == nil)
+        #expect(TrialNudge.due(daysLeft: 3, sent: []) == 3)
+        #expect(TrialNudge.due(daysLeft: 2, sent: [3]) == nil)
+        #expect(TrialNudge.due(daysLeft: 1, sent: [3]) == 1)
+        #expect(TrialNudge.due(daysLeft: 0, sent: [3, 1]) == nil)
+    }
+
+    /// A trial first evaluated with one day left sends one banner, not two —
+    /// the three-day one is marked sent along with it.
+    @Test("A late start does not send yesterday's banner as well")
+    func lateStartSendsOne() {
+        #expect(TrialNudge.due(daysLeft: 1, sent: []) == 1)
+        let sent = TrialNudge.markSent(daysLeft: 1, sent: [])
+        #expect(sent == [3, 1])
+        #expect(TrialNudge.due(daysLeft: 1, sent: sent) == nil)
+        #expect(TrialNudge.due(daysLeft: 0, sent: sent) == nil)
+    }
+
+    @Test("The banner names the days and the price, and never the word 'expired'")
+    func wording() {
+        #expect(TrialNudge.title(daysLeft: 3) == "Inbox & Chill trial — 3 days left")
+        #expect(TrialNudge.title(daysLeft: 1) == "Inbox & Chill trial — 1 day left")
+        #expect(TrialNudge.title(daysLeft: 0).contains("today"))
+        #expect(TrialNudge.body.contains(Licensing.price))
+        #expect(!TrialNudge.body.lowercased().contains("expired"))
+    }
+}
+
+// MARK: - Support e-mail (DiagnosticsReport.supportMailURL)
+
+@Suite("Support e-mail")
+struct SupportMailTests {
+
+    @Test("The mail link names the address and the subject, and carries no report")
+    func mailLink() throws {
+        let snapshot = DiagnosticsSnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            appVersion: "0.6.0", buildVersion: "60",
+            osVersion: "26.5", architecture: "arm64",
+            installPath: "/Applications/Inbox & Chill.app")
+        let url = try #require(DiagnosticsReport.supportMailURL(snapshot))
+        #expect(url.scheme == "mailto")
+        #expect(url.absoluteString.hasPrefix("mailto:\(SupportContact.email)?"))
+        let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(items.first { $0.name == "subject" }?.value?.hasPrefix("Inbox & Chill") == true)
+        // Mail clients truncate long mailto bodies, so the body is a pointer.
+        let body = try #require(items.first { $0.name == "body" }?.value)
+        #expect(body.contains("clipboard"))
+        #expect(body.count < 300)
+    }
+
+    @Test("About and Diagnostics share one address")
+    func oneAddress() {
+        #expect(SupportContact.email.contains("@"))
+        #expect(SupportContact.mailtoURL?.scheme == "mailto")
+    }
+}

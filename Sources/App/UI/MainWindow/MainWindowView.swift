@@ -318,7 +318,17 @@ struct MainWindowView: View {
 
     // MARK: Zero states
 
-    private var emptyState: some View {
+    @ViewBuilder private var emptyState: some View {
+        if case .all = scope, !isSearching,
+            FirstRun.needsFirstSource(kinds: sourceConfigs.map(\.kind))
+        {
+            WelcomeView()
+        } else {
+            zeroState
+        }
+    }
+
+    private var zeroState: some View {
         VStack(spacing: 6) {
             Image(
                 systemName: isSearching

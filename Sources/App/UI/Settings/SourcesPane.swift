@@ -9,6 +9,8 @@ struct SourcesPane: View {
     @Query(sort: \SourceConfig.sortOrder) private var sources: [SourceConfig]
 
     @State private var isAdding = false
+    /// The kind the add sheet opens on when the welcome asked for one.
+    @State private var addingKind: String?
     @State private var editingSource: SourceConfig?
     @State private var pendingDelete: SourceConfig?
 
@@ -44,9 +46,11 @@ struct SourcesPane: View {
             }
             .padding(10)
         }
-        .sheet(isPresented: $isAdding) {
-            SourceEditorSheet()
+        .sheet(isPresented: $isAdding, onDismiss: { addingKind = nil }) {
+            SourceEditorSheet(initialKind: addingKind)
         }
+        .onAppear { consumeAddRequest() }
+        .onChange(of: appState.pendingAddSource) { consumeAddRequest() }
         .sheet(item: $editingSource) { source in
             SourceEditorSheet(existing: source)
         }
@@ -76,6 +80,15 @@ struct SourcesPane: View {
             source.sortOrder = index
         }
         try? modelContext.save()
+    }
+
+    /// The welcome's "Add Apple Mail" lands here: open the add sheet on
+    /// that kind, and clear the request so it fires once.
+    private func consumeAddRequest() {
+        guard let request = appState.pendingAddSource else { return }
+        appState.pendingAddSource = nil
+        addingKind = request.kind
+        isAdding = true
     }
 
     private func delete(_ source: SourceConfig) {

@@ -379,7 +379,21 @@ struct PanelView: View {
         }
     }
 
-    private var emptyState: some View {
+    @ViewBuilder private var emptyState: some View {
+        if !isNarrowed, FirstRun.needsFirstSource(kinds: sourceConfigs.map(\.kind)) {
+            // No source yet: unstarted, not finished. See `FirstRun`.
+            VStack {
+                Spacer()
+                WelcomeView()
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            caughtUp
+        }
+    }
+
+    private var caughtUp: some View {
         VStack(spacing: 6) {
             Spacer()
             Image(
