@@ -173,14 +173,16 @@ struct PanelTopicLayoutTests {
         #expect(queue.groups.flatMap { $0.items.map(\.uid) } == ["3"])
     }
 
-    @Test("One member is not a topic — it goes back to being a row")
-    func aSingleMemberDegrades() {
-        // `.remoteTruth` erodes topics to one member routinely, and a
-        // disclosure triangle over one thing is a lie.
+    @Test("A topic is a header from its first member")
+    func aSingleMemberIsStillAHeader() {
+        // Reversed 2026-09-03: a one-member topic used to fall back to a
+        // plain row, and a topic made in anticipation of notifications
+        // vanished the moment it was saved. A fold keeps the two-row minimum
+        // (`PanelFoldLayoutTests.aSingleRowStaysLoose`); a topic does not.
         let queue = layout([item("1", topic: "t"), item("2")])
-        #expect(queue.topics.isEmpty)
-        #expect(queue.groups.flatMap { $0.items.map(\.uid) }.sorted() == ["1", "2"])
-        // …but the row still says it belongs to something.
+        #expect(queue.topics.map(\.id) == ["t"])
+        #expect(queue.topics[0].members.map(\.uid) == ["1"])
+        #expect(queue.groups.flatMap { $0.items.map(\.uid) } == ["2"])
         #expect(queue.topicOf["1"] == "t")
     }
 

@@ -97,13 +97,13 @@ struct TopicGroup: Identifiable {
 /// Snoozed, anything else puts it in Topics between the two. So pinning a
 /// topic moves the topic rather than scattering four rows into Pinned.
 ///
-/// Two things dissolve a topic back into ordinary rows:
-///
-/// - **A source filter.** Scoping to Slack means "show me Slack", so the
-///   Slack member appears as a plain row under SLACK.
-/// - **Falling below `TopicPolicy.minimumVisibleMembers`.** A disclosure
-///   triangle over one item is a lie, and remote-truth archiving erodes
-///   topics to one member routinely.
+/// One thing dissolves a topic back into ordinary rows: **a source filter.**
+/// Scoping to Slack means "show me Slack", so the Slack member appears as a
+/// plain row under SLACK. A topic with a single member is still a header —
+/// changed 2026-09-03 (Brandon: *"make manual topics always show as a
+/// header … it makes it so that you can start a topic in anticipation of more
+/// notifications"*). The two-member threshold now applies to folds only,
+/// which nobody made on purpose.
 struct PanelQueue {
     let index: SourceIndex
     let pinned: [Item]
@@ -174,11 +174,9 @@ struct PanelQueue {
                 }
                 membersByTopic[id, default: []].append(item)
             }
-            // Below the threshold a topic is not a topic; its member goes
-            // back to being an ordinary row.
-            membersByTopic = membersByTopic.filter {
-                $0.value.count >= TopicPolicy.minimumVisibleMembers
-            }
+            // No minimum: a topic you made by hand is a header from its
+            // first member, so it can be started ahead of the notifications
+            // it is meant to catch. (Folds have a minimum; see `folded`.)
         }
         let groupedUIDs = Set(membersByTopic.values.flatMap { $0 }.map(\.uid))
 

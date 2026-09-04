@@ -44,12 +44,16 @@ final class Topic {
 }
 
 enum TopicPolicy {
-    /// Below this, a topic renders as an ordinary row carrying a topic chip
-    /// rather than as a disclosure header.
+    /// Below this, an auto-grouping **fold** is not drawn; its row stays a
+    /// plain row. A triangle you open to find one thing is a lie when nobody
+    /// asked for the group.
     ///
-    /// A triangle you open to find one thing is a lie, and `.remoteTruth`
-    /// erodes topics to a single member routinely — three of four members
-    /// being cleared by their sources is a normal Tuesday, not an edge case.
+    /// **Does not apply to topics.** A topic you made by hand is a header
+    /// from its first member (Brandon, 2026-09-03: *"you can start a topic in
+    /// anticipation of more notifications"*). It did apply to topics until
+    /// then, on the argument that `.remoteTruth` erodes them to one member
+    /// routinely — true, but a header that says "one left" is honest, and a
+    /// topic that vanishes the moment you make it read as a save that failed.
     static let minimumVisibleMembers = 2
 
     /// A topic is purged only when it is both empty and older than the

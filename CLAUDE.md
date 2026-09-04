@@ -711,9 +711,14 @@ Five things that look like oversights and are not:
   invariant seen from the other side. Back-fill happens once, when a topic is
   created or its terms are edited, and never steals a row already filed
   elsewhere.
-- **A topic below `TopicPolicy.minimumVisibleMembers` (2) renders as an
-  ordinary row** carrying an "In a topic" chip. `.remoteTruth` erodes topics
-  to one member routinely, and a disclosure triangle over one item is a lie.
+- **A topic is a header from its first member.** It was not until
+  2026-09-03 — a one-member topic drew as a plain row with an "In a topic"
+  chip, on the argument that `.remoteTruth` erodes topics to one member
+  routinely — and Brandon read a freshly made topic vanishing into its
+  source section as a save that failed: *"make manual topics always show as
+  a header … you can start a topic in anticipation of more notifications."*
+  `TopicPolicy.minimumVisibleMembers` (2) now applies to **folds only**; the
+  chip remains for a member shown loose by a source filter.
 - **An empty topic is a normal resting state, not garbage.** It is what lets
   tomorrow's matching item re-form the group, so `purge` needs age *and*
   emptiness before deleting one.
