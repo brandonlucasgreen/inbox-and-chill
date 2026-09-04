@@ -407,7 +407,7 @@ enum ConnectorCatalog {
             authNote: "No OAuth needed, and none to skip: ntfy has no accounts on unprotected topics — publishing to a topic is the whole API. Priority 4–5 messages arrive as high-signal; `click` becomes the item's link.\n\nFor a protected topic, use either an access token or a username and password — whichever your server is set up for. A token wins if you fill in both, since it's the narrower credential and can be revoked without touching your account password. The token and password are stored in your Keychain and never leave this Mac.",
             grouping: .init(noun: "topic", defaultOn: true)),
         .init(
-            id: "local", displayName: "Local (Terminal & Claude Code)", systemImage: "terminal",
+            id: "local", displayName: "Local coding agents", systemImage: "terminal",
             fields: [], bannersDefaultOn: true,
             setupSteps: [
                 "Nothing to configure — this source only shows what something pushes to it.",

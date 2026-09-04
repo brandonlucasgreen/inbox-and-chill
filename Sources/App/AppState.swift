@@ -361,19 +361,31 @@ final class AppState {
         var configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []
-        // The local source (terminal + Claude Code) is built-in: create it on
-        // first run. Banners default on for local (decision §2.1.4).
+        // The local source (terminal + coding agents) is built-in: create it
+        // on first run. Banners default on for local (decision §2.1.4).
         if Self.shouldCreateLocalSource(
             hasLocalConfig: configs.contains(where: { $0.kind == "local" }),
             userRemoved: Self.localSourceUserRemoved)
         {
             let local = SourceConfig(
-                kind: "local", displayName: "Terminal & Claude Code",
+                kind: "local", displayName: Self.localSourceDefaultName,
                 bannersEnabled: true)
             container.mainContext.insert(local)
             try? container.mainContext.save()
             configs.append(local)
         }
+        // Renamed 2026-09-04 (Brandon: "Local coding agents"). A source's
+        // name is stored at creation, so an existing install would keep the
+        // old one forever without this; a name the user typed themselves is
+        // left alone.
+        var renamed = false
+        for config in configs where Self.shouldRenameLocalSource(
+            kind: config.kind, displayName: config.displayName)
+        {
+            config.displayName = Self.localSourceDefaultName
+            renamed = true
+        }
+        if renamed { try? container.mainContext.save() }
         ensureClaudeCodeHooks(configs: configs)
         var taskSourceIDs: Set<String> = []
         for config in configs where config.isEnabled {
@@ -399,6 +411,21 @@ final class AppState {
     /// Whether `bootstrapConnectors()` should (re)create the built-in local
     /// source. Pulled out as a pure function per rule 6 — the SwiftData
     /// plumbing around it isn't worth testing, this decision is.
+    /// What the built-in local source is called when the app creates it.
+    nonisolated static let localSourceDefaultName = "Local coding agents"
+
+    /// The two names the app itself gave that source before 2026-09-04.
+    /// Only these are migrated: anything else is a name the user chose.
+    nonisolated static let formerLocalSourceNames: Set<String> = [
+        "Terminal & Claude Code", "Local (Terminal & Claude Code)",
+    ]
+
+    nonisolated static func shouldRenameLocalSource(
+        kind: String, displayName: String
+    ) -> Bool {
+        kind == "local" && formerLocalSourceNames.contains(displayName)
+    }
+
     nonisolated static func shouldCreateLocalSource(
         hasLocalConfig: Bool, userRemoved: Bool
     ) -> Bool {
