@@ -2082,6 +2082,70 @@ struct AppleMailScriptTests {
         // RFC id and bare id remain as ordered fallbacks.
         #expect(script.contains("whose message id is \"a@b\""))
         #expect(script.contains("whose id is 42"))
+        // …and the scoped lookup is tried, not trusted: a Gmail "All Mail"
+        // mailbox is nested and cannot be addressed this way — it errors
+        // rather than misses, which must not abandon the fallbacks.
+        #expect(script.contains("try\n        set hits to (messages of mailbox"))
+        #expect(script.contains("end try"))
+    }
+
+    // MARK: Archive (C)
+
+    /// Mail's dictionary has no archive command, so archiving is a move into
+    /// a mailbox found by name — and the move has to act on the message as
+    /// the inbox knows it, because a Gmail message can report "All Mail" as
+    /// its mailbox while sitting in the inbox.
+    @Test("Archiving marks read and moves the inbox's copy to Archive or All Mail")
+    func archiveScript() {
+        let script = AppleMailConnector.archiveScript(
+            handle: .init(mailID: 42, messageID: "a@b", unflag: false,
+                          account: "ACCT-1", mailbox: "All Mail"))
+        #expect(script.contains("set read status of mover to true"))
+        #expect(script.contains("move mover to target"))
+        #expect(script.contains("\"Archive\", \"All Mail\""))
+        #expect(script.contains("mailboxes of inbox"))
+        #expect(script.contains("whose message id is (message id of m)"))
+        #expect(script.contains(AppleMailConnector.noArchiveMessage))
+        #expect(!script.contains("first message"))
+        // Never moves to whatever mailbox the handle happened to record.
+        #expect(!script.contains("move m to"))
+    }
+
+    @Test("Undo moves the message from the archive back to that account's inbox")
+    func unarchiveScript() throws {
+        let script = try #require(
+            AppleMailConnector.unarchiveScript(
+                handle: .init(mailID: 42, messageID: "a@b", unflag: false,
+                              account: "ACCT-1", mailbox: "All Mail")))
+        #expect(script.contains("account id \"ACCT-1\""))
+        #expect(script.contains("whose message id is \"a@b\""))
+        #expect(script.contains("move item 1 of hits to dest"))
+        #expect(script.contains(AppleMailConnector.notFoundInArchiveMessage))
+        #expect(script.contains(AppleMailConnector.noInboxMessage))
+        // Not by the recorded mailbox name — "All Mail" is where it is *now*.
+        #expect(!script.contains("mailbox \"All Mail\" of acct"))
+    }
+
+    /// The numeric id changed with the move, so only the account plus the
+    /// RFC id can find it again. A handle without them cannot be undone in
+    /// Mail — and says so rather than moving the wrong message.
+    @Test("Undo refuses a handle that cannot find the message again")
+    func unarchiveNeedsAccountAndMessageID() {
+        #expect(AppleMailConnector.unarchiveScript(
+            handle: .init(mailID: 42, messageID: nil, unflag: false, account: "ACCT-1")) == nil)
+        #expect(AppleMailConnector.unarchiveScript(
+            handle: .init(mailID: 42, messageID: "a@b", unflag: false)) == nil)
+    }
+
+    @Test("Mail carries both verbs, and C says Archive on its rows")
+    func mailHasBothVerbs() {
+        let connector = AppleMailConnector(sourceID: "m", scope: .init(flagged: true, unread: false, mailbox: ""))
+        #expect(connector.capabilities.contains(.markDone))
+        #expect(connector.capabilities.contains(.completesTask))
+        #expect(AppState.completeVerb(forKind: "appleMail").button == "Archive")
+        #expect(AppState.completeVerb(forKind: "reminders").button == "Complete task")
+        #expect(AppState.completeVerb(forKind: "todoist").help.contains("Todoist"))
+        #expect(AppState.completeVerb(forKind: "slack").button == "Complete task")
     }
 
     /// A handle written by 0.3.0 has no account or mailbox; it must still

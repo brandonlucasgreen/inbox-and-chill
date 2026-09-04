@@ -25,7 +25,15 @@ import OSLog
 actor AppleMailConnector: Connector {
     nonisolated let sourceID: String
     nonisolated let sourceKind = "appleMail"
-    nonisolated let capabilities: ConnectorCapabilities = [.markDone, .remoteTruth]
+    /// Both write-through verbs, the first connector to carry both. `E` is
+    /// "seen" — mark read, clear the flag — and leaves the message in the
+    /// inbox; `C` **archives** it (and marks it read), which is the to-do
+    /// connectors' `completesTask` wearing Mail's word for it. Asked for by
+    /// Brandon, 2026-09-03: *"be able to archive the email using the C
+    /// button (similar to 'complete' for todos)"*.
+    nonisolated let capabilities: ConnectorCapabilities = [
+        .markDone, .completesTask, .remoteTruth,
+    ]
     nonisolated let pollInterval: TimeInterval = 60
 
     private let scope: Scope
@@ -125,6 +133,49 @@ actor AppleMailConnector: Connector {
             )
         }
         _ = try await Self.runScript(Self.markDoneScript(handle: handle))
+    }
+
+    /// `C`: archive the message in Mail, and mark it read.
+    ///
+    /// Mail's scripting dictionary has **no archive command and no archive
+    /// mailbox** — it exposes drafts, junk, sent and trash and nothing else
+    /// (checked against the sdef on macOS 26.5, 2026-09-03) — so this does
+    /// what Mail's own Archive does underneath: moves the message to the
+    /// account's archive mailbox, found by name. `Archive` is iCloud's and
+    /// most IMAP hosts'; `All Mail` is Gmail's, where moving out of the inbox
+    /// *is* archiving (it drops the Inbox label). Both were confirmed on the
+    /// three live accounts before this was written. An account with neither
+    /// is refused out loud rather than moved nowhere (rule 5).
+    func complete(externalID: String, payload: Data?) async throws {
+        guard let handle = MessageHandle(payload: payload) else {
+            throw AppleMailError(
+                errorDescription:
+                    "Apple Mail: “\(externalID)” has no Mail message id recorded, so it can't be archived in Mail. It was cleared from the queue only."
+            )
+        }
+        _ = try await Self.runScript(Self.archiveScript(handle: handle))
+    }
+
+    /// ⌘Z after `C`: move the message back to the inbox it came from.
+    ///
+    /// The numeric id is scoped to a mailbox, so it changed when the message
+    /// moved; the RFC Message-ID is what finds it again, inside the archive
+    /// mailbox of the account it was in. A handle without those two facts
+    /// cannot be undone in Mail and says so — the row still comes back.
+    func uncomplete(externalID: String, payload: Data?) async throws {
+        guard let handle = MessageHandle(payload: payload) else {
+            throw AppleMailError(
+                errorDescription:
+                    "Apple Mail: “\(externalID)” has no Mail message id recorded, so it can't be moved back in Mail. The row is back in the queue."
+            )
+        }
+        guard let script = Self.unarchiveScript(handle: handle) else {
+            throw AppleMailError(
+                errorDescription:
+                    "Apple Mail: the message is back in the queue, but it was archived in Mail and can't be moved back automatically — its account or Message-ID wasn't recorded when it was first seen. Drag it back to the inbox in Mail."
+            )
+        }
+        _ = try await Self.runScript(script)
     }
 
     // MARK: Addressing a message
@@ -270,6 +321,16 @@ actor AppleMailConnector: Connector {
     ///   message was found in, and keep the RFC Message-ID as the fallback
     ///   for when Mail has moved it since.
     static func markDoneScript(handle: MessageHandle) -> String {
+        var body = lookupPreamble(handle: handle)
+        body += "\n    set read status of m to true"
+        if handle.unflag {
+            body += "\n    set flagged status of m to false"
+        }
+        return wrapped(body)
+    }
+
+    /// Finds the message (see `markDoneScript`'s rules), leaving it in `m`.
+    static func lookupPreamble(handle: MessageHandle) -> String {
         var lookups: [String] = []
         if let account = handle.account, !account.isEmpty,
             let mailbox = handle.mailbox, !mailbox.isEmpty {
@@ -285,30 +346,130 @@ actor AppleMailConnector: Connector {
         }
         lookups.append("(messages of inbox whose id is \(handle.mailID))")
 
-        var body = "set hits to \(lookups[0])\n"
+        // The first lookup can *error* rather than miss: a Gmail message's
+        // recorded mailbox is "All Mail", which is nested under "[Gmail]",
+        // and `mailbox "All Mail" of account id …` cannot resolve it
+        // (-1728, "Can't get mailbox", live on 2026-09-03). An error there
+        // would abandon the fallbacks that do find the message, so the miss
+        // is caught and the chain continues.
+        var body = "set hits to {}\n"
+        body += "    try\n        set hits to \(lookups[0])\n    end try\n"
         for lookup in lookups.dropFirst() {
             body += "    if (count of hits) is 0 then set hits to \(lookup)\n"
         }
         body += """
                 if (count of hits) is 0 then error \(quoted(notFoundMessage)) number -1728
                 set m to item 1 of hits
-                set read status of m to true
             """
-        if handle.unflag {
-            body += "\n    set flagged status of m to false"
-        }
+        return body
+    }
 
+    /// Archive mailbox names, in the order they are tried. `Archive` first:
+    /// a Gmail account in Mail can carry both, and Mail's own Archive uses
+    /// whichever the user designated, which a script cannot read.
+    static let archiveMailboxNames = ["Archive", "All Mail"]
+
+    /// The archive mailbox of `acct`, in `target`, or the named error.
+    private static func findArchiveMailbox() -> String {
+        let names = archiveMailboxNames.map(quoted).joined(separator: ", ")
         return """
-            tell application "Mail"
-                \(body)
-            end tell
+                set target to missing value
+                repeat with archiveName in {\(names)}
+                    set candidates to (mailboxes of acct whose name is (contents of archiveName))
+                    if (count of candidates) > 0 then
+                        set target to item 1 of candidates
+                        exit repeat
+                    end if
+                end repeat
+                if target is missing value then error \(quoted(noArchiveMessage)) number -1728
             """
+    }
+
+    /// The account's own inbox, in `dest`: the unified `inbox` is a mailbox
+    /// whose sub-mailboxes are one per account (measured 2026-09-03: three
+    /// accounts, three `INBOX @ <account>`). Found by account rather than
+    /// by the name "INBOX", which not every host uses.
+    private static func findAccountInbox() -> String {
+        """
+                set dest to missing value
+                repeat with ib in mailboxes of inbox
+                    if (id of account of ib) is (id of acct) then
+                        set dest to ib
+                        exit repeat
+                    end if
+                end repeat
+        """
+    }
+
+    /// Archive = mark read, then move out of the inbox into the account's
+    /// archive mailbox.
+    ///
+    /// The move is made on the message **as the inbox knows it**, not on
+    /// whatever `mailbox of m` says. For a Gmail account Mail can report a
+    /// message's mailbox as "All Mail" while it sits in the inbox (a live
+    /// handle read `"mailbox":"All Mail"` for an inbox row), and moving
+    /// *that* reference to All Mail moves nothing — the message would stay
+    /// in the inbox and the row would come straight back on the next poll.
+    static func archiveScript(handle: MessageHandle) -> String {
+        var body = lookupPreamble(handle: handle)
+        body += """
+
+                set acct to account of mailbox of m
+                set mover to m
+            """
+        body += findAccountInbox()
+        body += """
+                if dest is not missing value then
+                    set inboxHits to (messages of dest whose message id is (message id of m))
+                    if (count of inboxHits) > 0 then set mover to item 1 of inboxHits
+                end if
+                set read status of mover to true
+            """
+        body += findArchiveMailbox()
+        body += "\n    move mover to target"
+        return wrapped(body)
+    }
+
+    /// nil when the handle lacks the account or the RFC Message-ID — the two
+    /// facts that can find a message after Mail has moved it (the numeric id
+    /// is per mailbox and changed with the move).
+    static func unarchiveScript(handle: MessageHandle) -> String? {
+        guard let account = handle.account, !account.isEmpty,
+            let messageID = handle.messageID, !messageID.isEmpty
+        else { return nil }
+        var body = "set acct to account id \(quoted(account))\n"
+        body += findArchiveMailbox()
+        body += """
+
+                set hits to (messages of target whose message id is \(quoted(messageID)))
+                if (count of hits) is 0 then error \(quoted(notFoundInArchiveMessage)) number -1728
+            """
+        body += findAccountInbox()
+        body += """
+                if dest is missing value then error \(quoted(noInboxMessage)) number -1728
+                move item 1 of hits to dest
+            """
+        return wrapped(body)
+    }
+
+    private static func wrapped(_ body: String) -> String {
+        """
+        tell application "Mail"
+            \(body)
+        end tell
+        """
     }
 
     /// Raised by the script itself when every lookup misses, so the reason
     /// reaching the user is this sentence rather than "-1728".
     static let notFoundMessage =
         "Inbox & Chill could not find that message in Mail any more — it may have been moved or deleted."
+    static let noArchiveMessage =
+        "Inbox & Chill couldn't archive this message: its Mail account has no mailbox named “Archive” or “All Mail”, so there is nowhere to move it. Create a mailbox named Archive in Mail, or archive it there by hand."
+    static let noInboxMessage =
+        "Inbox & Chill could not find that account's inbox in Mail to move the message back. The row is back in the queue; drag the message out of the archive in Mail."
+    static let notFoundInArchiveMessage =
+        "Inbox & Chill could not find the archived message in Mail to move it back — it may have been moved again or deleted. The row is back in the queue."
 
 
     /// Parses the script's output. Returns the items plus whether Mail had

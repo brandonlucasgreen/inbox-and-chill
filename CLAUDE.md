@@ -345,6 +345,12 @@ Anything declaring it must also implement `uncomplete`, or ⌘Z restores the row
 while leaving the task ticked off. `Store.undoDone` returns the `DoneReason` so
 the engine can tell the two apart.
 
+**Mail declares both** (since 2026-09-03): `E` marks read and unflags, `C`
+**archives** and marks read. The two verbs compose because the engine keys
+each off its own capability; what changes per kind is only the *word* —
+`ConnectorKindDescriptor.completeVerb` — and it must be the source's own, or
+the button promises something the source will not do.
+
 ## Task groups in connectors — two ways to lose a source
 
 `run()` uses `withThrowingTaskGroup` with `_ = try await group.next()`, so **the
@@ -590,6 +596,23 @@ fallbacks.
 the flag as well when a flag is what queued it. Read is the load-bearing half:
 unflagging alone leaves the message unread, so an unread-scoped source
 re-queues it forever.
+
+**`C` means archive**, and three Mail facts shape `archiveScript` (all
+measured 2026-09-03):
+
+- **Mail's scripting dictionary has no archive command and no archive
+  mailbox** — only drafts, junk, sent and trash — so archiving is a `move` to
+  a mailbox found **by name**: `Archive` (iCloud, most IMAP) or `All Mail`
+  (Gmail, where leaving the inbox *is* archiving). An account with neither is
+  refused out loud (`noArchiveMessage`).
+- **A Gmail inbox message can report `mailbox of m` as "All Mail"** (a live
+  handle did). Moving *that* reference to All Mail moves nothing. So the move
+  acts on the message as the **inbox** knows it — `mailboxes of inbox` are
+  the per-account inboxes, all named `INBOX` here — found by `message id`.
+- **The numeric id changes with the move** (it is per mailbox), so undo finds
+  the message in the archive mailbox by RFC Message-ID and moves it to the
+  account's inbox, found by account rather than by the name "INBOX". A 0.3.0
+  handle with no account or Message-ID cannot be undone in Mail and says so.
 
 ## Diagnostics — crashes and errors (added 2026-08-26)
 

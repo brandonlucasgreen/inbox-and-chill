@@ -65,6 +65,24 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
     }
     var grouping: Grouping? = nil
 
+    /// What `C` says on a row of this kind. A to-do is *completed*; a mail
+    /// message is *archived*. Same capability (`completesTask`), same key,
+    /// different word — and the word has to be the source's own, or the
+    /// button promises something the source will not do.
+    struct CompleteVerb: Sendable {
+        /// Row hover button and accessibility label.
+        var button: String
+        /// Context menus and the archive pane.
+        var menu: String
+        /// Tooltip; ends with the key.
+        var help: String
+
+        static let complete = CompleteVerb(
+            button: "Complete task", menu: "Complete Task",
+            help: "Complete it in its app (C)")
+    }
+    var completeVerb: CompleteVerb = .complete
+
     struct SetupPayload: Sendable {
         var label: String
         var text: String
@@ -197,7 +215,10 @@ enum ConnectorCatalog {
                 "Flag a message in Mail and it appears here on the next refresh.",
             ],
             authNote: "No token, and nothing to sign in to: this reads the Mail app on this Mac over AppleScript, so it covers every account Mail has — **including Gmail**, which is why there is no separate Gmail source. Nothing is sent anywhere.\n\nmacOS gates this behind Privacy & Security → Automation. If you decline, Mail looks permanently empty rather than broken, so this source says so explicitly instead of showing you an empty queue.\n\nThe first refresh after Mail has been idle can take around ten seconds — that's Mail waking up, not a failure.",
-            grouping: .init(noun: "sender", defaultOn: true)),
+            grouping: .init(noun: "sender", defaultOn: true),
+            completeVerb: .init(
+                button: "Archive", menu: "Archive in Mail",
+                help: "Archive it in Mail and mark it read (C)")),
         .init(
             id: "reminders", displayName: "Apple Reminders", systemImage: "checklist",
             fields: [
@@ -222,7 +243,10 @@ enum ConnectorCatalog {
             // called out on 2026-08-26. `credentialSourcesExplainThemselves`
             // only requires steps of sources that ask for a secret.
             authNote: "No token and nothing to sign in to: this reads the Reminders app on this Mac, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere.",
-            grouping: .init(noun: "list", defaultOn: false)),
+            grouping: .init(noun: "list", defaultOn: false),
+            completeVerb: .init(
+                button: "Complete task", menu: "Complete Task",
+                help: "Complete it in Reminders (C)")),
         .init(
             id: "todoist", displayName: "Todoist", systemImage: "checkmark.circle",
             fields: [
@@ -254,7 +278,10 @@ enum ConnectorCatalog {
             // it is a token rather than a sign-in button, and the one thing
             // about `C` that Todoist itself does differently from the row.
             authNote: "Todoist's OAuth is built for apps distributed to other people — it wants a registered client and a redirect URL — so the personal API token is its own sanctioned path for your own account. The token is stored in your Keychain and never leaves this Mac.\n\nCompleting a repeating task with **C** reschedules it in Todoist rather than ticking it off, which is what Todoist itself does. Undo can't take that back.",
-            grouping: .init(noun: "project", defaultOn: false)),
+            grouping: .init(noun: "project", defaultOn: false),
+            completeVerb: .init(
+                button: "Complete task", menu: "Complete Task",
+                help: "Complete it in Todoist (C)")),
         .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [

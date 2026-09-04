@@ -247,14 +247,16 @@ struct ItemRowView: View {
             ) {
                 appState.markDone(item)
             }
-            // Only to-do sources, because only they have two end states. The
-            // button is absent rather than disabled: a greyed-out "complete"
-            // on every Slack mention would be permanent clutter explaining
-            // itself to nobody.
+            // Only sources with two end states — a to-do (seen vs done) and
+            // mail (seen vs archived). The button is absent rather than
+            // disabled: a greyed-out "complete" on every Slack mention would
+            // be permanent clutter explaining itself to nobody.
             if appState.canComplete(item) {
+                let verb = appState.completeVerb(for: item)
                 actionButton(
-                    "checkmark.circle.fill", key: "C",
-                    "Complete it in Reminders (C)", "Complete task"
+                    item.sourceKind == "appleMail"
+                        ? "archivebox" : "checkmark.circle.fill",
+                    key: "C", verb.help, verb.button
                 ) {
                     appState.completeTask(item)
                 }
@@ -323,7 +325,9 @@ struct ItemRowView: View {
             appState.markDone(item)
         }
         if appState.canComplete(item) {
-            Button("Complete Task") { appState.completeTask(item) }
+            Button(appState.completeVerb(for: item).menu) {
+                appState.completeTask(item)
+            }
         }
         Menu("Snooze") {
             ForEach(SnoozePreset.allCases) { preset in
