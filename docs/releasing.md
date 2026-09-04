@@ -10,15 +10,22 @@ means which cause.
 
 ---
 
-## Where things stand (2026-09-03)
+## Where things stand (2026-09-03, evening)
 
-**0.5.0 is a feature release**: Topics (#41) group one thing across sources
+**0.6.0 is a feature release**: auto-grouping (#43) folds one source's rows
+by channel, issue or project, repository, Sentry project, ntfy topic or mail
+sender, behind a per-source "Group" checkbox; a hand-made topic is now a
+header from its first member. It adds two optional fields to `Item` and one
+to `SourceConfig` — the migration was verified against the live store before
+merge. 0.6.0 ships `CURRENT_PROJECT_VERSION` **11**.
+
+**0.5.0 was the previous feature release**: Topics (#41) group one thing across sources
 into a single queue row, and the same PR brought bulk marking — the hover
 checkbox, ⌘-click, Space and ⇧↑/⇧↓ — with `E`, `S`, `U`, `C`, `⌘P` and `G`
 acting on every marked row.
 
-`v0.4.0` shipped `CURRENT_PROJECT_VERSION` **9**. 0.5.0 ships **10**, which
-`release.sh` enforces.
+`v0.4.0` shipped `CURRENT_PROJECT_VERSION` **9**, 0.5.0 **10**; `release.sh`
+enforces the increase.
 
 **0.5.0 is the first release cut with unversioned artifact names** (#40):
 `dist/InboxAndChill.zip` and `dist/dmg/InboxAndChill.dmg`, so
