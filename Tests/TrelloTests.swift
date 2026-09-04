@@ -172,8 +172,36 @@ struct TrelloTests {
                 .contains("short and stout"))
     }
 
-    /// The credentials ride in the query string, and this sentence is written
-    /// to `ProblemLog` on disk. It must never carry a URL.
+    /// The request URL used to carry the key and token, and one offline poll
+    /// would have put it on disk: `SyncEngine` renders errors with
+    /// `String(describing:)`, and for a `URLError` that includes
+    /// `NSErrorFailingURLStringKey`. Both halves are pinned — the URL side
+    /// carries nothing, and a transport error is rewrapped without it.
+    @Test("Credentials ride in a header, and a transport error keeps the URL out")
+    func transportFailureCannotLeakTheURL() throws {
+        let url = try #require(URL(string: "https://api.trello.com/1/members/me/notifications?limit=1"))
+        let request = TrelloConnector.request(
+            url: url, method: "GET", key: "KEY_MARKER", token: "TOKEN_MARKER")
+        #expect(request.url?.absoluteString.contains("MARKER") == false)
+        #expect(
+            request.value(forHTTPHeaderField: "Authorization")
+                == #"OAuth oauth_consumer_key="KEY_MARKER", oauth_token="TOKEN_MARKER""#)
+
+        // The trap itself, so this test fails loudly if Foundation changes:
+        // the described form carries the URL, the localized one does not.
+        let leaky = URLError(.cannotFindHost, userInfo: [
+            NSURLErrorFailingURLStringErrorKey:
+                "https://api.trello.com/1/x?key=KEY_MARKER&token=TOKEN_MARKER",
+        ])
+        #expect(String(describing: leaky).contains("TOKEN_MARKER"))
+        let text = TrelloConnector.explain(transport: leaky, writing: false)
+        #expect(!text.contains("MARKER"))
+        #expect(!text.contains("api.trello.com"))
+        #expect(text.contains("reading your notifications"))
+    }
+
+    /// This sentence is written to `ProblemLog` on disk. It must never carry
+    /// a URL.
     @Test("No failure message can leak the key or token")
     func messagesCarryNoCredentials() {
         let statuses = [400, 401, 404, 429, 500, 418]

@@ -20,11 +20,18 @@ import Foundation
 ///   token`**. So `explain` reads the body rather than the status alone, and
 ///   can name *which* of the two values is wrong — which matters because this
 ///   is the only source in the app asking for two.
-/// - **Credentials travel in the query string** (the spec's own security
-///   scheme is `apiKey` in `query`), not a header. Nothing here may ever
-///   interpolate a request URL into an error or a log line; `ProblemLog`
-///   would keep the token on disk. Every message below is built from the
-///   status and body only.
+/// - **Credentials go in a header, never the query string.** Trello's spec
+///   documents `key=`/`token=` query parameters, and the first build used
+///   them — but `String(describing:)` of a `URLError` (which is how
+///   `SyncEngine` renders every thrown error) carries the failing URL, query
+///   string and all. One offline poll would have put the token into the
+///   Settings status line and `ProblemLog` on disk. Trello also accepts
+///   `Authorization: OAuth oauth_consumer_key="…", oauth_token="…"`, verified
+///   live on 2026-09-04: junk header credentials answer `401 invalid key`
+///   exactly as the query form does. So the URL never holds a secret, and
+///   `send` still rewraps transport errors from `localizedDescription` as a
+///   second line of defence. Every message below is built from the status
+///   and body only.
 actor TrelloConnector: Connector {
     nonisolated let sourceID: String
     nonisolated let sourceKind = "trello"
@@ -107,22 +114,13 @@ actor TrelloConnector: Connector {
             // Without this the response carries no author, and every row
             // would lose the one fact that says who wants you.
             URLQueryItem(name: "memberCreator", value: "true"),
-            URLQueryItem(name: "key", value: key),
-            URLQueryItem(name: "token", value: token),
         ]
         guard let url = components.url else {
             throw TrelloError(
                 errorDescription: "Trello: couldn't build a request URL.")
         }
-        var request = URLRequest(url: url)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw TrelloError(
-                errorDescription:
-                    "Trello: non-HTTP response from the notifications endpoint.")
-        }
+        let request = Self.request(url: url, method: "GET", key: key, token: token)
+        let (data, http) = try await send(request, writing: false)
         guard http.statusCode == 200 else {
             throw TrelloError(
                 errorDescription: Self.explain(
@@ -139,33 +137,88 @@ actor TrelloConnector: Connector {
     /// source for obeying twice.
     func markDone(externalID: String, payload: Data?) async throws {
         let (key, token) = try credentials()
-        var components = URLComponents(
-            string: "\(Self.host)/1/notifications/\(externalID)")!
-        components.queryItems = [
-            URLQueryItem(name: "unread", value: "false"),
-            URLQueryItem(name: "key", value: key),
-            URLQueryItem(name: "token", value: token),
-        ]
+        // Not force-unwrapped: the id is stored data, and a malformed one
+        // should be a named failure rather than a crash.
+        guard var components = URLComponents(
+            string: "\(Self.host)/1/notifications/\(externalID)")
+        else {
+            throw TrelloError(
+                errorDescription:
+                    "Trello: couldn't build a request URL to mark \(externalID) read.")
+        }
+        components.queryItems = [URLQueryItem(name: "unread", value: "false")]
         guard let url = components.url else {
             throw TrelloError(
                 errorDescription:
                     "Trello: couldn't build a request URL to mark \(externalID) read.")
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw TrelloError(
-                errorDescription:
-                    "Trello: non-HTTP response marking notification \(externalID) read.")
-        }
+        let request = Self.request(url: url, method: "PUT", key: key, token: token)
+        let (data, http) = try await send(request, writing: true)
         guard !(200...204).contains(http.statusCode), http.statusCode != 404
         else { return }
         throw TrelloError(
             errorDescription: Self.explain(
                 status: http.statusCode, body: data, writing: true))
+    }
+
+    // MARK: Transport
+
+    /// Trello's documented alternative to `key=`/`token=` query parameters.
+    /// Pure so a test can assert the URL side carries nothing.
+    nonisolated static func authorizationHeader(key: String, token: String) -> String {
+        "OAuth oauth_consumer_key=\"\(key)\", oauth_token=\"\(token)\""
+    }
+
+    nonisolated static func request(
+        url: URL, method: String, key: String, token: String
+    ) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(
+            authorizationHeader(key: key, token: token),
+            forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// Runs the request and rewraps a transport failure.
+    ///
+    /// `URLSession`'s errors are `URLError`s, and `String(describing:)` of one
+    /// prints the whole `NSError`, `NSErrorFailingURLStringKey` included.
+    /// `SyncEngine` renders thrown errors exactly that way, so an offline
+    /// poll would otherwise put the request URL into the source's status line
+    /// and `ProblemLog`. The header change above means that URL no longer
+    /// carries a secret; this keeps it that way even if a query parameter
+    /// is ever added back.
+    private func send(
+        _ request: URLRequest, writing: Bool
+    ) async throws -> (Data, HTTPURLResponse) {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw TrelloError(
+                errorDescription: Self.explain(transport: error, writing: writing))
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw TrelloError(
+                errorDescription:
+                    "Trello: non-HTTP response while \(Self.action(writing: writing)).")
+        }
+        return (data, http)
+    }
+
+    /// The one sentence a network failure is allowed to produce. Built from
+    /// `localizedDescription`, which names the failure ("The Internet
+    /// connection appears to be offline.") without the URL that
+    /// `String(describing:)` would append.
+    nonisolated static func explain(transport error: any Error, writing: Bool) -> String {
+        "Trello couldn't be reached while \(action(writing: writing)): \(error.localizedDescription) It will try again on the next poll."
+    }
+
+    private nonisolated static func action(writing: Bool) -> String {
+        writing ? "marking a notification read" : "reading your notifications"
     }
 
     // MARK: Decoding
@@ -342,8 +395,8 @@ actor TrelloConnector: Connector {
     /// the only source asking for two values, so naming which one is wrong is
     /// the difference between a fix and a guess.
     ///
-    /// The request URL is never included: the key and token ride in the query
-    /// string, and this sentence ends up in `ProblemLog` on disk.
+    /// The request URL is never included, and this sentence ends up in
+    /// `ProblemLog` on disk — see `send` for the transport-error half.
     nonisolated static func explain(
         status: Int, body: Data, writing: Bool
     ) -> String {
@@ -351,7 +404,7 @@ actor TrelloConnector: Connector {
             (String(data: body.prefix(200), encoding: .utf8) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = text.lowercased()
-        let action = writing ? "marking a notification read" : "reading your notifications"
+        let action = action(writing: writing)
 
         if lowered.contains("invalid key") {
             return
