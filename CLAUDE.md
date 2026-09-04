@@ -368,6 +368,7 @@ the connector 5s later. Two failures have come from this:
 |---|---|---|---|
 | `linear` | GraphQL poll 30s | markDone, remoteSnooze, remoteTruth | Per-type inline fragments; `DocumentNotification` has no `document` relation (resolved by a second `documents(filter:)` pass). `Notification.subtitle` is the comment **body**, not a name. |
 | `github` | REST poll | markDone, remoteTruth | Classic PAT only (OAuth tokens rejected). Paginates; `participating=true` by default. |
+| `gitlab` | REST poll 60s | markDone, remoteTruth | **GitLab's To-Do list *is* the queue** (`GET /todos`, `POST /todos/:id/mark_as_done`) — a Linear-class inbox mirror. `api` scope, not `read_api`, or `E` 403s. **Written with no live account** (2026-09-04); the fixtures are GitLab's own documented payloads. See below. |
 | `slack` | Socket Mode + poll | markDone, remoteTruth, push | User token `xoxp-` required; app-level `xapp-` optional (adds channel mentions). Keyword Watch polls `search.messages` — the only way to see a channel you're not in. Mute Channels drops keyword hits *and* real mentions from named channels (never DMs or emoji saves). |
 | `ntfy` | WebSocket | push | No remote read-state; items die by explicit done. `since=<id>` is exclusive-after. |
 | `jsonPoller` | HTTP poll 120s | remoteTruth | Generic: any URL returning a JSON array, fields mapped via a user-supplied `id=id,title=title,...` string. **`root=data` (or a dotted `root=result.items`) reaches a nested list** — added 2026-09-04 because a survey of nine candidate APIs found none that used the bare array or `items`: Stripe nests under `data`, PagerDuty `incidents`, Jira `issues`, Vercel `deployments`. Every shape failure names the keys the feed really sent. Optional bearer auth header from the Keychain. |
@@ -376,6 +377,36 @@ the connector 5s later. Two failures have come from this:
 | `appleMail` | AppleScript poll 60s | markDone, remoteTruth | **Covers Gmail** — it reads every account Mail has, which is why there is no Gmail connector (PLAN §6.13). Flagged-only by default. See below. |
 | `reminders` | EventKit poll 60s | **completesTask**, remoteTruth, providesContext | Apple Reminders. Declares `completesTask` and deliberately **not** `markDone` — that omission is the dismiss-vs-complete feature. No entitlement needed; 7.8ms cold, so no Mail-style cold penalty. See below. |
 | `todoist` | REST poll 120s | **completesTask**, remoteTruth, providesContext | Todoist, via a personal API token. Same to-do semantics as `reminders` — `E` dismisses locally, `C` closes in Todoist. **API v1 only** (`api.todoist.com/api/v1`); REST v2 and Sync v9 are gone. Undo is honestly lossy on a repeating task. See below. |
+
+### GitLab, and the first connector built without an account
+
+`GET /api/v4/todos` is the authenticated user's To-Do list, so `gitlab` is an
+inbox mirror rather than the assigned-work approximation Jira or Asana could
+manage. Research and the ranking that chose it: `docs/source-candidates.md`.
+
+**It has never been fed to the real service.** Brandon has no GitLab account,
+and rule 4 says that makes it unverified however carefully written. Two
+things follow, and both are the point:
+
+- **Every mapping is a `nonisolated static` helper tested against the payload
+  GitLab's own docs publish** — nesting, field names and all, including a
+  `Commit` to-do whose `target.id` is a SHA *string* where an issue's is a
+  number. `Todo.Target` therefore has no `id` field at all: decoding it as
+  either type would throw on the other and take the whole poll down.
+- **The failure paths are pinned as hard as the mappings**, because they are
+  what nobody can watch happen. One was verified live without an account:
+  gitlab.com answers **401 with `{"message":"401 Unauthorized"}`** for a
+  missing token *and* a wrong one, so `explain` cannot claim to know which —
+  and since **a GitLab token expires (a year out, and the date is
+  mandatory)**, it names expiry too. No other source has a credential that
+  dies on a timer.
+
+Two smaller decisions worth keeping: a **404 on `mark_as_done` is success**
+(GitLab answers 404 for an already-done to-do, and erroring there would put a
+red dot on the source for obeying twice), and **`build_failed`, `unmergeable`
+and `merge_train_removed` are *not* high-signal** — a machine raised them
+about your own branch, which is the line `GitHubConnector` draws by excluding
+`ci_activity`.
 
 ### A to-do is not a notification (`reminders`, `todoist`)
 
