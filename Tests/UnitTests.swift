@@ -2990,6 +2990,103 @@ struct JSONPollerConnectorTests {
     }
 }
 
+@Suite("JSON poller list location (root=)")
+struct JSONPollerRootTests {
+    private func json(_ raw: String) throws -> Any {
+        try JSONSerialization.jsonObject(with: Data(raw.utf8))
+    }
+
+    private func rows(_ raw: String, root: String? = nil) throws -> [[String: Any]] {
+        try JSONPollerConnector.rows(in: json(raw), root: root)
+    }
+
+    /// The two shapes that worked before `root=` existed, unchanged — every
+    /// feed already configured has to keep working.
+    @Test("A bare array and an items wrapper still work with no root")
+    func backwardsCompatible() throws {
+        #expect(try rows(#"[{"id":"1"},{"id":"2"}]"#).count == 2)
+        #expect(try rows(#"{"items":[{"id":"1"}]}"#).count == 1)
+    }
+
+    /// The reason this exists: nine candidate APIs were surveyed and not one
+    /// used `items`. These are the real key names.
+    @Test("root= reaches the list every real API actually nests it under")
+    func realWorldRoots() throws {
+        #expect(try rows(#"{"data":[{"id":"evt_1"}],"has_more":false}"#, root: "data").count == 1)
+        #expect(try rows(#"{"incidents":[{"id":"P1"},{"id":"P2"}],"more":false}"#, root: "incidents").count == 2)
+        #expect(try rows(#"{"issues":[{"key":"EPD-1"}],"isLast":true}"#, root: "issues").count == 1)
+        #expect(try rows(#"{"deployments":[{"uid":"dpl_1"}]}"#, root: "deployments").count == 1)
+    }
+
+    @Test("A dotted root walks more than one level")
+    func dottedPath() throws {
+        let found = try rows(
+            #"{"result":{"items":[{"id":"9"}]}}"#, root: "result.items")
+        #expect(found.count == 1)
+        #expect(found.first?["id"] as? String == "9")
+    }
+
+    /// Rule 5: a mapping is typed by hand, so the error has to name the keys
+    /// the feed really sent rather than say "no array".
+    @Test("A wrong root names the keys the feed does have")
+    func wrongRootIsActionable() throws {
+        let raw = #"{"object":"list","url":"/v1/events","data":[]}"#
+        do {
+            _ = try rows(raw, root: "results")
+            Issue.record("expected a throw")
+        } catch let error as ConnectorError {
+            #expect(error.description.contains("results"))
+            #expect(error.description.contains("data"))
+            #expect(error.description.contains("object"))
+        }
+    }
+
+    @Test("With no root, the error points at root= as the fix")
+    func missingRootSuggestsItself() throws {
+        do {
+            _ = try rows(#"{"data":[{"id":"1"}]}"#)
+            Issue.record("expected a throw")
+        } catch let error as ConnectorError {
+            #expect(error.description.contains("root="))
+            #expect(error.description.contains("data"))
+        }
+    }
+
+    /// Two mistakes that read nothing like each other and would otherwise
+    /// produce the same sentence.
+    @Test("Not-an-array and array-of-scalars are told apart")
+    func shapeErrorsAreDistinct() throws {
+        do {
+            _ = try rows(#"{"data":{"id":"1"}}"#, root: "data")
+            Issue.record("expected a throw")
+        } catch let error as ConnectorError {
+            #expect(error.description.contains("not an array"))
+        }
+        do {
+            _ = try rows(#"{"data":["a","b"]}"#, root: "data")
+            Issue.record("expected a throw")
+        } catch let error as ConnectorError {
+            #expect(error.description.contains("not of JSON objects"))
+        }
+    }
+
+    @Test("Walking into a non-object says where it stopped")
+    func walkStopsInsideAScalar() throws {
+        do {
+            _ = try rows(#"{"result":7}"#, root: "result.items")
+            Issue.record("expected a throw")
+        } catch let error as ConnectorError {
+            #expect(error.description.contains("\"result\""))
+            #expect(error.description.contains("not a JSON object"))
+        }
+    }
+
+    @Test("An empty root is the same as none, so a stray comma is harmless")
+    func emptyRootFallsBack() throws {
+        #expect(try rows(#"[{"id":"1"}]"#, root: "").count == 1)
+    }
+}
+
 // MARK: - JSONPollerConnector timestamp parsing
 // (Sources/App/Connectors/JSONPollerConnector.swift)
 //

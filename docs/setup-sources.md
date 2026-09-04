@@ -80,7 +80,7 @@ path entirely. Saves made while the app is running are unaffected.
 
 For any internal tool or script that can serve a JSON list, add it as a custom source:
 
-1. **Feed URL** — any URL that returns either a bare JSON array, or an object with an `items` array.
+1. **Feed URL** — any URL that returns a JSON array, or an object holding one (see `root=` below).
 2. **Authorization Header** — optional; if set, it's sent verbatim as the request's `Authorization` header (e.g. `Bearer sometoken`).
 3. **Field Mapping** — a comma-separated list of `ourField=theirField` pairs telling the app how to read your JSON. Supported fields:
    - `id=` — a stable identifier (falls back to `url=` if omitted)
@@ -106,6 +106,18 @@ This source is polled every two minutes. Example feed JSON that the mapping abov
 ```
 
 An `{ "items": [...] }` wrapper works the same way.
+
+**If the list sits under some other key — and it usually does — name it with
+`root=`.** Most real APIs nest: Stripe uses `data`, PagerDuty `incidents`,
+Jira `issues`, Vercel `deployments`. So a Stripe events feed is:
+
+```
+root=data,id=id,title=type,time=created
+```
+
+`root=result.items` walks two levels for the feeds that need it. Get it wrong
+and the error names the keys your feed actually sent, so you can fix the
+mapping without curling it yourself.
 
 ## ntfy
 
