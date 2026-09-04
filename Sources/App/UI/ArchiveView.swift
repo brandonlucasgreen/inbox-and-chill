@@ -157,7 +157,7 @@ private struct ArchiveRow: View {
             // the archive has to be possible — otherwise pressing E costs you
             // the ability to ever tick it off from this app.
             if appState.canComplete(item) {
-                Button("Complete Task", action: complete)
+                Button(appState.completeVerb(for: item).menu, action: complete)
             }
             Button("Copy") {
                 PanelPasteboard.copy(title: item.title, url: item.url)

@@ -890,6 +890,18 @@ final class AppState {
         !items.isEmpty && items.allSatisfy(canComplete)
     }
 
+    /// The word `C` uses for this row — "Complete" for a to-do, "Archive"
+    /// for a mail message.
+    nonisolated static func completeVerb(
+        forKind kind: String
+    ) -> ConnectorKindDescriptor.CompleteVerb {
+        ConnectorCatalog.descriptor(for: kind)?.completeVerb ?? .complete
+    }
+
+    func completeVerb(for item: Item) -> ConnectorKindDescriptor.CompleteVerb {
+        Self.completeVerb(forKind: item.sourceKind)
+    }
+
     /// `C` — finish the task in its source, and take the row out of the queue.
     ///
     /// Distinct from `markDone` by design: dismissing a to-do leaves the task
@@ -899,7 +911,7 @@ final class AppState {
     func completeTask(_ item: Item) {
         guard canComplete(item) else {
             openProblem =
-                "Only to-do sources can be completed. Press E to dismiss this instead."
+                "Only to-dos and mail can be completed — a to-do is finished in its app, a message is archived in Mail. Press E to dismiss this instead."
             return
         }
         undoStack.append([item.uid])
@@ -924,7 +936,7 @@ final class AppState {
             openProblem =
                 items.isEmpty
                 ? "Nothing to complete."
-                : "Only to-do sources can be completed, and not every item here is one. Press E to dismiss them instead."
+                : "Only to-dos and mail can be completed, and not every item here is one. Press E to dismiss them instead."
             return
         }
         undoStack.append(items.map(\.uid))
