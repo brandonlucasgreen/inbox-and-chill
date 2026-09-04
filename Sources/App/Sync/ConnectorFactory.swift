@@ -18,6 +18,9 @@ enum ConnectorFactory {
         case "gitlab":
             return GitLabConnector(
                 sourceID: config.id, host: settings["host"] ?? "")
+        case "trello":
+            return TrelloConnector(
+                sourceID: config.id, apiKey: settings["apiKey"] ?? "")
         case "local":
             return LocalConnector(sourceID: config.id)
         case "ntfy":
