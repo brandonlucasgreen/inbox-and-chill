@@ -2467,6 +2467,32 @@ struct LocalSourceRecreationTests {
                 hasLocalConfig: true, userRemoved: false))
     }
 
+    /// Renamed to "Local coding agents" on 2026-09-04. A source's name is
+    /// stored at creation, so the two names the app itself used to give it
+    /// are migrated on launch — and only those, because anything else is a
+    /// name the user typed.
+    @Test func renamesOnlyTheAppsOwnFormerDefaults() {
+        #expect(AppState.localSourceDefaultName == "Local coding agents")
+        #expect(
+            ConnectorCatalog.descriptor(for: "local")?.displayName
+                == AppState.localSourceDefaultName)
+        #expect(
+            AppState.shouldRenameLocalSource(
+                kind: "local", displayName: "Terminal & Claude Code"))
+        #expect(
+            AppState.shouldRenameLocalSource(
+                kind: "local", displayName: "Local (Terminal & Claude Code)"))
+        #expect(
+            !AppState.shouldRenameLocalSource(
+                kind: "local", displayName: "My hooks"))
+        #expect(
+            !AppState.shouldRenameLocalSource(
+                kind: "local", displayName: "Local coding agents"))
+        #expect(
+            !AppState.shouldRenameLocalSource(
+                kind: "ntfy", displayName: "Terminal & Claude Code"))
+    }
+
     /// The guard the fix rests on: deleting the source has to stay deleted,
     /// the same contract `ClaudeCodeIntegration.shouldAutoInstall` already
     /// keeps for the hooks themselves.

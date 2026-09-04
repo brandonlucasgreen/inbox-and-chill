@@ -99,7 +99,7 @@ environment (Xcode: Product → Scheme → Edit Scheme → Run → Arguments).
 
 ## 3. Test the local pipeline (terminal + Claude Code)
 
-The app auto-creates the "Terminal & Claude Code" source and starts a
+The app auto-creates the "Local coding agents" source and starts a
 localhost listener. The CLI lives inside the app bundle:
 
 ```sh
