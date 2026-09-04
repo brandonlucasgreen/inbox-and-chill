@@ -226,6 +226,22 @@ struct SourceEditorSheet: View {
         URL(string: urlString)?.host() ?? urlString
     }
 
+    /// The network to-do sources whose `projects` field is a picker rather
+    /// than a text field, with the call that fills it. Adding a provider here
+    /// is the whole UI change it needs.
+    private static func projectPicker(
+        for kind: String
+    ) -> (name: String, load: @Sendable (String) async throws -> [String])? {
+        switch kind {
+        case "todoist":
+            return ("Todoist", { try await TodoistConnector.projects(token: $0).map(\.name) })
+        case "asana":
+            return ("Asana", { try await AsanaConnector.projectNames(token: $0) })
+        default:
+            return nil
+        }
+    }
+
     // MARK: Generic fields
 
     @ViewBuilder
@@ -261,17 +277,19 @@ struct SourceEditorSheet: View {
                 field.label, text: binding,
                 prompt: Text(
                     existing != nil ? "•••• saved — enter to replace" : field.placeholder))
-        } else if descriptor.id == "todoist", field.key == "projects" {
+        } else if let picker = Self.projectPicker(for: descriptor.id), field.key == "projects" {
             // Checkboxes over the account's real project names, for the same
             // reason Reminders gets them — and here the picker is also what
             // proves the token works, so it replaces a separate connection
             // test rather than sitting beside one.
             VStack(alignment: .leading, spacing: 4) {
                 Text(field.label)
-                TodoistProjectPicker(
+                TodoProjectPicker(
                     value: binding,
                     typedToken: fieldValues["token"] ?? "",
-                    sourceID: existing?.id)
+                    sourceID: existing?.id,
+                    providerName: picker.name,
+                    loadProjects: picker.load)
                 if !field.help.isEmpty {
                     Text(field.help)
                         .font(.caption)

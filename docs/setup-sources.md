@@ -127,6 +127,33 @@ high-signal.
 **Not tested against a live account.** Written against Trello's published
 spec, so treat your first hour with it as the real test.
 
+## Asana
+
+Asana's Inbox is not in its API, so this source is **the tasks assigned to
+you**, not your notifications — a to-do source like Reminders and Todoist.
+`E` dismisses a row here and Asana never hears about it; `C` completes the
+task in Asana, and ⌘Z reopens it.
+
+1. Open Asana's **developer console** (`app.asana.com/0/developer-console`)
+   and create a personal access token. Asana shows it once.
+2. Paste it into the source. The project list loads as soon as the token is
+   read, which is also how you know the token works.
+3. Leave **Due today or overdue** on for the tasks you are late on or due
+   today, and tick any projects you want wholesale.
+
+Two things Asana's API does differently from Todoist:
+
+- **A ticked project is everyone's open tasks in it**, not just yours. The
+  API can filter a project *or* filter by assignee, never both. Shared team
+  projects can be long, which is why undated tasks stay off by default.
+- **Repeating tasks are new tasks.** Asana spawns the next occurrence when
+  you complete one, so completing with `C` is safe and undo reopens exactly
+  the task you completed. The spawned next occurrence stays and shows up as
+  its own row.
+
+**Not tested against a live account.** Written against Asana's published
+OpenAPI document; the first real token is the real test.
+
 ## Custom JSON feed
 
 **Fields:** Feed URL, Authorization Header (optional), Field Mapping
