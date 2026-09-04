@@ -74,6 +74,32 @@ path entirely. Saves made while the app is running are unaffected.
 
 **One thing to expect:** channel mentions only appear for activity happening *after* you set the source up — they arrive as events, and there's no history API to backfill them from (see above). DM unreads and emoji saves *are* backfilled, because both have real polling endpoints (`conversations.info` and `reactions.list`).
 
+## GitLab
+
+GitLab's **To-Do list is this queue** — assigned issues and merge requests,
+mentions, approvals you owe, and pipelines that broke. Marking a row done
+here marks it done in GitLab, so it stops arriving.
+
+1. In GitLab, open **Preferences → Access tokens**.
+2. Create a token with the **`api`** scope. `read_api` looks like enough and
+   is not: it can read the queue but not clear it, so `E` would fail at the
+   moment it matters.
+3. Paste it into the source, and leave **GitLab URL** blank unless you are on
+   a self-managed instance.
+
+**GitLab makes you pick an expiry date, up to a year.** When it lapses, GitLab
+answers exactly as it does for a wrong token — a bare 401 — so the source says
+"missing, wrong, or expired" rather than guessing. No other source here has a
+credential that dies on a timer; if GitLab goes quiet after months of working,
+check the token's date first.
+
+Rows fold by project, the way GitHub's fold by repository. Pipeline failures
+and "can't be merged" arrive quiet rather than high-signal: they matter, but a
+machine raised them about your own branch.
+
+**Not tested against a live account.** It was written against GitLab's
+published payloads, so treat the first hour with it as the real test.
+
 ## Custom JSON feed
 
 **Fields:** Feed URL, Authorization Header (optional), Field Mapping

@@ -129,6 +129,26 @@ enum ConnectorCatalog {
             authNote: "Why no “Sign in with GitHub”? GitHub's notifications API only accepts classic personal access tokens — it rejects OAuth app tokens and fine-grained PATs outright. The token is stored in your Keychain and never leaves this Mac.",
             grouping: .init(noun: "repository", defaultOn: true)),
         .init(
+            id: "gitlab", displayName: "GitLab", systemImage: "triangle",
+            fields: [
+                .init(
+                    key: "token", label: "Personal Access Token", isSecret: true,
+                    placeholder: "glpat-…",
+                    help: "Needs the `api` scope. `read_api` can read this queue but not clear it, so E would fail."),
+                .init(
+                    key: "host", label: "GitLab URL", isSecret: false,
+                    placeholder: GitLabConnector.defaultHost,
+                    help: "Blank means gitlab.com. Set it for a self-managed instance, including any subpath."),
+            ],
+            setupSteps: [
+                "In GitLab, open **Preferences → Access tokens**.",
+                "Add a token with the **`api`** scope. GitLab makes you pick an expiry date — a year is the maximum, and this source will say so when it lapses.",
+                "Paste it below.",
+            ],
+            setupURL: "https://gitlab.com/-/user_settings/personal_access_tokens",
+            authNote: "GitLab's To-Do list *is* this queue: assigned work, mentions, approvals you owe, and pipelines that broke. Marking one done here marks it done in GitLab, so it stops arriving.\n\nWhy paste a token? GitLab's OAuth is built for applications you register and host; a personal access token is its own sanctioned path for acting as yourself. It is stored in your Keychain and never leaves this Mac.",
+            grouping: .init(noun: "project", defaultOn: true)),
+        .init(
             id: "slack", displayName: "Slack", systemImage: "number",
             fields: [
                 .init(

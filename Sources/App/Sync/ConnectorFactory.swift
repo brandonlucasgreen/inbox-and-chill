@@ -15,6 +15,9 @@ enum ConnectorFactory {
             return GitHubConnector(
                 sourceID: config.id,
                 participating: field?.boolValue(in: settings) ?? true)
+        case "gitlab":
+            return GitLabConnector(
+                sourceID: config.id, host: settings["host"] ?? "")
         case "local":
             return LocalConnector(sourceID: config.id)
         case "ntfy":
