@@ -302,3 +302,40 @@ enum LemonSqueezy {
         }
     }
 }
+
+
+/// The two banners the trial sends on its way out, once each.
+///
+/// `LicenseNotice` already shows a countdown bar in the panel for the last
+/// three days, but only to someone who opens the panel. A banner reaches the
+/// person who has not — which, near the end of a trial, is the person about
+/// to be surprised by paused syncing. Pure, so the thresholds and the
+/// once-only rule are tested without a notification center.
+enum TrialNudge {
+    /// Days-left values at which a banner is due.
+    static let thresholds = [3, 1]
+    static let sentKey = "license.nudgesSent"
+
+    /// The banner to send now, or nil. The *smallest* matching threshold, so
+    /// a trial first noticed at one day left sends one banner, not two.
+    nonisolated static func due(daysLeft: Int, sent: Set<Int>) -> Int? {
+        thresholds.filter { daysLeft <= $0 && !sent.contains($0) }.min()
+    }
+
+    /// Everything at or above today's mark counts as sent, so the three-day
+    /// banner is not delivered the day after the one-day banner.
+    nonisolated static func markSent(daysLeft: Int, sent: Set<Int>) -> Set<Int> {
+        sent.union(thresholds.filter { daysLeft <= $0 })
+    }
+
+    nonisolated static func title(daysLeft: Int) -> String {
+        switch daysLeft {
+        case ...0: return "Inbox & Chill trial ends today"
+        case 1: return "Inbox & Chill trial — 1 day left"
+        default: return "Inbox & Chill trial — \(daysLeft) days left"
+        }
+    }
+
+    static let body =
+        "After that, syncing pauses until you buy a license (\(Licensing.price)) or enter a key. Your queue and settings stay put."
+}

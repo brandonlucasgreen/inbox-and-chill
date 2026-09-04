@@ -181,6 +181,12 @@ final class AppState {
                 }
             }
         }
+        // The trial's last days are said out loud even to someone who has not
+        // opened the panel; the in-panel bar (`LicenseNotice`) covers the rest.
+        license.onStateEvaluated = { [weak self] state in
+            guard let self else { return }
+            Task { @MainActor in await self.nudgeIfTrialEnding(state) }
+        }
         // Permission is requested lazily, right before the first banner —
         // not at launch (banners are opt-in; don't alert before the UI).
         notificationDelegate = NotificationDelegate(appState: self)
@@ -191,8 +197,85 @@ final class AppState {
             // Read-only: a blocked permission shows up in Settings before an
             // item arrives, but nobody gets a system prompt they didn't ask for.
             await resolveBannerAuthorization(prompting: false)
+            // The controller evaluated its state before the callback above
+            // existed, so the launch-time evaluation is replayed by hand.
+            await nudgeIfTrialEnding(license.state)
+            await presentFirstRunIfNeeded()
         }
     }
+
+    // MARK: First run
+
+    /// What the welcome buttons ask for: Settings › Sources with the add
+    /// sheet open on `kind` (nil = the default kind). Consumed by
+    /// `SourcesPane`; a fresh `id` per request so asking twice for the same
+    /// kind still fires.
+    struct AddSourceRequest: Equatable {
+        var kind: String?
+        var id = UUID()
+    }
+    var pendingAddSource: AddSourceRequest?
+    var requestedSettingsTab: SettingsTab?
+
+    func requestAddSource(kind: String?) {
+        requestedSettingsTab = .sources
+        pendingAddSource = AddSourceRequest(kind: kind)
+    }
+
+    /// Opens the panel once, on the very first launch of an install with no
+    /// source yet, so the welcome is seen. See `FirstRun`.
+    private func presentFirstRunIfNeeded() async {
+        // The test host is the app; a panel opening mid-test run is noise,
+        // and stamping the developer's own defaults from a test is worse.
+        guard !DiagnosticsRecorder.isRunningTests else { return }
+        let defaults = UserDefaults.standard
+        let launchedBefore = defaults.bool(forKey: FirstRun.hasLaunchedKey)
+        defaults.set(true, forKey: FirstRun.hasLaunchedKey)
+        let kinds =
+            ((try? container.mainContext.fetch(FetchDescriptor<SourceConfig>())) ?? [])
+            .map(\.kind)
+        guard FirstRun.shouldOpenPanelOnLaunch(
+            hasLaunchedBefore: launchedBefore,
+            needsFirstSource: FirstRun.needsFirstSource(kinds: kinds))
+        else { return }
+        // A beat after launch, so the status item exists to be clicked.
+        try? await Task.sleep(for: .seconds(1))
+        PanelToggler.toggle()
+    }
+
+    // MARK: Trial nudges
+
+    /// A system banner at three days and at one day left, once each.
+    ///
+    /// `prompting: false` on purpose: a timer must not spend the banner
+    /// permission prompt (the same rule Mail's Automation prompt follows), so
+    /// with banners never granted this stays silent and `LicenseNotice` in
+    /// the panel carries the countdown alone.
+    func nudgeIfTrialEnding(_ state: LicenseState) async {
+        guard Licensing.isEnforced, case .trialing(let daysLeft) = state else { return }
+        let defaults = UserDefaults.standard
+        let sent = Set(defaults.array(forKey: TrialNudge.sentKey) as? [Int] ?? [])
+        guard let threshold = TrialNudge.due(daysLeft: daysLeft, sent: sent) else { return }
+        defaults.set(
+            Array(TrialNudge.markSent(daysLeft: daysLeft, sent: sent)).sorted(),
+            forKey: TrialNudge.sentKey)
+        guard await resolveBannerAuthorization(prompting: false) else { return }
+        let content = UNMutableNotificationContent()
+        content.title = TrialNudge.title(daysLeft: daysLeft)
+        content.body = TrialNudge.body
+        content.userInfo = ["panel": true]
+        do {
+            try await UNUserNotificationCenter.current().add(
+                UNNotificationRequest(
+                    identifier: "license.nudge.\(threshold)", content: content,
+                    trigger: nil))
+        } catch {
+            Self.licenseLog.notice(
+                "trial nudge not delivered: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static let licenseLog = AppLog.logger(.license)
 
     private var notificationDelegate: NotificationDelegate?
 

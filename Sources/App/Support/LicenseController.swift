@@ -24,6 +24,9 @@ final class LicenseController {
     /// running out under a live app (a menu bar app runs for weeks, so
     /// launch-time checks alone would miss the transition by days).
     var onSyncPermissionChange: ((Bool) -> Void)?
+    /// Fired on every evaluation, changed or not — the trial nudges key off
+    /// the day count, which changes without `allowsSync` flipping.
+    var onStateEvaluated: ((LicenseState) -> Void)?
 
     /// Last four characters of the stored key, for the Settings state line.
     var keySuffix: String? {
@@ -99,6 +102,7 @@ final class LicenseController {
         guard forcedState == nil, Licensing.isEnforced else { return }
         let previous = state
         state = Self.derive()
+        onStateEvaluated?(state)
         guard state != previous else { return }
         Self.log.notice(
             "license state resolved: \(String(describing: self.state), privacy: .public)"

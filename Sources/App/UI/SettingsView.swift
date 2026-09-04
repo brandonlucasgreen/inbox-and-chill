@@ -11,25 +11,48 @@ import SwiftUI
 /// than in General — and Diagnostics is what broke, which belongs next to the
 /// sources whose failures it records rather than buried in About.
 struct SettingsView: View {
+    @Environment(AppState.self) private var appState
+    @State private var selection: SettingsTab = .general
+
     var body: some View {
-        TabView {
+        TabView(selection: $selection) {
             GeneralPane()
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
 
             NotificationsPane()
                 .tabItem { Label("Notifications", systemImage: "bell") }
+                .tag(SettingsTab.notifications)
 
             SourcesPane()
                 .tabItem { Label("Sources", systemImage: "tray.2") }
+                .tag(SettingsTab.sources)
 
             DiagnosticsPane()
                 .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+                .tag(SettingsTab.diagnostics)
 
             AboutPane()
                 .tabItem { Label("About", systemImage: "info.circle") }
+                .tag(SettingsTab.about)
         }
         .frame(width: 640, height: 480)
+        // The welcome buttons ask for a tab from outside this window; the
+        // request is consumed here so it cannot fire twice.
+        .onAppear { consumeTabRequest() }
+        .onChange(of: appState.requestedSettingsTab) { consumeTabRequest() }
     }
+
+    private func consumeTabRequest() {
+        guard let requested = appState.requestedSettingsTab else { return }
+        selection = requested
+        appState.requestedSettingsTab = nil
+    }
+}
+
+/// The five tabs, addressable so a button elsewhere can land on one.
+enum SettingsTab: Hashable, Sendable {
+    case general, notifications, sources, diagnostics, about
 }
 
 /// The app itself: how you summon it, whether it starts with the Mac, how it

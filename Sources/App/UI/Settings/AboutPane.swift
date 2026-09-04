@@ -49,7 +49,7 @@ struct AboutPane: View {
                     Link("socialsindy.com", destination: URL(string: "https://socialsindy.com")!)
                 }
                 LabeledContent("Found a bug, or want to say hi?") {
-                    Link("hi@bgreen.lol", destination: URL(string: "mailto:hi@bgreen.lol")!)
+                    Link(SupportContact.email, destination: SupportContact.mailtoURL!)
                 }
             }
 

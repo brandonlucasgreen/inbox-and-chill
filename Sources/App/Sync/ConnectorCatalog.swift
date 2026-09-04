@@ -49,6 +49,22 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
     /// provider is paste-a-token rather than OAuth (PLAN §6.9 verdicts).
     var authNote: String = ""
 
+    /// One line on what connecting this kind asks of the user, shown under
+    /// the kind picker *before* any field asks it. Nil derives it: a kind
+    /// with a secret field is "paste a token", one without is "nothing to
+    /// set up". Set it where the derivation would undersell the work —
+    /// Slack needs an app created first, and that is the one a first-time
+    /// buyer should not pick blind.
+    var setupCost: String? = nil
+
+    var setupCostLabel: String {
+        if let setupCost { return setupCost }
+        if fields.contains(where: \.isSecret) {
+            return "You'll paste a token from \(displayName)."
+        }
+        return "Nothing to set up — no account or token needed."
+    }
+
     /// How this kind's rows fold in the panel when auto-grouping is on, or
     /// nil when there is nothing to fold by (a Claude Code session is already
     /// one row; a custom JSON feed has no natural key). A kind with a
@@ -127,6 +143,7 @@ enum ConnectorCatalog {
             ],
             setupURL: "https://github.com/settings/tokens",
             authNote: "Why no “Sign in with GitHub”? GitHub's notifications API only accepts classic personal access tokens — it rejects OAuth app tokens and fine-grained PATs outright. The token is stored in your Keychain and never leaves this Mac.",
+            setupCost: "You'll paste a classic personal access token. An organization with SSO asks you to authorize it once.",
             grouping: .init(noun: "repository", defaultOn: true)),
         .init(
             id: "gitlab", displayName: "GitLab", systemImage: "triangle",
@@ -202,6 +219,7 @@ enum ConnectorCatalog {
             setupURL: "https://api.slack.com/apps",
             setupPayload: .init(label: "App Manifest", text: slackAppManifest),
             authNote: "Why paste tokens? Your workspace app's install page *is* Slack's OAuth flow — it ends by displaying the user token. A native app can't run Slack's OAuth itself: the token exchange requires your client secret (Slack has no PKCE public-client mode), and redirect URLs must be HTTPS, so there's no loopback to come back to. The app-level token never comes from OAuth at all.\n\nOnly the user token is required. Adding the app-level token turns on Socket Mode, which is the only supported way to receive channel mentions — Slack publishes no API for “messages that mention me”, so without it you get DM unreads, emoji saves and read-state auto-clear, but not mentions. Both tokens live in your Keychain and never leave this Mac.",
+            setupCost: "You'll create a Slack app from our manifest first — five steps, and your workspace admin may need to approve it.",
             grouping: .init(noun: "channel", defaultOn: true)),
         .init(
             id: "sentry", displayName: "Sentry", systemImage: "ladybug",
@@ -373,7 +391,8 @@ enum ConnectorCatalog {
                 "Point **Feed URL** at any URL returning a JSON array — or an object holding one, like Stripe's `{\"data\": […]}`.",
                 "In **Field Mapping**, name the keys your feed uses: `id=id,title=title,url=link,time=created_at`, plus `root=data` if the list is nested.",
                 "`id` and `title` are required; everything else is optional.",
-            ]),
+            ],
+            setupCost: "A URL that returns JSON, and a one-line field mapping."),
         .init(
             id: "ntfy", displayName: "ntfy", systemImage: "bell.badge",
             fields: [
@@ -405,6 +424,7 @@ enum ConnectorCatalog {
             ],
             setupURL: "https://ntfy.sh",
             authNote: "No OAuth needed, and none to skip: ntfy has no accounts on unprotected topics — publishing to a topic is the whole API. Priority 4–5 messages arrive as high-signal; `click` becomes the item's link.\n\nFor a protected topic, use either an access token or a username and password — whichever your server is set up for. A token wins if you fill in both, since it's the narrower credential and can be revoked without touching your account password. The token and password are stored in your Keychain and never leave this Mac.",
+            setupCost: "A topic name. A token or password only if the topic is protected.",
             grouping: .init(noun: "topic", defaultOn: true)),
         .init(
             id: "local", displayName: "Local coding agents", systemImage: "terminal",
@@ -413,7 +433,8 @@ enum ConnectorCatalog {
                 "Nothing to configure — this source only shows what something pushes to it.",
                 "From a script or terminal: `inchill notify --title \"Build finished\"`.",
                 "For Claude Code, turn on the hooks in Settings → General.",
-            ]),
+            ],
+            setupCost: "Built in — nothing to set up. Claude Code hooks install from this source's editor."),
     ]
 
     /// The Slack app manifest, offered as a Copy button in the source

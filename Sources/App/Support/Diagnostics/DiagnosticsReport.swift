@@ -180,6 +180,22 @@ enum DiagnosticsReport {
         return components?.url
     }
 
+    /// A support e-mail with the subject filled in. The report itself is
+    /// **not** in the body: `mailto:` bodies past a few kilobytes are
+    /// truncated or refused by mail clients, so the caller copies the report
+    /// to the clipboard and the body says where it is.
+    nonisolated static func supportMailURL(_ snapshot: DiagnosticsSnapshot) -> URL? {
+        var components = URLComponents(string: "mailto:\(SupportContact.email)")
+        components?.queryItems = [
+            URLQueryItem(name: "subject", value: "Inbox & Chill — " + issueTitle(snapshot)),
+            URLQueryItem(name: "body", value: supportMailBody),
+        ]
+        return components?.url
+    }
+
+    nonisolated static let supportMailBody =
+        "The diagnostics report is on your clipboard — paste it below this line, and add what you were doing when it happened.\n\n"
+
     /// Default file name for Export Diagnostics…
     nonisolated static func fileName(_ snapshot: DiagnosticsSnapshot) -> String {
         let formatter = DateFormatter()

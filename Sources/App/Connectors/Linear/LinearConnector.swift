@@ -411,9 +411,13 @@ actor LinearConnector: Connector {
         )
     }
 
-    /// How much comment body a row carries. Matched to `SlackConnector`'s
-    /// cap so an opened row is the same size whatever it came from.
-    static let snippetLimit = 320
+    /// How much comment body a row carries. Matched to `SlackText`'s cap so
+    /// `D` reaches the end of a Linear comment the way it reaches the end of
+    /// a Slack message — at 320 it stopped at an ellipsis nothing could open
+    /// (CLAUDE.md recorded that as a known gap until 2026-09-04). Affordable
+    /// because `ExpandingText.clampedPrefix` lays out only the visible lines
+    /// for every row but the selected one.
+    static let snippetLimit = 4_000
 
     /// The row's body text, flattened into a paragraph.
     ///
