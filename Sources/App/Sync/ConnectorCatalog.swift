@@ -131,6 +131,26 @@ enum ConnectorCatalog {
             authNote: "GitLab's To-Do list *is* this queue: assigned work, mentions, approvals you owe, and pipelines that broke. Marking one done here marks it done in GitLab, so it stops arriving.\n\nWhy paste a token? GitLab's OAuth is built for applications you register and host; a personal access token is its own sanctioned path for acting as yourself. It is stored in your Keychain and never leaves this Mac.",
             grouping: .init(noun: "project", defaultOn: true)),
         .init(
+            id: "trello", displayName: "Trello", systemImage: "rectangle.split.3x1",
+            fields: [
+                .init(
+                    key: "apiKey", label: "API Key", isSecret: false,
+                    placeholder: "0123456789abcdef…",
+                    help: "Trello treats this one as public — it is the token below that grants access."),
+                .init(
+                    key: "token", label: "Token", isSecret: true,
+                    help: "Grants full access to your Trello account, so it is kept in your Keychain."),
+            ],
+            setupSteps: [
+                "Open **trello.com/apps/admin** and create a Power-Up — Trello now issues keys through one, even for personal use.",
+                "In your Power-Up, open the **API Key** tab and generate a key.",
+                "Beside it, click **Token**, allow the access it lists, and copy the token from the page it lands on.",
+                "Paste both below.",
+            ],
+            setupURL: "https://trello.com/apps/admin",
+            authNote: "Trello's notification feed is a real inbox: mentions, cards you are added to, due dates, board invites. Marking a row done here marks it read in Trello, so it stops arriving.\n\nWhy two values? Trello's API pairs a public key with a personal token, and it has no OAuth flow a native app can complete on its own — the Token link *is* the flow, and it ends by showing you the token. Only the token is a secret, and it never leaves this Mac.",
+            grouping: .init(noun: "board", defaultOn: true)),
+        .init(
             id: "slack", displayName: "Slack", systemImage: "number",
             fields: [
                 .init(

@@ -369,6 +369,7 @@ the connector 5s later. Two failures have come from this:
 | `linear` | GraphQL poll 30s | markDone, remoteSnooze, remoteTruth | Per-type inline fragments; `DocumentNotification` has no `document` relation (resolved by a second `documents(filter:)` pass). `Notification.subtitle` is the comment **body**, not a name. |
 | `github` | REST poll | markDone, remoteTruth | Classic PAT only (OAuth tokens rejected). Paginates; `participating=true` by default. |
 | `gitlab` | REST poll 60s | markDone, remoteTruth | **GitLab's To-Do list *is* the queue** (`GET /todos`, `POST /todos/:id/mark_as_done`) — a Linear-class inbox mirror. `api` scope, not `read_api`, or `E` 403s. **Written with no live account** (2026-09-04); the fixtures are GitLab's own documented payloads. See below. |
+| `trello` | REST poll 60s | markDone, remoteTruth | Per-user notification feed (`GET /members/me/notifications?read_filter=unread`, `PUT /notifications/{id}?unread=false`). **Key and token ride in the QUERY STRING**, so no error or log line may ever carry a request URL. Errors are **plain text**, not JSON. Built with no live account. |
 | `slack` | Socket Mode + poll | markDone, remoteTruth, push | User token `xoxp-` required; app-level `xapp-` optional (adds channel mentions). Keyword Watch polls `search.messages` — the only way to see a channel you're not in. Mute Channels drops keyword hits *and* real mentions from named channels (never DMs or emoji saves). |
 | `ntfy` | WebSocket | push | No remote read-state; items die by explicit done. `since=<id>` is exclusive-after. |
 | `jsonPoller` | HTTP poll 120s | remoteTruth | Generic: any URL returning a JSON array, fields mapped via a user-supplied `id=id,title=title,...` string. **`root=data` (or a dotted `root=result.items`) reaches a nested list** — added 2026-09-04 because a survey of nine candidate APIs found none that used the bare array or `items`: Stripe nests under `data`, PagerDuty `incidents`, Jira `issues`, Vercel `deployments`. Every shape failure names the keys the feed really sent. Optional bearer auth header from the Keychain. |
@@ -407,6 +408,32 @@ red dot on the source for obeying twice), and **`build_failed`, `unmergeable`
 and `merge_train_removed` are *not* high-signal** — a machine raised them
 about your own branch, which is the line `GitHubConnector` draws by excluding
 `ci_activity`.
+
+### Trello, and two facts a probe found without an account
+
+`GET /1/members/me/notifications?read_filter=unread` is a genuine inbox with
+two-way read state, so `trello` is `[.markDone, .remoteTruth]` and folds by
+board. Both facts below came from `curl`-ing the real endpoint with junk
+credentials — which needs no account and is the cheapest verification
+available for a source nobody can log into:
+
+- **Trello's errors are plain text.** A bad key is `401 invalid key`; absent
+  credentials are `400 invalid token`. A JSON decoder would throw on the
+  error path — the one path you cannot watch. `explain` reads the body and
+  names *which* of the two values is wrong, which matters because this is
+  the only source that asks for two.
+- **Both credentials travel in the query string** (the spec's own security
+  scheme is `apiKey` in `query`). Failure sentences reach `ProblemLog` on
+  disk, so **no message here may interpolate a request URL** — there is a
+  test that asserts none of them do.
+
+Also deliberate: Trello's API key is stored **unsecret**, in the source's
+settings rather than the Keychain, because Trello's own docs say the key "is
+intended to be publicly accessible" and only the token grants access. And
+`commentCard` is **not** high-signal while `cardDueSoon` is — the first is
+the line `GitHubConnector` draws by excluding `comment`, the second is a
+commitment of yours coming due, which is the call Brandon made for overdue
+reminders.
 
 ### A to-do is not a notification (`reminders`, `todoist`)
 

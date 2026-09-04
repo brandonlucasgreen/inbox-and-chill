@@ -100,6 +100,33 @@ machine raised them about your own branch.
 **Not tested against a live account.** It was written against GitLab's
 published payloads, so treat the first hour with it as the real test.
 
+## Trello
+
+Trello's notification feed is a real inbox — mentions, cards you get added
+to, due dates, board invites — and marking a row done here marks it read in
+Trello, so it stops arriving. Rows fold by board.
+
+Setup asks for two values, and Trello's route to them is roundabout:
+
+1. Open **trello.com/apps/admin** and create a Power-Up. Trello issues API
+   keys through one now, even for personal use.
+2. In that Power-Up, open the **API Key** tab and generate a key.
+3. Beside the key, click **Token**, allow the access it lists, and copy the
+   token from the page you land on.
+4. Paste both into the source.
+
+Only the token is a secret — Trello's own documentation calls the key public —
+so the token goes to your Keychain and the key is stored with the source's
+other settings. If either is wrong, the source says which one: Trello
+distinguishes an invalid key from an invalid token, and the app passes that
+straight through.
+
+Comments on cards arrive quiet; mentions, assignments and due dates arrive
+high-signal.
+
+**Not tested against a live account.** Written against Trello's published
+spec, so treat your first hour with it as the real test.
+
 ## Custom JSON feed
 
 **Fields:** Feed URL, Authorization Header (optional), Field Mapping
