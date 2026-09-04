@@ -93,6 +93,7 @@ struct SourcesPane: View {
 
     private func delete(_ source: SourceConfig) {
         let sourceID = source.id
+        let label = source.displayName
         // The local source is built-in and recreated by bootstrapConnectors()
         // whenever none exists — record that this deletion was deliberate so
         // it doesn't come straight back.
@@ -105,7 +106,10 @@ struct SourcesPane: View {
         modelContext.delete(source)
         try? modelContext.save()
         Task {
+            // Stop the poll first, so nothing can re-insert rows after
+            // they are cleared; then clear them; then rebuild the rest.
             await appState.engine.unregister(sourceID: sourceID)
+            await appState.forgetItems(sourceID: sourceID, sourceLabel: label)
             await appState.bootstrapConnectors()
         }
     }

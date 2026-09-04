@@ -487,6 +487,25 @@ actor Store {
         return victims.count
     }
 
+    // MARK: Removing a source
+
+    /// Deletes every row a source ever produced — active, snoozed, done and
+    /// pinned alike — in one save. Returns how many went.
+    ///
+    /// Called when the user removes the source itself. Until 2026-09-04
+    /// nothing did this, so removing Reminders left every reminder row in
+    /// the queue with no connector behind it, to be archived by hand one at a
+    /// time (Brandon: *"the notifications inbox should purge all
+    /// notifications from that source"*). Pinned rows go too: a pin says
+    /// "keep this in front of me", and there is nothing left to open.
+    func deleteItems(sourceID: String) throws -> Int {
+        let victims = try items(sourceID: sourceID)
+        guard !victims.isEmpty else { return 0 }
+        for item in victims { modelContext.delete(item) }
+        try modelContext.save()
+        return victims.count
+    }
+
     // MARK: Counts (for the badge)
 
     /// What the menu bar badge says is waiting.
