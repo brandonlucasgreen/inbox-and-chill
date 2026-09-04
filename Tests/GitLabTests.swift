@@ -170,6 +170,29 @@ struct GitLabTests {
         #expect(GitLabConnector.humanize(action: "some_new_thing") == "Some new thing")
     }
 
+    // MARK: Pagination
+
+    /// `X-Next-Page` is authoritative when present. The first build stopped
+    /// on any short page even when the header said there was more, which
+    /// would have reported a truncated snapshot as complete and let
+    /// `.remoteTruth` archive everything past the cut — the GitHub
+    /// resurrect-loop bug in a new coat.
+    @Test("X-Next-Page decides; the page count is only a fallback")
+    func nextPageTrustsTheHeader() {
+        let full = GitLabConnector.perPage
+        // Header says more, page is short: keep going.
+        #expect(GitLabConnector.nextPage(header: "2", current: 1, count: 3) == 2)
+        // Header empty (GitLab's last page), page is full: stop.
+        #expect(GitLabConnector.nextPage(header: "", current: 1, count: full) == nil)
+        // Header points backwards or at itself: stop rather than loop.
+        #expect(GitLabConnector.nextPage(header: "1", current: 1, count: full) == nil)
+        // No header at all: a full page means probably more, a short one done.
+        #expect(GitLabConnector.nextPage(header: nil, current: 4, count: full) == 5)
+        #expect(GitLabConnector.nextPage(header: nil, current: 4, count: full - 1) == nil)
+        // Garbage in the header falls back to the count.
+        #expect(GitLabConnector.nextPage(header: "soon", current: 2, count: full) == 3)
+    }
+
     // MARK: Host
 
     @Test("Blank means gitlab.com; a self-managed URL is kept")

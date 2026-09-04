@@ -100,20 +100,47 @@ actor GitLabConnector: Connector {
 
         var collected: [RemoteItem] = []
         var complete = true
+        var page = 1
+        var fetched = 0
 
-        for page in 1...Self.maxPages {
+        while true {
             let (todos, nextPage) = try await fetchPage(
                 page: page, token: token, baseURL: baseURL)
             collected.append(contentsOf: todos.map(Self.item(from:)))
-            // GitLab sends `X-Next-Page`, empty on the last page. A short
-            // page is the fallback for an instance that omits the header.
-            guard let nextPage, nextPage > page, todos.count >= Self.perPage
-            else { break }
-            if page == Self.maxPages { complete = false }
+            fetched += 1
+            // `X-Next-Page` decides (see `nextPage(header:current:count:)`).
+            // A short page is *not* a stop signal on its own: stopping on one
+            // while GitLab says there is more would hand `.remoteTruth` a
+            // truncated list reported as complete, and archive the tail.
+            guard let nextPage else { break }
+            if fetched >= Self.maxPages {
+                complete = false
+                break
+            }
+            page = nextPage
         }
 
         snapshotComplete = complete
         return collected
+    }
+
+    /// Which page to ask for next, or nil when this was the last.
+    ///
+    /// GitLab sends `X-Next-Page` on every response and leaves it **empty on
+    /// the last page**, so when the header is present it is the answer. The
+    /// page count is only a fallback for an instance (or a proxy) that drops
+    /// the header: a full page then means "probably more", a short one "done".
+    /// A header that names a page at or before the current one is treated as
+    /// the end rather than trusted into a loop.
+    nonisolated static func nextPage(
+        header: String?, current: Int, count: Int
+    ) -> Int? {
+        if let header {
+            let trimmed = header.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { return nil }
+            if let named = Int(trimmed) { return named > current ? named : nil }
+        }
+        return count >= perPage ? current + 1 : nil
     }
 
     func snapshotWasComplete() async -> Bool { snapshotComplete }
@@ -150,9 +177,10 @@ actor GitLabConnector: Connector {
                     status: http.statusCode, body: data, writing: false))
         }
         let todos = try JSONDecoder().decode([Todo].self, from: data)
-        let next = http.value(forHTTPHeaderField: "X-Next-Page")
-            .flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-        return (todos, next ?? (todos.count >= Self.perPage ? page + 1 : nil))
+        let next = Self.nextPage(
+            header: http.value(forHTTPHeaderField: "X-Next-Page"),
+            current: page, count: todos.count)
+        return (todos, next)
     }
 
     // MARK: Write-back
@@ -369,7 +397,7 @@ actor GitLabConnector: Connector {
         switch status {
         case 401:
             return
-                "GitLab rejected the token (401) while \(action). GitLab answers the same way whether a token is missing, wrong, or **expired** — and GitLab tokens expire, a year out by default — so check the expiry date on it as well as the value."
+                "GitLab rejected the token (401) while \(action). GitLab answers the same way whether a token is missing, wrong, or expired — and GitLab tokens expire, a year out by default — so check the expiry date on it as well as the value."
         case 403:
             return writing
                 ? "GitLab refused to mark the to-do done (403). A token with only the `read_api` scope can read this queue but not clear it; create one with the `api` scope."
