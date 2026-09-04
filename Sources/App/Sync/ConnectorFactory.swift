@@ -72,6 +72,17 @@ enum ConnectorFactory {
                     includesDueWindow: todoistToggle("dueToday"),
                     listNames: TodoScope.parseListNames(settings["projects"] ?? ""),
                     listsIncludeUndated: todoistToggle("projectsIncludeUndated")))
+        case "asana":
+            let fields = ConnectorCatalog.descriptor(for: "asana")?.fields ?? []
+            func asanaToggle(_ key: String) -> Bool {
+                fields.first { $0.key == key }?.boolValue(in: settings) ?? false
+            }
+            return AsanaConnector(
+                sourceID: config.id,
+                scope: .init(
+                    includesDueWindow: asanaToggle("dueToday"),
+                    listNames: TodoScope.parseListNames(settings["projects"] ?? ""),
+                    listsIncludeUndated: asanaToggle("projectsIncludeUndated")))
         case "slack":
             return SlackConnector(
                 sourceID: config.id,

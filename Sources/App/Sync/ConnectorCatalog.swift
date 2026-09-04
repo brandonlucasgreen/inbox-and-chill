@@ -323,6 +323,40 @@ enum ConnectorCatalog {
                 button: "Complete task", menu: "Complete Task",
                 help: "Complete it in Todoist (C)")),
         .init(
+            id: "asana", displayName: "Asana", systemImage: "circle.hexagongrid",
+            fields: [
+                .init(
+                    key: "token", label: "Personal Access Token", isSecret: true,
+                    placeholder: "2/1234567890/…",
+                    help: "From Asana's developer console."),
+                .init(
+                    key: "dueToday", label: "Due today or overdue", isSecret: false,
+                    help: "Tasks assigned to you that you're late on, plus anything due before midnight. Undated tasks are never included.",
+                    isToggle: true, defaultOn: true),
+                .init(
+                    key: "projects", label: "Projects", isSecret: false,
+                    help: "Everything open in the projects you tick — whoever it's assigned to, because Asana's API can't narrow a project to you."),
+                .init(
+                    key: "projectsIncludeUndated",
+                    label: "Include undated tasks from those projects",
+                    isSecret: false,
+                    help: "Off by default — a shared project's undated backlog is usually long enough to bury your other sources.",
+                    isToggle: true, defaultOn: false),
+            ],
+            setupSteps: [
+                "Open Asana's **developer console** and, under Personal access tokens, create one.",
+                "Copy the token — Asana shows it once.",
+                "Paste it below, then pick what this source should watch.",
+            ],
+            setupURL: "https://app.asana.com/0/developer-console",
+            // Two facts, each once: why a token rather than a sign-in
+            // button, and the one thing Asana's API cannot see.
+            authNote: "Asana's OAuth is for apps that act for many users — it wants a registered client and a redirect URL — so a personal access token is its own sanctioned path for your own account. The token is stored in your Keychain and never leaves this Mac.\n\nAsana's Inbox is not in its API, so this source is the tasks assigned to you, not your notifications.",
+            grouping: .init(noun: "project", defaultOn: false),
+            completeVerb: .init(
+                button: "Complete task", menu: "Complete Task",
+                help: "Complete it in Asana (C)")),
+        .init(
             id: "jsonPoller", displayName: "Custom JSON Feed", systemImage: "curlybraces",
             fields: [
                 .init(

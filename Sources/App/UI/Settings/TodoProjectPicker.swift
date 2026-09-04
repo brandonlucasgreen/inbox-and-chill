@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// Which Todoist projects to pull in, as checkboxes over the account's real
-/// project names — the network counterpart of `RemindersListPicker`.
+/// Which projects a network to-do source (Todoist, Asana) pulls in, as
+/// checkboxes over the account's real project names — the network
+/// counterpart of `RemindersListPicker`. One view for both providers: the
+/// only things that differ are the provider's name in the copy and the call
+/// that lists its projects, so those are the two parameters.
 ///
-/// **It is also the only place a Todoist token gets checked before it is
+/// **It is also the only place the token gets checked before it is
 /// used.** That is deliberate, and it is the rule-5 half of this source: a
 /// wrong or expired token produces a source that returns nothing, which for a
 /// to-do list is indistinguishable from having nothing due. Loading the
@@ -14,13 +17,18 @@ import SwiftUI
 /// The token is read from what the user has just typed, falling back to the
 /// Keychain — in edit mode the secret field renders blank on purpose, so
 /// "blank" means "keep the saved one" here exactly as it does on save.
-struct TodoistProjectPicker: View {
+struct TodoProjectPicker: View {
     /// The comma-separated `projects` setting, edited in place.
     @Binding var value: String
     /// What is currently typed into the token field, which may be nothing.
     var typedToken: String
     /// nil while adding a source that has never been saved.
     var sourceID: String?
+    /// "Todoist" or "Asana", for the three sentences that name it.
+    var providerName: String
+    /// Lists the account's project names — the connector's own static call,
+    /// so a token that works here works in the poll.
+    var loadProjects: @Sendable (String) async throws -> [String]
 
     @State private var state: LoadState = .idle
 
@@ -50,7 +58,7 @@ struct TodoistProjectPicker: View {
             switch state {
             case .idle:
                 if token.isEmpty {
-                    Text("Paste your API token above to choose projects.")
+                    Text("Paste your token above to choose projects.")
                         .foregroundStyle(.secondary)
                 } else {
                     Button("Load Projects") { loadNow() }
@@ -61,7 +69,7 @@ struct TodoistProjectPicker: View {
                 // this project uses for visual checks draws ProgressView as a
                 // prohibition sign, and "loading" reading as "forbidden" is a
                 // bad half-second.
-                Label("Asking Todoist…", systemImage: "hourglass")
+                Label("Asking \(providerName)…", systemImage: "hourglass")
                     .foregroundStyle(.secondary)
 
             case .loaded(let names):
@@ -95,7 +103,7 @@ struct TodoistProjectPicker: View {
         // screen. The work happens *inside* the task rather than in a detached
         // one so SwiftUI's own cancellation debounces it: a token arrives one
         // character at a time when typed, and a request per keystroke is a
-        // good way to meet Todoist's rate limiter on your first try.
+        // good way to meet the provider's rate limiter on your first try.
         .task(id: token) { await reload() }
     }
 
@@ -115,7 +123,7 @@ struct TodoistProjectPicker: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle")
                     Text(
-                        "“\(name)” isn't a project in Todoist any more. Untick it, or rename the project back."
+                        "“\(name)” isn't a project in \(providerName) any more. Untick it, or rename the project back."
                     )
                     .fixedSize(horizontal: false, vertical: true)
                     Button("Remove") { toggle(name, on: false) }
@@ -155,14 +163,14 @@ struct TodoistProjectPicker: View {
     private func load(token: String) async {
         state = .loading
         do {
-            let projects = try await TodoistConnector.projects(token: token)
+            let names = try await loadProjects(token)
             guard !Task.isCancelled else { return }
-            state = .loaded(projects.map(\.name))
+            state = .loaded(names)
         } catch {
             guard !Task.isCancelled else { return }
-            // `TodoistError` already says what to do about each status — 401
-            // names where to re-copy the token — so this passes the connector's
-            // own wording through rather than inventing a second, vaguer one.
+            // The connector's error already says what to do about each
+            // status — 401 names where to re-copy the token — so this passes
+            // its wording through rather than inventing a second, vaguer one.
             state = .failed(String(describing: error))
         }
     }

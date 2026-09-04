@@ -384,6 +384,7 @@ the connector 5s later. Two failures have come from this:
 | `appleMail` | AppleScript poll 60s | markDone, remoteTruth | **Covers Gmail** — it reads every account Mail has, which is why there is no Gmail connector (PLAN §6.13). Flagged-only by default. See below. |
 | `reminders` | EventKit poll 60s | **completesTask**, remoteTruth, providesContext | Apple Reminders. Declares `completesTask` and deliberately **not** `markDone` — that omission is the dismiss-vs-complete feature. No entitlement needed; 7.8ms cold, so no Mail-style cold penalty. See below. |
 | `todoist` | REST poll 120s | **completesTask**, remoteTruth, providesContext | Todoist, via a personal API token. Same to-do semantics as `reminders` — `E` dismisses locally, `C` closes in Todoist. **API v1 only** (`api.todoist.com/api/v1`); REST v2 and Sync v9 are gone. Undo is honestly lossy on a repeating task. See below. |
+| `asana` | REST poll 120s | **completesTask**, remoteTruth, providesContext | Asana, via a personal access token. **A to-do source because Asana's Inbox is not in its API** (no notifications endpoint in its OpenAPI, 2026-09-04): the queue is tasks assigned to you, one request per workspace. No priority and no recurrence on the wire, so the external id is the bare gid and undo is *not* lossy. A chosen project is **everyone's** open tasks in it — the spec allows `project` or `assignee`+`workspace`, never both. Built with no live account. See below. |
 
 ### GitLab, and the first connector built without an account
 
@@ -451,7 +452,7 @@ the line `GitHubConnector` draws by excluding `comment`, the second is a
 commitment of yours coming due, which is the call Brandon made for overdue
 reminders.
 
-### A to-do is not a notification (`reminders`, `todoist`)
+### A to-do is not a notification (`reminders`, `todoist`, `asana`)
 
 Three things here were arrived at by measuring EventKit, and two of them are
 the opposite of what the rest of this file would lead you to expect. Full
@@ -545,6 +546,41 @@ rejected-token path.
 - The project picker in the source editor is **also the token check**, on
   purpose: a bad token otherwise produces a source that looks like a free
   afternoon. There is no second "Check Connection" control saying it again.
+
+#### Asana — the third provider, and what it has less of (2026-09-04)
+
+Built without an account, like GitLab and Trello; the only live facts are
+that a missing and a wrong token both answer **401 with
+`{"errors":[{"message":"Not Authorized"}]}`** — so the 401 sentence names
+"missing, mistyped or revoked" rather than guessing. Everything else is from
+`Asana/openapi`. **The seam held again:** `AsanaAPI` + `AsanaConnector` were
+added and none of the four shared files changed. The one UI change was
+generalising `TodoistProjectPicker` into `TodoProjectPicker` (provider name
++ loader closure), so a fourth provider needs a `case` in
+`SourceEditorSheet.projectPicker(for:)` and nothing else.
+
+Four things it deliberately does not have, each because Asana's API does not:
+
+- **No `/notifications`.** Asana's Inbox is not exposed, so this is an
+  assigned-to-me mirror, not an inbox mirror. The `authNote` says so once.
+- **No priority.** Asana does priority through per-workspace custom fields,
+  so every task is `.none` and only *overdue* raises the high-signal badge.
+- **No recurrence.** Asana repeats a task by spawning a *new* task when the
+  current one completes, so `isRecurring` is always false, the queue id is
+  the bare gid, and **`uncomplete` really reopens the same task** — the
+  opposite of Todoist's lossy undo. It cannot remove the next occurrence
+  Asana spawned, and that arrives as its own row.
+- **No `assignee` on a project query.** `GET /tasks` takes `project` *or*
+  `assignee`+`workspace`, never both, so ticking a shared project pulls
+  everyone's open tasks in it. The field help says so; do not "fix" it by
+  filtering locally on assignee without checking the spec first.
+
+Two shapes worth keeping: `due_at` (UTC instant, timed) and `due_on`
+(`YYYY-MM-DD`, all-day) are **two fields**, and `due_at` present is the
+timed discriminator; `next_page` is `null` on the last page and is the only
+end-of-list signal (a free `snapshotWasComplete()`, like Todoist's cursor).
+The token rides in a header, and `send` still rewraps transport errors — the
+Trello lesson applied before it can bite.
 
 ### One queue row per Claude Code session, not per turn
 
