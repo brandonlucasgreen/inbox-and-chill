@@ -113,7 +113,9 @@ actor NtfyConnector: Connector {
             // source can subscribe to several — so it earns the actor slot.
             actorName: frame.topic?.nonEmptyOrNil,
             occurredAt: frame.time.map { Date(timeIntervalSince1970: $0) } ?? .now,
-            highSignal: priority >= 4)
+            highSignal: priority >= 4,
+            groupKey: frame.topic?.nonEmptyOrNil,
+            groupLabel: frame.topic?.nonEmptyOrNil)
     }
 
     /// Where a click on this row should go, most explicit source first.

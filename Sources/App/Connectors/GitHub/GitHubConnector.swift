@@ -216,7 +216,12 @@ actor GitHubConnector: Connector {
             payload: try? JSONEncoder().encode(StoredSubject(
                 subjectURL: thread.subject.url,
                 commentURL: thread.subject.latest_comment_url,
-                reason: thread.reason)))
+                reason: thread.reason)),
+            // GitHub already folds a thread to one notification, so the
+            // repository is the only fold left — and 458 rows in 30 days
+            // were 11 repositories.
+            groupKey: thread.repository.full_name,
+            groupLabel: thread.repository.full_name)
     }
 
     // MARK: Context (D expansion)

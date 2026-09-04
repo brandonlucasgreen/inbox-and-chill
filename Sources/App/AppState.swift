@@ -562,8 +562,10 @@ final class AppState {
             return
         }
         let counted = countedSourceIDs()
+        let grouping = groupingSourceIDs()
         let counts =
-            (try? await store.badgeCounts(countedSourceIDs: counted))
+            (try? await store.badgeCounts(
+                countedSourceIDs: counted, groupingSourceIDs: grouping))
             ?? (0, 0)
         badgeText = badge.text(total: counts.0, highSignal: counts.1)
     }
@@ -1248,6 +1250,15 @@ final class AppState {
             ids.insert("fake-1")
         #endif
         return ids
+    }
+
+    /// Sources whose rows fold in the panel — the badge counts a fold as one,
+    /// so it has to fold the same rows the queue does.
+    private func groupingSourceIDs() -> Set<String> {
+        let configs =
+            (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
+            ?? []
+        return Set(configs.filter(\.groupsAutomatically).map(\.id))
     }
 }
 

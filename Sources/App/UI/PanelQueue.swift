@@ -14,8 +14,18 @@ enum QueueRowID {
 }
 
 /// One rendered topic: the header row plus everything filed under it.
+///
+/// Also the shape of an **auto-grouping fold** (`kind == .fold`): rows from
+/// one source sharing a `groupKey`, computed by `PanelQueue` and never
+/// written to the store. Making a fold a `TopicGroup` rather than a second
+/// type is what lets `D`, `E`, `S`, `U`, `C`, `⌘P`, `↑`/`↓` and the header's
+/// hover actions work on it with no new code paths — the panel routes every
+/// one of them through `selectedTopic`.
 struct TopicGroup: Identifiable {
+    enum Kind { case topic, fold }
+
     var id: String
+    var kind: Kind = .topic
     var name: String
     /// Every member still in the queue, newest first — including snoozed
     /// ones, which are only ever visible once the topic is expanded and
@@ -34,6 +44,32 @@ struct TopicGroup: Identifiable {
     var isSeen: Bool { members.allSatisfy(\.isSeen) }
     var newest: Date { members.map(\.occurredAt).max() ?? .distantPast }
     var memberUIDs: [String] { members.map(\.uid) }
+
+    var isFold: Bool { kind == .fold }
+    /// What is newest inside — a fold header's second line. `#deploys` says
+    /// where; this says what.
+    var preview: String? {
+        members.max { $0.occurredAt < $1.occurredAt }?.title
+    }
+
+    /// A fold's id: namespaced so it can never collide with a topic's UUID,
+    /// and carrying what it is made of so `PanelView.rowBelongs` can answer
+    /// "is this row inside the open fold" from the item alone.
+    static func foldID(sourceID: String, key: String) -> String {
+        "fold:\(sourceID):\(key)"
+    }
+
+    /// Source ids are UUIDs (no colon), keys may contain colons
+    /// (`issue:EPD-1873`), so the split is at the first colon after the prefix.
+    static func foldParts(_ id: String) -> (sourceID: String, key: String)? {
+        guard id.hasPrefix("fold:") else { return nil }
+        let rest = id.dropFirst(5)
+        guard let colon = rest.firstIndex(of: ":") else { return nil }
+        let sourceID = String(rest[..<colon])
+        let key = String(rest[rest.index(after: colon)...])
+        guard !sourceID.isEmpty, !key.isEmpty else { return nil }
+        return (sourceID, key)
+    }
 }
 
 /// Everything the panel draws, derived once.
@@ -61,13 +97,13 @@ struct TopicGroup: Identifiable {
 /// Snoozed, anything else puts it in Topics between the two. So pinning a
 /// topic moves the topic rather than scattering four rows into Pinned.
 ///
-/// Two things dissolve a topic back into ordinary rows:
-///
-/// - **A source filter.** Scoping to Slack means "show me Slack", so the
-///   Slack member appears as a plain row under SLACK.
-/// - **Falling below `TopicPolicy.minimumVisibleMembers`.** A disclosure
-///   triangle over one item is a lie, and remote-truth archiving erodes
-///   topics to one member routinely.
+/// One thing dissolves a topic back into ordinary rows: **a source filter.**
+/// Scoping to Slack means "show me Slack", so the Slack member appears as a
+/// plain row under SLACK. A topic with a single member is still a header —
+/// changed 2026-09-03 (Brandon: *"make manual topics always show as a
+/// header … it makes it so that you can start a topic in anticipation of more
+/// notifications"*). The two-member threshold now applies to folds only,
+/// which nobody made on purpose.
 struct PanelQueue {
     let index: SourceIndex
     let pinned: [Item]
@@ -99,10 +135,13 @@ struct PanelQueue {
     ///   - openTopicID: which topic is showing its members. Part of the
     ///     layout rather than of the view, because it changes the keyboard
     ///     traversal order — arrowing down has to walk into an open topic.
+    ///   - groupingSourceIDs: sources whose rows fold by `groupKey`
+    ///     (`SourceConfig.groupsAutomatically`). Computed once by the caller
+    ///     so the fold stays a pure function of items and a set.
     init(
         queued: [Item], configs: [SourceConfig], allTopics: [Topic] = [],
         sourceFilter: String?, filterText: String, showSnoozed: Bool,
-        openTopicID: String? = nil
+        openTopicID: String? = nil, groupingSourceIDs: Set<String> = []
     ) {
         let index = SourceIndex(configs: configs, items: queued)
         self.index = index
@@ -135,11 +174,9 @@ struct PanelQueue {
                 }
                 membersByTopic[id, default: []].append(item)
             }
-            // Below the threshold a topic is not a topic; its member goes
-            // back to being an ordinary row.
-            membersByTopic = membersByTopic.filter {
-                $0.value.count >= TopicPolicy.minimumVisibleMembers
-            }
+            // No minimum: a topic you made by hand is a header from its
+            // first member, so it can be started ahead of the notifications
+            // it is meant to catch. (Folds have a minimum; see `folded`.)
         }
         let groupedUIDs = Set(membersByTopic.values.flatMap { $0 }.map(\.uid))
 
@@ -167,7 +204,11 @@ struct PanelQueue {
             guard let items = bySource[source.id], !items.isEmpty else {
                 return nil
             }
-            return SourceGroup(source: source, items: items)
+            guard groupingSourceIDs.contains(source.id) else {
+                return SourceGroup(source: source, items: items)
+            }
+            let (loose, folds) = Self.folded(items, source: source)
+            return SourceGroup(source: source, items: loose, folds: folds)
         }
 
         topicOf = scoped.reduce(into: [:]) { map, item in
@@ -184,15 +225,61 @@ struct PanelQueue {
         }
         visibleUIDs =
             pinned.map(\.uid) + rows(pinnedTopics) + rows(topics)
-            + groups.flatMap { $0.items.map(\.uid) }
+            + groups.flatMap { group in
+                group.rows.flatMap { row -> [String] in
+                    switch row {
+                    case .item(let item): return [item.uid]
+                    case .fold(let fold): return rows([fold])
+                    }
+                }
+            }
             + (showSnoozed ? snoozed.map(\.uid) + rows(snoozedTopics) : [])
     }
 
-    /// Every topic on screen, wherever it was placed. Used to answer "is this
-    /// row id a topic, and which one" without three lookups.
+    /// Every topic or fold on screen, wherever it was placed. Used to answer
+    /// "is this row id a header, and of what" without four lookups.
     func topic(rowID: String) -> TopicGroup? {
         guard let id = QueueRowID.topicID(from: rowID) else { return nil }
-        return (pinnedTopics + topics + snoozedTopics).first { $0.id == id }
+        return (pinnedTopics + topics + snoozedTopics + groups.flatMap(\.folds))
+            .first { $0.id == id }
+    }
+
+    /// Folds one source's active rows by `groupKey`.
+    ///
+    /// A row already filed in a topic is left alone — explicit beats rule,
+    /// and that one comparison is the whole invariant. A key with a single
+    /// row stays a plain row (`TopicPolicy.minimumVisibleMembers`), drawn
+    /// with no chip: "In a topic" means *you filed this*, and nothing here
+    /// was. The header takes the newest member's label, so a renamed channel
+    /// reads by its new name as soon as one message arrives under it.
+    static func folded(
+        _ items: [Item], source: SourceDisplay
+    ) -> (loose: [Item], folds: [TopicGroup]) {
+        var byKey: [String: [Item]] = [:]
+        var order: [String] = []
+        for item in items {
+            guard item.topicID == nil, let key = item.groupKey, !key.isEmpty
+            else { continue }
+            if byKey[key] == nil { order.append(key) }
+            byKey[key, default: []].append(item)
+        }
+        var foldedUIDs = Set<String>()
+        var folds: [TopicGroup] = []
+        for key in order {
+            guard let members = byKey[key],
+                members.count >= TopicPolicy.minimumVisibleMembers
+            else { continue }
+            let sorted = members.sorted { $0.occurredAt > $1.occurredAt }
+            foldedUIDs.formUnion(sorted.map(\.uid))
+            folds.append(
+                TopicGroup(
+                    id: TopicGroup.foldID(sourceID: source.id, key: key),
+                    kind: .fold,
+                    name: sorted.first?.groupLabel ?? key,
+                    members: sorted, sources: [source]))
+        }
+        folds.sort { $0.newest > $1.newest }
+        return (items.filter { !foldedUIDs.contains($0.uid) }, folds)
     }
 
     /// Type-to-filter across title, snippet, person, source name — and the
@@ -212,6 +299,7 @@ struct PanelQueue {
                 item.title, item.snippet ?? "", item.actorName ?? "",
                 index.display(for: item).name,
                 item.topicID.flatMap { topics[$0]?.name } ?? "",
+                item.groupLabel ?? "",
             ]
             .contains { $0.lowercased().contains(query) }
         }

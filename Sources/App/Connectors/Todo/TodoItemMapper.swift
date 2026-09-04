@@ -180,7 +180,11 @@ enum TodoItemMapper {
             actorName: task.listName,
             occurredAt: occurredAt(for: task, now: now),
             highSignal: highSignal(for: task, now: now, calendar: calendar),
-            payload: TodoPayload(from: task).encoded())
+            payload: TodoPayload(from: task).encoded(),
+            // Offered but off by default: 18 active reminders in 4 lists fold
+            // to 4 rows, and a to-do is work rather than noise.
+            groupKey: task.listName.flatMap { $0.isEmpty ? nil : $0 },
+            groupLabel: task.listName.flatMap { $0.isEmpty ? nil : $0 })
     }
 
     // MARK: Presentation

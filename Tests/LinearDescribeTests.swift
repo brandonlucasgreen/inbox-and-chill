@@ -286,4 +286,27 @@ struct LinearDescribeTests {
         #expect(item.actorName == "amaan")
         #expect(item.highSignal)
     }
+
+    // MARK: Auto-grouping key
+
+    @Test func anIssueNotificationFoldsByItsIssue() {
+        let item = LinearConnector.mapItem(node(type: "issueCommentMention", issue: coreIssue))
+        #expect(item.groupKey == "issue:CORE-6872")
+        #expect(item.groupLabel == "CORE-6872 · Google Drive upload takes a long time")
+    }
+
+    @Test func aProjectNotificationFallsBackToItsProject() {
+        let project = LinearNotificationNode.ProjectEntity(
+            name: "Real-time notes", url: "https://linear.app/buffer/project/rtn-abc")
+        let item = LinearConnector.mapItem(node(type: "projectUpdateCreated", project: project))
+        #expect(item.groupKey == "project:https://linear.app/buffer/project/rtn-abc")
+        #expect(item.groupLabel == "Real-time notes")
+    }
+
+    @Test func aNotificationWithNeitherHasNoFold() {
+        let item = LinearConnector.mapItem(
+            node(type: "documentCommentMention", document: .init(title: "Launch plan")))
+        #expect(item.groupKey == nil)
+        #expect(item.groupLabel == nil)
+    }
 }

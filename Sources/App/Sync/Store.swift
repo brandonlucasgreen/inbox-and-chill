@@ -47,7 +47,8 @@ actor Store {
                     kind: remote.kind, title: remote.title,
                     snippet: remote.snippet, urlString: remote.url,
                     actorName: remote.actorName, occurredAt: remote.occurredAt,
-                    highSignal: remote.highSignal, payload: remote.payload)
+                    highSignal: remote.highSignal, payload: remote.payload,
+                    groupKey: remote.groupKey, groupLabel: remote.groupLabel)
                 item.topicID = Self.topicID(matching: remote, in: rules)
                 modelContext.insert(item)
                 result.inserted.append(summary(item))
@@ -95,7 +96,8 @@ actor Store {
                         snippet: remote.snippet, urlString: remote.url,
                         actorName: remote.actorName,
                         occurredAt: remote.occurredAt,
-                        highSignal: remote.highSignal, payload: remote.payload)
+                        highSignal: remote.highSignal, payload: remote.payload,
+                        groupKey: remote.groupKey, groupLabel: remote.groupLabel)
                     item.topicID = Self.topicID(matching: remote, in: rules)
                     modelContext.insert(item)
                     result.inserted.append(summary(item))
@@ -497,23 +499,42 @@ actor Store {
     ///
     /// A topic with a single active member counts one either way, which is
     /// also exactly how it renders (`TopicPolicy.minimumVisibleMembers`).
-    func badgeCounts(countedSourceIDs: Set<String>) throws -> (
-        total: Int, highSignal: Int
-    ) {
+    ///
+    /// **An auto-grouping fold counts as one too**, by the same sentence: for
+    /// a source in `groupingSourceIDs`, rows sharing a `groupKey` are one.
+    /// Expect the number to drop hard when grouping is first turned on —
+    /// Slack from 188 to 49 in one measured week — which is the feature
+    /// working, not the badge breaking.
+    func badgeCounts(
+        countedSourceIDs: Set<String>, groupingSourceIDs: Set<String> = []
+    ) throws -> (total: Int, highSignal: Int) {
         let active = try items().filter {
             $0.isActive && countedSourceIDs.contains($0.sourceID)
         }
-        let ungrouped = active.filter { $0.topicID == nil }
+        var loose = 0
+        var loudLoose = 0
         var topicIDs = Set<String>()
         var loudTopicIDs = Set<String>()
+        var foldIDs = Set<String>()
+        var loudFoldIDs = Set<String>()
         for item in active {
-            guard let id = item.topicID else { continue }
-            topicIDs.insert(id)
-            if item.highSignal { loudTopicIDs.insert(id) }
+            if let id = item.topicID {
+                topicIDs.insert(id)
+                if item.highSignal { loudTopicIDs.insert(id) }
+            } else if groupingSourceIDs.contains(item.sourceID),
+                let key = item.groupKey, !key.isEmpty
+            {
+                let id = TopicGroup.foldID(sourceID: item.sourceID, key: key)
+                foldIDs.insert(id)
+                if item.highSignal { loudFoldIDs.insert(id) }
+            } else {
+                loose += 1
+                if item.highSignal { loudLoose += 1 }
+            }
         }
         return (
-            ungrouped.count + topicIDs.count,
-            ungrouped.filter(\.highSignal).count + loudTopicIDs.count
+            loose + topicIDs.count + foldIDs.count,
+            loudLoose + loudTopicIDs.count + loudFoldIDs.count
         )
     }
 
@@ -578,6 +599,11 @@ actor Store {
         item.occurredAt = remote.occurredAt
         item.highSignal = remote.highSignal
         item.payload = remote.payload
+        // Refreshed on purpose, unlike `topicID` just above this method's
+        // callers: the source owns what an item is about, and a poll is how
+        // a renamed channel or retitled issue comes to read correctly.
+        item.groupKey = remote.groupKey
+        item.groupLabel = remote.groupLabel
         item.updatedAt = .now
     }
 

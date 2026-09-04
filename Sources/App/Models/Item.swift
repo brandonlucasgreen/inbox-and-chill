@@ -66,12 +66,23 @@ final class Item {
     /// poll has to be left out of it by hand. A poll dissolving the topic the
     /// user just built is the regression this comment exists to prevent.
     var topicID: String?
+    /// What the source says this item is about — see `RemoteItem.groupKey`.
+    ///
+    /// **Source state, like `kind` and `title`, and so deliberately
+    /// refreshed by `Store.update(_:from:)`** — the opposite rule from
+    /// `topicID`, for the opposite reason. A topic is yours and a poll must
+    /// not dissolve it; a channel label is the source's, and a poll is how a
+    /// renamed channel comes to read correctly. Nothing is written to the
+    /// store when rows fold: auto-grouping is computed from these two fields
+    /// by `PanelQueue`, so turning it off gives back exactly the queue you had.
+    var groupKey: String?
+    var groupLabel: String?
 
     init(
         uid: String, sourceID: String, sourceKind: String, kind: String,
         title: String, snippet: String? = nil, urlString: String? = nil,
         actorName: String? = nil, occurredAt: Date, highSignal: Bool = false,
-        payload: Data? = nil
+        payload: Data? = nil, groupKey: String? = nil, groupLabel: String? = nil
     ) {
         self.uid = uid
         self.sourceID = sourceID
@@ -86,6 +97,8 @@ final class Item {
         self.updatedAt = .now
         self.highSignal = highSignal
         self.payload = payload
+        self.groupKey = groupKey
+        self.groupLabel = groupLabel
     }
 }
 

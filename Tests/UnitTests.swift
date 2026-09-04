@@ -99,6 +99,21 @@ struct SourceConfigSettingsTests {
         #expect(config.settings.isEmpty)
     }
 
+    @Test("Auto-grouping reads the stored choice, else the kind's default")
+    func groupingResolvesLikeAToggle() {
+        let slack = SourceConfig(kind: "slack", displayName: "Slack")
+        #expect(slack.groupsAutomatically)
+        slack.autoGroups = false
+        #expect(!slack.groupsAutomatically)
+        let reminders = SourceConfig(kind: "reminders", displayName: "Reminders")
+        #expect(!reminders.groupsAutomatically)
+        reminders.autoGroups = true
+        #expect(reminders.groupsAutomatically)
+        // Nothing to fold by: off, whatever is stored.
+        let local = SourceConfig(kind: "local", displayName: "Local")
+        #expect(!local.groupsAutomatically)
+    }
+
     @Test func settingsRoundTripPreservesAllKeys() {
         let config = SourceConfig(kind: "jsonPoller", displayName: "Feed")
         let values = [
@@ -1706,6 +1721,16 @@ struct SentryIssueMappingTests {
         try JSONDecoder().decode(SentryConnector.Issue.self, from: Data(json.utf8))
     }
 
+    @Test("An issue folds by its project slug")
+    func foldsByProject() throws {
+        let item = SentryConnector.item(
+            from: try issue(#"{"id":"1","title":"Boom","project":{"slug":"web","name":"Web"}}"#))
+        #expect(item.groupKey == "web")
+        #expect(item.groupLabel == "web")
+        let orphan = SentryConnector.item(from: try issue(#"{"id":"2","title":"Boom"}"#))
+        #expect(orphan.groupKey == nil)
+    }
+
     @Test("A full issue maps onto a RemoteItem")
     func fullIssue() throws {
         let item = SentryConnector.item(
@@ -2104,6 +2129,18 @@ struct AppleMailParsingTests {
         let handle = try #require(AppleMailConnector.MessageHandle(payload: item.payload))
         #expect(handle.mailID == 826216)
         #expect(handle.unflag)
+        // Folds by the address, reads by the name.
+        #expect(item.groupKey == "ada@example.com")
+        #expect(item.groupLabel == "Ada Lovelace")
+    }
+
+    @Test("The fold key is the address, lowercased, whatever the display name does")
+    func senderAddress() {
+        #expect(AppleMailConnector.senderAddress(fromSender: "\"Ada\" <Ada@Example.com>") == "ada@example.com")
+        #expect(AppleMailConnector.senderAddress(fromSender: "<noreply@bandcamp.com>") == "noreply@bandcamp.com")
+        #expect(AppleMailConnector.senderAddress(fromSender: "ops@example.com") == "ops@example.com")
+        #expect(AppleMailConnector.senderAddress(fromSender: "   ") == nil)
+        #expect(AppleMailConnector.senderAddress(fromSender: "Ada <>") == nil)
     }
 
     @Test("Account and mailbox round-trip into the handle when present")
@@ -3206,6 +3243,9 @@ struct NtfyConnectorTests {
         #expect(item.actorName == "deploys")
         #expect(item.occurredAt == Date(timeIntervalSince1970: 1700000000))
         #expect(item.kind == "ntfy_message")
+        // The topic is the fold: one source can subscribe to several.
+        #expect(item.groupKey == "deploys")
+        #expect(item.groupLabel == "deploys")
     }
 
     @Test("With no title the body becomes the title and is not duplicated")

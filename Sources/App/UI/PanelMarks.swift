@@ -26,6 +26,13 @@ final class PanelMarks {
         if uids.remove(uid) == nil { uids.insert(uid) }
     }
 
+    /// Space on a fold header: mark everything in it. Adds rather than
+    /// toggles, so pressing it on two folds marks both.
+    func mark(_ newUIDs: [String]) {
+        endRange()
+        uids.formUnion(newUIDs)
+    }
+
     func clear() {
         endRange()
         guard !uids.isEmpty else { return }

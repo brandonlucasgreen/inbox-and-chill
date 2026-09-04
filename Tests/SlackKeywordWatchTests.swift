@@ -212,6 +212,25 @@ struct SlackKeywordWatchTests {
         #expect(item?.channel == "C123")
     }
 
+    @Test func aHitFoldsByChannelIDWithTheNameAsItsLabel() {
+        let item = SlackConnector.watchHit(
+            from: hit(ts: insideWindow), term: "x", selfUserID: "U001", notBefore: cutoff)
+        #expect(item?.item.groupKey == "C123")
+        #expect(item?.item.groupLabel == "#growth")
+    }
+
+    /// A header reading `D0123ABCD` is worse than the rows it would hide.
+    @Test func aDirectMessageHitHasNoFold() {
+        let item = SlackConnector.watchHit(
+            from: hit(ts: insideWindow, channel: "D0123ABCD", channelName: "D0123ABCD"),
+            term: "x", selfUserID: "U001", notBefore: cutoff)
+        #expect(item?.item.groupKey == nil)
+        #expect(item?.item.groupLabel == nil)
+        #expect(SlackConnector.channelGrouping(channel: "C1", label: nil) == nil)
+        #expect(SlackConnector.channelGrouping(channel: "C1", label: "")?.key == nil)
+        #expect(SlackConnector.channelGrouping(channel: "C1", label: "eng")?.label == "#eng")
+    }
+
     /// The external id has to round-trip, or pressing `e` can't clear it.
     @Test func theExternalIDIsAWatchRefThatCanBeCompleted() {
         let item = SlackConnector.watchHit(

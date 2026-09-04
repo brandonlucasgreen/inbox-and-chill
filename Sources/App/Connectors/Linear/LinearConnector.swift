@@ -260,6 +260,7 @@ actor LinearConnector: Connector {
     nonisolated static func mapItem(_ node: LinearNotificationNode) -> RemoteItem {
         let occurredAt = parseISO8601(node.createdAt) ?? .now
         let (title, snippet, url) = describe(node)
+        let grouping = grouping(node)
         return RemoteItem(
             externalID: node.id,
             kind: node.type,
@@ -272,7 +273,34 @@ actor LinearConnector: Connector {
             // Context is built eagerly — the fields ride the same query —
             // and stored here, so `context()` needs no network at all.
             // `Store.update` refreshes payload every poll, keeping it fresh.
-            payload: contextData(for: node))
+            payload: contextData(for: node),
+            groupKey: grouping?.key, groupLabel: grouping?.label)
+    }
+
+    /// What a notification folds under: its **issue** when it has one, else
+    /// its **project** (project updates, documents, initiatives).
+    ///
+    /// Issue first, measured: 468 of 576 rows in the live store carry an
+    /// issue key, and a comment and a status change on `EPD-1873` are one
+    /// thing while two issues in one project are two. Grouping everything by
+    /// project would fold harder and hide your issue behind a project name.
+    /// The project key is its URL rather than its name, so a renamed project
+    /// keeps its fold.
+    nonisolated static func grouping(
+        _ node: LinearNotificationNode
+    ) -> (key: String, label: String)? {
+        if let issue = node.issue, !issue.identifier.isEmpty {
+            let label =
+                issue.title.isEmpty
+                ? issue.identifier : "\(issue.identifier) · \(issue.title)"
+            return ("issue:\(issue.identifier)", label)
+        }
+        if let project = node.project ?? node.issue?.project,
+            !project.name.isEmpty
+        {
+            return ("project:\(project.url ?? project.name)", project.name)
+        }
+        return nil
     }
 
     // MARK: Context (D expansion)

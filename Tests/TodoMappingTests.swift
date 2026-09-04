@@ -36,6 +36,28 @@ private func task(
         createdAt: created, modifiedAt: modified)
 }
 
+struct TodoFoldKeyTests {
+    @Test("A task folds by its list — offered, off by default")
+    func listIsTheKey() {
+        let item = TodoItemMapper.remoteItem(from: task(list: "Home"), now: .now)
+        #expect(item.groupKey == "Home")
+        #expect(item.groupLabel == "Home")
+        let unlisted = TodoItemMapper.remoteItem(from: task(list: nil), now: .now)
+        #expect(unlisted.groupKey == nil)
+        let blank = TodoItemMapper.remoteItem(from: task(list: ""), now: .now)
+        #expect(blank.groupKey == nil)
+    }
+
+    @Test("To-do sources default to grouping off; notification sources on")
+    func catalogDefaults() {
+        #expect(ConnectorCatalog.descriptor(for: "reminders")?.grouping?.defaultOn == false)
+        #expect(ConnectorCatalog.descriptor(for: "todoist")?.grouping?.defaultOn == false)
+        #expect(ConnectorCatalog.descriptor(for: "slack")?.grouping?.defaultOn == true)
+        #expect(ConnectorCatalog.descriptor(for: "local")?.grouping == nil)
+        #expect(ConnectorCatalog.descriptor(for: "jsonPoller")?.grouping == nil)
+    }
+}
+
 struct TodoIdentityTests {
 
     /// The bug this whole design turns on. A task's due date is in the future,

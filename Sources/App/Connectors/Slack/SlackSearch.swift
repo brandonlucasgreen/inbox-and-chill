@@ -169,7 +169,9 @@ extension SlackConnector {
                 actorName: who,
                 occurredAt: occurredAt,
                 highSignal: true,
-                payload: payload(channel: channel, ts: ts, permalink: permalink))
+                payload: payload(channel: channel, ts: ts, permalink: permalink),
+                groupKey: channelGrouping(channel: channel, label: rawName)?.key,
+                groupLabel: channelGrouping(channel: channel, label: rawName)?.label)
         )
     }
 
@@ -178,6 +180,20 @@ extension SlackConnector {
     /// DM — so the id has to be described rather than printed, exactly as
     /// `watchHit` already does. Pure, so both cases are testable without a
     /// workspace.
+    /// The fold a channel message belongs to: the channel id as the key
+    /// (stable across renames) and the name as the label. nil for a DM or a
+    /// channel whose name never resolved — a header reading `C0AP7Q92ZPB`
+    /// is worse than the rows it would hide. A DM is one row per
+    /// conversation already, so it never needs one.
+    nonisolated static func channelGrouping(
+        channel: String, label: String?
+    ) -> (key: String, label: String)? {
+        guard let label, !label.isEmpty, !isRawChannelID(label) else {
+            return nil
+        }
+        return (channel, "#\(label)")
+    }
+
     nonisolated static func saveTitle(channelLabel: String?) -> String {
         guard let label = channelLabel, !label.isEmpty else {
             return "Saved message"

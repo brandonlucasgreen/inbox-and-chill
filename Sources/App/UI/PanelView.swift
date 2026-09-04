@@ -201,14 +201,12 @@ struct PanelView: View {
                         }
                         ForEach(queue.groups) { group in
                             Section {
-                                rows(
-                                    group.items, index: queue.index,
-                                    topicOf: queue.topicOf)
+                                sourceRows(group, queue: queue)
                             } header: {
                                 PanelSectionHeader(
                                     title: group.source.name,
                                     systemImage: group.source.systemImage,
-                                    count: group.items.count)
+                                    count: group.rowCount)
                             }
                         }
                         if !queue.snoozed.isEmpty
@@ -309,6 +307,22 @@ struct PanelView: View {
         }
     }
 
+    /// A source section's lines: loose rows and auto-grouping folds, in one
+    /// list by date. A fold is a `TopicGroup`, so it draws as a header and
+    /// opens like one.
+    @ViewBuilder private func sourceRows(
+        _ group: SourceGroup, queue: PanelQueue
+    ) -> some View {
+        ForEach(group.rows) { row in
+            switch row {
+            case .item(let item):
+                rows([item], index: queue.index, topicOf: queue.topicOf)
+            case .fold(let fold):
+                topicRows([fold], queue: queue)
+            }
+        }
+    }
+
     /// A topic header, plus its members when it is the open one.
     @ViewBuilder private func topicRows(
         _ list: [TopicGroup], queue: PanelQueue
@@ -324,7 +338,13 @@ struct PanelView: View {
                     focus = .list
                 },
                 onToggleOpen: { toggleTopic(topic) },
-                onEdit: { topicEditor = .edit(topic) })
+                // A fold has nothing to edit — it is not stored — so its G
+                // is the path *to* a topic: the naming card, pre-filled with
+                // the members.
+                onEdit: {
+                    topicEditor =
+                        topic.isFold ? .create(topic.members) : .edit(topic)
+                })
                 .id(topic.rowID)
                 .transition(PanelMotion.row)
             if openTopicID == topic.id {
@@ -795,10 +815,19 @@ struct PanelView: View {
     }
 
     /// Whether a row id is the topic's own header or one of its members.
+    /// A fold's membership is read off the item — same source, same key, not
+    /// filed in a topic — because a fold is never stored.
     private func rowBelongs(_ rowID: String?, toTopic topicID: String) -> Bool {
         guard let rowID else { return false }
         if QueueRowID.topicID(from: rowID) == topicID { return true }
-        return items.first { $0.uid == rowID }?.topicID == topicID
+        guard let item = items.first(where: { $0.uid == rowID }) else {
+            return false
+        }
+        if let fold = TopicGroup.foldParts(topicID) {
+            return item.topicID == nil && item.sourceID == fold.sourceID
+                && item.groupKey == fold.key
+        }
+        return item.topicID == topicID
     }
 
     /// D on a topic header, and the header's own disclosure button.
@@ -844,10 +873,16 @@ struct PanelView: View {
 
     private func toggleMarkSelected() {
         guard let selectedUID else { return }
-        // Marking a topic header would mean "group a group", which has no
-        // meaning yet. Say so rather than doing nothing — a key that
-        // silently no-ops reads as broken (rule 5).
-        guard selectedTopic == nil else {
+        if let topic = selectedTopic {
+            // Space on a fold marks what is in it — the fold stands for its
+            // members and has no identity of its own to mark.
+            if topic.isFold {
+                marks.mark(topic.memberUIDs)
+                return
+            }
+            // Marking a topic header would mean "group a group", which has
+            // no meaning yet. Say so rather than doing nothing — a key that
+            // silently no-ops reads as broken (rule 5).
             appState.openProblem =
                 "A topic can't be marked. Mark individual rows with Space, then press G."
             return
@@ -892,8 +927,14 @@ struct PanelView: View {
         var uids = marks.uids
         if let item { uids.insert(item.uid) }
         if uids.isEmpty, let topic = selectedTopic {
-            topicEditor = .edit(topic)
-            return
+            // A fold is not stored, so there is nothing to edit; G on one
+            // makes a topic *of* it instead.
+            if topic.isFold {
+                uids.formUnion(topic.memberUIDs)
+            } else {
+                topicEditor = .edit(topic)
+                return
+            }
         }
         if uids.isEmpty, let selectedUID, selectedTopic == nil {
             uids.insert(selectedUID)
@@ -1052,7 +1093,9 @@ struct PanelView: View {
             queued: items, configs: sourceConfigs, allTopics: allTopics,
             sourceFilter: appState.selectedSourceFilter,
             filterText: filterText, showSnoozed: showSnoozed,
-            openTopicID: openTopicID)
+            openTopicID: openTopicID,
+            groupingSourceIDs: Set(
+                sourceConfigs.filter(\.groupsAutomatically).map(\.id)))
     }
 
     private var sourceFilterBinding: Binding<String?> {

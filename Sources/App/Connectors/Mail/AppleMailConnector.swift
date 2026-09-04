@@ -357,7 +357,28 @@ actor AppleMailConnector: Connector {
             // A flagged message is one the user singled out themselves.
             // Nothing in an inbox is a stronger signal than that.
             highSignal: isFlagged && !isRead,
-            payload: handle.encoded)
+            payload: handle.encoded,
+            // Sender, not conversation: measured 229 of 334 items folding
+            // against 104, and what folds is digests and bots. The address is
+            // the key so two people called Sam stay apart and "Bandcamp" and
+            // "Bandcamp <noreply@…>" stay together.
+            groupKey: senderAddress(fromSender: sender),
+            groupLabel: displayName(fromSender: sender))
+    }
+
+    /// The address in `Name <addr>` (or the bare address), lowercased — the
+    /// part of a sender that survives a display-name change.
+    static func senderAddress(fromSender sender: String) -> String? {
+        let trimmed = sender.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        if let open = trimmed.firstIndex(of: "<") {
+            let address = trimmed[trimmed.index(after: open)...]
+                .split(separator: ">", maxSplits: 1).first.map(String.init)
+                ?? ""
+            let cleaned = address.trimmingCharacters(in: .whitespaces).lowercased()
+            return cleaned.isEmpty ? nil : cleaned
+        }
+        return trimmed.lowercased()
     }
 
     /// `message://%3c<Message-ID>%3e` opens the exact message in Mail.app —
