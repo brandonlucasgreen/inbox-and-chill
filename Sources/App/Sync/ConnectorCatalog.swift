@@ -293,11 +293,11 @@ enum ConnectorCatalog {
                 .init(
                     key: "mapping", label: "Field Mapping", isSecret: false,
                     placeholder: "id=id,title=title,url=url,time=created_at",
-                    help: "Maps feed JSON keys to item fields"),
+                    help: "Maps feed JSON keys to item fields. Add `root=data` when the list sits under a key — most APIs nest it."),
             ],
             setupSteps: [
-                "Point **Feed URL** at any URL returning a JSON array, or an object with an `items` array.",
-                "In **Field Mapping**, name the keys your feed uses: `id=id,title=title,url=link,time=created_at`.",
+                "Point **Feed URL** at any URL returning a JSON array — or an object holding one, like Stripe's `{\"data\": […]}`.",
+                "In **Field Mapping**, name the keys your feed uses: `id=id,title=title,url=link,time=created_at`, plus `root=data` if the list is nested.",
                 "`id` and `title` are required; everything else is optional.",
             ]),
         .init(
