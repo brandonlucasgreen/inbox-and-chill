@@ -7,9 +7,15 @@ import SwiftUI
 /// Keychain value, typing replaces it.
 ///
 /// Layout note: the fields live in a grouped, scrolling Form inside a fixed
-/// frame — content can never clip, it scrolls. Every source is now
-/// paste-a-token, and each one's `authNote` explains why that is the only
-/// path it has (PLAN §6.9).
+/// frame — content can never clip, it scrolls.
+///
+/// Copy note: this screen has four surfaces that can each explain the same
+/// thing — the cost line, the setup steps, per-field help, and `sourceNote`
+/// — which is how it reached 2,000 words across thirteen kinds by
+/// 2026-09-05. Where a secret is kept is now said **here**, once, rather
+/// than in every kind's note. Before adding a sentence, check the other
+/// three surfaces do not already carry it; `SourceEditorCopyTests` caps the
+/// total per kind.
 struct SourceEditorSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppState.self) private var appState
@@ -134,14 +140,25 @@ struct SourceEditorSheet: View {
                         ForEach(descriptor.fields) { field in
                             fieldRow(for: field)
                         }
+                    } footer: {
+                        // One home for this claim. Nine of the thirteen kinds
+                        // used to end their note with their own wording of it.
+                        if descriptor.fields.contains(where: \.isSecret) {
+                            Text("Stored in your Keychain. Nothing leaves this Mac.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
-                if !descriptor.authNote.isEmpty {
+                if !descriptor.sourceNote.isEmpty {
                     Section {
-                        Text(descriptor.authNote)
+                        // Formatted, not raw: the notes carry inline markdown
+                        // and rendering a `String` shows the asterisks.
+                        Text(Self.formatted(descriptor.sourceNote))
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -175,8 +192,7 @@ struct SourceEditorSheet: View {
     /// asks you to paste.
     ///
     /// Above the fields on purpose: you read these *before* you have a token
-    /// to paste, and the reasoning (`authNote`) stays underneath for anyone
-    /// who wants it.
+    /// to paste.
     @ViewBuilder private var setupSteps: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(descriptor.setupSteps.enumerated()), id: \.offset) {
@@ -262,7 +278,10 @@ struct SourceEditorSheet: View {
             fieldEditor(for: field)
                 .help(field.help)
             if !field.help.isEmpty {
-                Text(field.help)
+                // Formatted like the steps and the note: help carries inline
+                // markdown (`read_api`, `root=data`), and a raw String draws
+                // the backticks. Caught by rendering the sheet, 2026-09-05.
+                Text(Self.formatted(field.help))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -303,7 +322,7 @@ struct SourceEditorSheet: View {
                     providerName: picker.name,
                     loadProjects: picker.load)
                 if !field.help.isEmpty {
-                    Text(field.help)
+                    Text(Self.formatted(field.help))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -317,7 +336,7 @@ struct SourceEditorSheet: View {
                 Text(field.label)
                 RemindersListPicker(value: binding)
                 if !field.help.isEmpty {
-                    Text(field.help)
+                    Text(Self.formatted(field.help))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

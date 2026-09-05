@@ -176,7 +176,7 @@ incident list is the right queue.
 The queue would be `assignee = currentUser() AND statusCategory != Done`,
 plus optionally watched issues updated recently. **Mentions cannot be
 enumerated** — JQL has no "mentioned me" operator — so a Jira comment
-@-mentioning Brandon reaches him by email and not here, which the `authNote`
+@-mentioning Brandon reaches him by email and not here, which the `sourceNote`
 must say out loud. Write-back: there is no read-state to write, so `E` is
 local and `.remoteTruth` does the real work (an issue resolved or reassigned
 leaves the JQL result and auto-archives).
@@ -286,7 +286,7 @@ through `jsonPoller` today before committing to a connector.
 4. **PagerDuty** — verified good; settle the personal-key gate first.
 5. **Apple Calendar** — highest utility, but decide what a meeting row *is*
    before writing it.
-6. **Jira** — worth it with the mention gap stated in the `authNote`.
+6. **Jira** — worth it with the mention gap stated in the `sourceNote`.
 
 Everything below that waits for a real need.
 

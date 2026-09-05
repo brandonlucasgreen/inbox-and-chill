@@ -504,7 +504,7 @@ struct TodoistWiringTests {
         // trusting a read-through, exactly as the Reminders screen does.
         let todoist = try #require(ConnectorCatalog.descriptor(for: "todoist"))
         let onScreen =
-            todoist.authNote + todoist.setupSteps.joined()
+            todoist.sourceNote + todoist.setupSteps.joined()
             + todoist.fields.map(\.help).joined()
         let keychainMentions =
             onScreen.components(separatedBy: "Keychain").count - 1

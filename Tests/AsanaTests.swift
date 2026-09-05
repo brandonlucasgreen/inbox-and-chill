@@ -276,7 +276,7 @@ struct AsanaRegistrationTests {
     @Test("Each fact appears once on the Asana editor screen")
     func editorCopyDoesNotRepeatItself() throws {
         let asana = try #require(ConnectorCatalog.descriptor(for: "asana"))
-        let onScreen = asana.authNote + asana.setupSteps.joined() + asana.fields.map(\.help).joined()
+        let onScreen = asana.sourceNote + asana.setupSteps.joined() + asana.fields.map(\.help).joined()
         #expect(onScreen.components(separatedBy: "Keychain").count - 1 <= 1)
         #expect(onScreen.components(separatedBy: "developer console").count - 1 <= 2)
         #expect(onScreen.components(separatedBy: "Inbox").count - 1 <= 1)

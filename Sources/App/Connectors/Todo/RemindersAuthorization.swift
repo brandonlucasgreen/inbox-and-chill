@@ -150,7 +150,7 @@ enum RemindersAuthorization {
     /// Two bullets, and they are the two the user cannot guess.
     ///
     /// This started at three bullets plus a four-sentence prompt note, on top
-    /// of three setup steps and a four-paragraph `authNote` — and between them
+    /// of three setup steps and a four-paragraph source note — and between them
     /// they said "nothing leaves this Mac" three times and "macOS will ask, and
     /// it'll look empty if you decline" four times. Brandon, 2026-08-26:
     /// *"there is WAY too much copy in the Add/Edit Source screen for

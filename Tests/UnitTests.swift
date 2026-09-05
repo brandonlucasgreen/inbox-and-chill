@@ -2517,11 +2517,21 @@ struct NewSourceCatalogTests {
 
     @Test("Both explain themselves before asking for anything")
     func bothExplainThemselves() throws {
-        for kind in ["sentry", "appleMail"] {
-            let descriptor = try #require(ConnectorCatalog.descriptor(for: kind))
-            #expect(!descriptor.setupSteps.isEmpty)
-            #expect(!descriptor.authNote.isEmpty)
-        }
+        // Sentry asks for a credential, so it owes steps saying how to get
+        // one. Mail asks for nothing but a permission grant, so it owes the
+        // preflight instead — steps there would restate the access section
+        // rendered directly below them, which is why they were deleted on
+        // 2026-09-05 exactly as Reminders' were on 2026-08-26.
+        let sentry = try #require(ConnectorCatalog.descriptor(for: "sentry"))
+        #expect(!sentry.setupSteps.isEmpty)
+
+        let mail = try #require(ConnectorCatalog.descriptor(for: "appleMail"))
+        #expect(mail.setupSteps.isEmpty)
+        #expect(mail.fields.allSatisfy { !$0.isSecret })
+        #expect(!MailAutomationAuthorization.preflight.bullets.isEmpty)
+        // The one thing about this source nobody can guess, and the reason
+        // there is no Gmail kind, has to survive the trim.
+        #expect(mail.sourceNote.contains("Gmail"))
     }
 
     @Test("Only the local-Mac-app kinds can't be added twice")
@@ -2554,7 +2564,10 @@ struct NewSourceCatalogTests {
     @Test("Reminders explains itself once, not three times")
     func remindersIsConfigurable() throws {
         let reminders = try #require(ConnectorCatalog.descriptor(for: "reminders"))
-        #expect(!reminders.authNote.isEmpty)
+        // The note went entirely on 2026-09-05: "reads the Reminders app on
+        // this Mac, nothing is sent anywhere" was a third wording of what
+        // the cost line and the preflight title already say.
+        #expect(reminders.sourceNote.isEmpty)
         // Nothing to paste, so nothing should claim otherwise — and no setup
         // steps, because they could only restate the permission control that
         // renders directly below them. `credentialSourcesExplainThemselves`
@@ -2568,10 +2581,10 @@ struct NewSourceCatalogTests {
         // The anti-duplication guard. This screen said "stays on this Mac"
         // three times and "macOS asks, and it'll look empty if you decline"
         // four times before Brandon called it out (2026-08-26). Each fact gets
-        // exactly one home: the E-vs-C surprise lives in the preflight bullets,
-        // and the no-token story lives in authNote.
+        // exactly one home: the E-vs-C surprise lives in the preflight
+        // bullets, and the no-token story in the cost line above the fields.
         let onScreen =
-            reminders.authNote + reminders.setupSteps.joined()
+            reminders.sourceNote + reminders.setupSteps.joined()
             + reminders.fields.map(\.help).joined()
         #expect(
             !onScreen.contains("does not complete it"),
@@ -3880,10 +3893,71 @@ struct ConnectorSetupStepsTests {
         }
     }
 
+    /// The cap that keeps this screen from growing back.
+    ///
+    /// Brandon, 2026-09-05: *"there is a lot of copy in the add source
+    /// screens. now that we have added one liners about permissions and
+    /// clear steps, i feel we can remove a lot of the other text from these
+    /// screens."* It was 2,018 words across the thirteen kinds; the cut took
+    /// it to 975, and Slack — five real setup steps and six fields — is the
+    /// ceiling at 157.
+    ///
+    /// A new source tripping this has not necessarily written too much: it
+    /// has written more than Slack, which is the moment to check the other
+    /// surfaces are not already saying it.
+    @Test("No source editor screen runs long")
+    func editorCopyStaysShort() {
+        for descriptor in ConnectorCatalog.all {
+            let onScreen =
+                ([descriptor.setupCostLabel, descriptor.sourceNote]
+                    + descriptor.setupSteps + descriptor.fields.map(\.help))
+                .joined(separator: " ")
+            let words = onScreen.split(whereSeparator: \.isWhitespace).count
+            #expect(
+                words <= 170,
+                "\(descriptor.displayName): \(words) words on the add-source screen")
+        }
+    }
+
+    /// Nine of the thirteen kinds used to end their note with their own
+    /// wording of where the secret is kept. `SourceEditorSheet` now says it
+    /// once, as the footer of the fields section, for every kind that has a
+    /// secret — so no kind may say it again.
+    @Test("Where the secret lives is said once, by the sheet")
+    func secretStorageHasOneHome() {
+        for descriptor in ConnectorCatalog.all {
+            let onScreen =
+                ([descriptor.setupCostLabel, descriptor.sourceNote]
+                    + descriptor.setupSteps + descriptor.fields.map(\.help))
+                .joined(separator: " ")
+            #expect(
+                !onScreen.contains("Keychain"),
+                "\(descriptor.displayName) restates what the sheet's footer says")
+            #expect(
+                !onScreen.contains("never leaves this Mac"),
+                "\(descriptor.displayName) restates what the sheet's footer says")
+        }
+    }
+
+    /// A note that has grown back into an essay is the failure mode this
+    /// property had for a year: 789 words of "why a token rather than
+    /// OAuth", across screens where nobody was asking.
+    @Test("A source note is a sentence or two, not an essay")
+    func sourceNotesAreShort() {
+        for descriptor in ConnectorCatalog.all where !descriptor.sourceNote.isEmpty {
+            #expect(
+                !descriptor.sourceNote.contains("\n"),
+                "\(descriptor.displayName): a note is one paragraph")
+            #expect(
+                descriptor.sourceNote.count <= 180,
+                "\(descriptor.displayName): note is \(descriptor.sourceNote.count) chars")
+        }
+    }
+
     @Test("Steps stay short enough to read at a glance")
     func stepsAreBrief() {
         // The brief is literally "quite brief and clear". A step that has
-        // grown past a couple of lines belongs in authNote or the docs.
+        // grown past a couple of lines belongs in the source note or docs.
         for descriptor in ConnectorCatalog.all {
             for step in descriptor.setupSteps {
                 #expect(
