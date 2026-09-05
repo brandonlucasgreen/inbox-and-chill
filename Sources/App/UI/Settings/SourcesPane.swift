@@ -94,12 +94,6 @@ struct SourcesPane: View {
     private func delete(_ source: SourceConfig) {
         let sourceID = source.id
         let label = source.displayName
-        // The local source is built-in and recreated by bootstrapConnectors()
-        // whenever none exists — record that this deletion was deliberate so
-        // it doesn't come straight back.
-        if source.kind == "local" {
-            AppState.localSourceUserRemoved = true
-        }
         // Prefix-wipe rather than per-descriptor-field: catches credentials
         // the descriptor no longer lists (e.g. Linear OAuth tokens).
         Keychain.deleteAll(prefix: "\(sourceID).")

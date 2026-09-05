@@ -2451,20 +2451,18 @@ struct OpenSchemeGateTests {
     }
 }
 
-@Suite("Local source recreation policy (Sources/App/AppState.swift)")
+@Suite("Local source policy (Sources/App/AppState.swift)")
 struct LocalSourceRecreationTests {
-    /// The bug this guards: `bootstrapConnectors()` runs after every source
-    /// add/edit/toggle and on every launch, and used to recreate the
-    /// built-in local source unconditionally whenever none existed — making
-    /// the trash button in `SourcesPane` undo itself a moment after deleting
-    /// "Terminal & Claude Code".
-    @Test func createsOnlyWhenMissingAndNotUserRemoved() {
-        #expect(
-            AppState.shouldCreateLocalSource(
-                hasLocalConfig: false, userRemoved: false))
-        #expect(
-            !AppState.shouldCreateLocalSource(
-                hasLocalConfig: true, userRemoved: false))
+    /// The local source is no longer created on first run — Brandon,
+    /// 2026-09-04: *"Make sure it's off by default and allow the user to
+    /// explicitly add it as a source."* It is added like any other kind, and
+    /// only once, because two listeners would fight for the port.
+    @Test func isAddedByTheUserLikeAnyOtherKind() throws {
+        let local = try #require(ConnectorCatalog.descriptor(for: "local"))
+        #expect(!local.allowsMultiple)
+        #expect(local.bannersDefaultOn)
+        // With nothing pre-added, a fresh install has no source at all.
+        #expect(FirstRun.needsFirstSource(kinds: []))
     }
 
     /// Renamed to "Local coding agents" on 2026-09-04. A source's name is
@@ -2493,17 +2491,6 @@ struct LocalSourceRecreationTests {
                 kind: "ntfy", displayName: "Terminal & Claude Code"))
     }
 
-    /// The guard the fix rests on: deleting the source has to stay deleted,
-    /// the same contract `ClaudeCodeIntegration.shouldAutoInstall` already
-    /// keeps for the hooks themselves.
-    @Test func neverUndoesAnExplicitRemoval() {
-        #expect(
-            !AppState.shouldCreateLocalSource(
-                hasLocalConfig: false, userRemoved: true))
-        #expect(
-            !AppState.shouldCreateLocalSource(
-                hasLocalConfig: true, userRemoved: true))
-    }
 }
 
 @Suite("New sources are configurable")
@@ -2550,12 +2537,14 @@ struct NewSourceCatalogTests {
         // *other* kind allows multiples is the half worth keeping, because it
         // is what catches a new source copying `allowsMultiple: false` off its
         // neighbour without meaning to.
-        let singletons: Set<String> = ["appleMail", "reminders"]
+        // `local` joined 2026-09-04, when it stopped being pre-added: it is
+        // one loopback listener per Mac, and a second would fight for the port.
+        let singletons: Set<String> = ["appleMail", "reminders", "local"]
         for id in singletons {
             let descriptor = try #require(ConnectorCatalog.descriptor(for: id))
             #expect(
                 !descriptor.allowsMultiple,
-                "\(descriptor.displayName) reads one local database and should be a singleton")
+                "\(descriptor.displayName) owns one local resource and should be a singleton")
         }
         for kind in ConnectorCatalog.all where !singletons.contains(kind.id) {
             #expect(kind.allowsMultiple, "\(kind.displayName) should allow multiple sources")

@@ -10,33 +10,39 @@ import Testing
 @Suite("First run")
 struct FirstRunTests {
 
-    @Test("Only the built-in local source means no source yet")
+    /// Nothing is pre-added any more — the local source included — so "no
+    /// source yet" means no source of any kind.
+    @Test("No source of any kind means no source yet")
     func needsFirstSource() {
         #expect(FirstRun.needsFirstSource(kinds: []))
-        #expect(FirstRun.needsFirstSource(kinds: ["local"]))
-        #expect(!FirstRun.needsFirstSource(kinds: ["local", "appleMail"]))
-        #expect(!FirstRun.needsFirstSource(kinds: ["reminders"]))
+        #expect(!FirstRun.needsFirstSource(kinds: ["local"]))
+        #expect(!FirstRun.needsFirstSource(kinds: ["appleMail"]))
     }
 
     /// Existence, not enablement: someone who switched everything off on
     /// purpose is not greeted like a stranger. The policy takes kinds only,
     /// so it cannot even see `isEnabled`.
-    @Test("The panel opens itself once, and only for an install with no source")
-    func opensPanelOnce() {
-        #expect(FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: false, needsFirstSource: true))
-        #expect(!FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: true, needsFirstSource: true))
+    @Test("The welcome window shows once, and only for an install with no source")
+    func welcomeWindowShowsOnce() {
+        #expect(FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: false, needsFirstSource: true))
+        #expect(!FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: true, needsFirstSource: true))
         // An upgrade is not a first run.
-        #expect(!FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: false, needsFirstSource: false))
+        #expect(!FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: false, needsFirstSource: false))
     }
 
-    @Test("The welcome offers the two kinds that need no credential, and they exist")
-    func zeroSetupKindsAreReal() {
-        #expect(FirstRun.zeroSetupKinds == ["appleMail", "reminders"])
-        for kind in FirstRun.zeroSetupKinds {
-            let descriptor = ConnectorCatalog.descriptor(for: kind)
-            #expect(descriptor != nil, "\(kind)")
-            #expect(descriptor?.fields.contains(where: \.isSecret) == false, "\(kind)")
+    /// Brandon: naming Mail and Reminders *"sells short the depth of services
+    /// I&C integrates with"*. The roster comes from the catalog, so a new
+    /// connector joins the sentence on its own.
+    @Test("The welcome names the whole roster and features no source")
+    func rosterNamesEverything() {
+        let roster = FirstRun.sourceRoster(from: ConnectorCatalog.all)
+        for descriptor in ConnectorCatalog.all where !["local", "jsonPoller", "ntfy"].contains(descriptor.id) {
+            #expect(roster.contains(descriptor.displayName), "\(descriptor.id)")
         }
+        #expect(roster.contains("ntfy"))
+        #expect(roster.contains("JSON feed"))
+        #expect(roster.contains("coding agents"))
+        #expect(FirstRun.addButton == "Add Your First Source")
     }
 
     /// Asking twice for the same kind must read as two requests, or the

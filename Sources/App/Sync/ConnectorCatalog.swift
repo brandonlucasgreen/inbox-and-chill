@@ -428,13 +428,15 @@ enum ConnectorCatalog {
             grouping: .init(noun: "topic", defaultOn: true)),
         .init(
             id: "local", displayName: "Local coding agents", systemImage: "terminal",
-            fields: [], bannersDefaultOn: true,
+            fields: [],
+            // One listener per Mac: a second would fight for the port.
+            allowsMultiple: false, bannersDefaultOn: true,
             setupSteps: [
                 "Nothing to configure — this source only shows what something pushes to it.",
                 "From a script or terminal: `inchill notify --title \"Build finished\"`.",
-                "For Claude Code, turn on the hooks in Settings → General.",
+                "For Claude Code and other agents, turn on the hooks in this source's editor.",
             ],
-            setupCost: "Built in — nothing to set up. Claude Code hooks install from this source's editor."),
+            setupCost: "Nothing to set up — it listens for the inchill CLI and your coding agents' hooks."),
     ]
 
     /// The Slack app manifest, offered as a Copy button in the source

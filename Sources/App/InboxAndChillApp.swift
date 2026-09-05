@@ -61,6 +61,20 @@ struct InboxAndChillApp: App {
         .defaultLaunchBehavior(.suppressed)
         .commands { MainWindowCommands(updates: updates) }
 
+        // First launch only: `AppState` decided in its `init`, so the answer
+        // is ready when this scene is built. Presenting through the launch
+        // behaviour rather than `openWindow` avoids needing a view to call
+        // it from — the panel's content does not exist until it is clicked.
+        Window(FirstRun.title, id: WelcomeWindowView.windowID) {
+            WelcomeWindowView()
+                .environment(appState)
+                .modelContainer(appState.container)
+        }
+        .defaultLaunchBehavior(appState.wantsWelcomeWindow ? .presented : .suppressed)
+        .restorationBehavior(.disabled)
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+
         Settings {
             SettingsView()
                 .environment(appState)

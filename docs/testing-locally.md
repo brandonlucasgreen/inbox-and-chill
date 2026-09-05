@@ -99,8 +99,8 @@ environment (Xcode: Product → Scheme → Edit Scheme → Run → Arguments).
 
 ## 3. Test the local pipeline (terminal + Claude Code)
 
-The app auto-creates the "Local coding agents" source and starts a
-localhost listener. The CLI lives inside the app bundle:
+Add the "Local coding agents" source in Settings › Sources (nothing is
+pre-added on a fresh install); it starts a localhost listener. The CLI lives inside the app bundle:
 
 ```sh
 alias inchill='~/Library/Developer/Xcode/DerivedData/InboxAndChill-*/Build/Products/Debug/"Inbox & Chill.app"/Contents/MacOS/inchill'
