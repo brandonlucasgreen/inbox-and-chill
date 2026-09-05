@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -53,6 +54,37 @@ struct FirstRunTests {
         let second = AppState.AddSourceRequest(kind: "appleMail")
         #expect(first.kind == second.kind)
         #expect(first != second)
+    }
+}
+
+// MARK: - Brand (Sources/App/UI/Brand.swift)
+
+/// The bundled typefaces register at launch through `ATSApplicationFontsPath`.
+/// This runs inside the app as test host, so if the folder or the plist key
+/// is wrong the faces are simply absent — and the welcome would render in
+/// SF with nothing failing anywhere else.
+@Suite("Brand fonts")
+struct BrandFontTests {
+    @Test("Syne and Space Grotesk are registered from the bundle")
+    func bundledFacesResolve() {
+        let available = Set(NSFontManager.shared.availableFonts)
+        #expect(Brand.firstAvailable(Brand.displayFaces, in: available) != nil,
+            "no Syne instance registered — check Resources/Fonts and ATSApplicationFontsPath")
+        #expect(Brand.firstAvailable(Brand.textFaces, in: available) != nil,
+            "no Space Grotesk instance registered")
+        #expect(NSFont(name: "Syne-SemiBold", size: 12) != nil)
+    }
+
+    @Test("A missing face falls back to the next, then to nil")
+    func fallbackOrder() {
+        #expect(Brand.firstAvailable(["A", "B"], in: ["B"]) == "B")
+        #expect(Brand.firstAvailable(["A", "B"], in: ["A", "B"]) == "A")
+        #expect(Brand.firstAvailable(["A"], in: []) == nil)
+    }
+
+    @Test("The house tagline has one home")
+    func taglineIsShared() {
+        #expect(Brand.tagline == "Everything waiting on you, in one queue, nice & chilled.")
     }
 }
 

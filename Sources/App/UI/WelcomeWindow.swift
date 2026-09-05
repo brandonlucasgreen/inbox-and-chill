@@ -42,6 +42,11 @@ final class WelcomeWindowController {
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
+        // The content paints the brand's navy edge to edge; the window's own
+        // ground and the traffic lights' appearance have to agree with it,
+        // or a light-mode Mac shows a pale title strip over a dark card.
+        window.backgroundColor = Brand.navyNSColor
+        window.appearance = NSAppearance(named: .darkAqua)
         window.setContentSize(hosting.view.fittingSize)
         window.center()
         // The red close button is a valid answer too; tidy up after it.

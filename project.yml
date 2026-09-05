@@ -50,7 +50,14 @@ targets:
   InboxAndChill:
     type: application
     platform: macOS
-    sources: [Sources/App]
+    sources:
+      - path: Sources/App
+        # The fonts go in as a *folder reference* below, so ATSApplicationFontsPath
+        # can name the directory; left in the group they would be copied flat
+        # into Resources/ and the plist key would point at nothing.
+        excludes: ["Resources/Fonts"]
+      - path: Sources/App/Resources/Fonts
+        type: folder
     dependencies:
       - package: KeyboardShortcuts
       - package: Sparkle
@@ -180,6 +187,12 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: Inbox & Chill
         LSUIElement: true
+        # Syne and Space Grotesk (both SIL OFL 1.1, licences shipped beside
+        # them) for the first-launch welcome window — the one branded surface
+        # in the app. AppKit registers everything in this folder at launch;
+        # a wrong path fails silently into the system fallback, which is why
+        # verify-bundle.sh checks the folder and a test asks NSFont by name.
+        ATSApplicationFontsPath: Fonts
         # Xcode injects this only into a plist it generates itself. Sparkle
         # reads it out of the app inside the zip to write the appcast's
         # sparkle:minimumSystemVersion, so a missing value here would offer

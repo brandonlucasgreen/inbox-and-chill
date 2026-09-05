@@ -114,22 +114,73 @@ struct WelcomeView: View {
     }
 }
 
-/// The content of the first-launch window. `WelcomeWindowController` owns
-/// the window and decides nothing; `AppState` decides *whether* (see
-/// `wantsWelcomeWindow`). This view only knows how to close itself: after
-/// the button, or once a source exists by any other route.
+/// The content of the first-launch window — the one branded surface in the
+/// app (see `Brand`). Same copy as the in-queue `WelcomeView`, dressed: the
+/// real app icon as the hero with a soft amber glow, the house tagline under
+/// a wide Syne headline, Space Grotesk for the rest, and the guide's capsule
+/// button in the one warm note. Dark blue in both appearances on purpose:
+/// this is the brand's own ground, not a themed panel.
+///
+/// `WelcomeWindowController` owns the window and decides nothing; `AppState`
+/// decides *whether* (see `wantsWelcomeWindow`). This view only knows how to
+/// close itself: after the button, or once a source exists by any route.
 struct WelcomeWindowView: View {
     var onDismiss: () -> Void
+    @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettings
     @Query private var sources: [SourceConfig]
 
     var body: some View {
-        WelcomeView(afterAdd: onDismiss)
-            .frame(width: 440)
-            .padding(.vertical, 12)
-            // The user added a source some other way (the panel, Settings
-            // directly): the welcome has done its job.
-            .onChange(of: sources.isEmpty) { _, isEmpty in
-                if !isEmpty { onDismiss() }
+        ZStack {
+            LinearGradient(
+                colors: [Brand.navyRaised, Brand.navy],
+                startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 14) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 88, height: 88)
+                    .shadow(color: Brand.amber.opacity(0.28), radius: 24, y: 6)
+                    .padding(.bottom, 2)
+                    .accessibilityHidden(true)
+                Text(FirstRun.title)
+                    .font(Brand.display(23))
+                    .foregroundStyle(Brand.beige)
+                Text(Brand.tagline)
+                    .font(Brand.text(14))
+                    .foregroundStyle(Brand.beigeDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(FirstRun.sourceRoster(from: ConnectorCatalog.all))
+                    .font(Brand.text(11.5))
+                    .foregroundStyle(Brand.beigeFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                Button(FirstRun.addButton) { add() }
+                    .buttonStyle(BrandCapsuleButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                    .padding(.top, 8)
             }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 44)
+            .padding(.top, 44)
+            .padding(.bottom, 40)
+        }
+        .frame(width: 480)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(FirstRun.title)
+        // The user added a source some other way (the panel, Settings
+        // directly): the welcome has done its job.
+        .onChange(of: sources.isEmpty) { _, isEmpty in
+            if !isEmpty { onDismiss() }
+        }
+    }
+
+    /// Same route as `WelcomeView.add`, then close.
+    private func add() {
+        appState.requestAddSource(kind: nil)
+        openSettings()
+        WindowActivation.openSettings()
+        WindowActivation.focusSettings()
+        onDismiss()
     }
 }
