@@ -245,13 +245,16 @@ final class AppState {
         let kinds =
             ((try? container.mainContext.fetch(FetchDescriptor<SourceConfig>())) ?? [])
             .map(\.kind)
+        let forced =
+            ProcessInfo.processInfo.environment[FirstRun.previewEnvironmentKey] != nil
         let decision = FirstRun.shouldShowWelcomeWindow(
             hasLaunchedBefore: launchedBefore,
-            needsFirstSource: FirstRun.needsFirstSource(kinds: kinds))
+            needsFirstSource: FirstRun.needsFirstSource(kinds: kinds),
+            forced: forced)
         // Default level, not .info: this is the line to read when someone
         // says the welcome never appeared, and .info may never reach disk.
         firstRunLog.notice(
-            "first run check: launchedBefore=\(launchedBefore) sources=\(kinds.count) welcome=\(decision)")
+            "first run check: launchedBefore=\(launchedBefore) sources=\(kinds.count) forced=\(forced) welcome=\(decision)")
         return decision
     }
 

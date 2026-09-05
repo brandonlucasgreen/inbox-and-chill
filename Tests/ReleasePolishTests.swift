@@ -29,6 +29,9 @@ struct FirstRunTests {
         #expect(!FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: true, needsFirstSource: true))
         // An upgrade is not a first run.
         #expect(!FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: false, needsFirstSource: false))
+        // The preview switch shows it anywhere, for design review.
+        #expect(FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: true, needsFirstSource: false, forced: true))
+        #expect(FirstRun.previewEnvironmentKey == "INCHILL_SHOW_WELCOME")
     }
 
     /// Brandon: naming Mail and Reminders *"sells short the depth of services

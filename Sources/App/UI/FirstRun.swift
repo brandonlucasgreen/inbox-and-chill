@@ -34,14 +34,22 @@ enum FirstRun {
 
     /// Show the welcome window on the very first launch, and only then.
     /// Never for an install that already has a source — an upgrade is not a
-    /// first run.
+    /// first run. `forced` is the preview switch below, which shows it
+    /// regardless so the window can be looked at on a Mac that is long past
+    /// its first run.
     nonisolated static func shouldShowWelcomeWindow(
-        hasLaunchedBefore: Bool, needsFirstSource: Bool
+        hasLaunchedBefore: Bool, needsFirstSource: Bool, forced: Bool = false
     ) -> Bool {
-        !hasLaunchedBefore && needsFirstSource
+        forced || (!hasLaunchedBefore && needsFirstSource)
     }
 
     static let hasLaunchedKey = "firstRun.hasLaunched"
+
+    /// `open -a "Inbox & Chill" --env INCHILL_SHOW_WELCOME=1` shows the
+    /// welcome on any install, for design review and screenshots. It does not
+    /// stamp or clear the first-run flag. Works in Release on purpose: the
+    /// people looking at the window are running the installed build.
+    static let previewEnvironmentKey = "INCHILL_SHOW_WELCOME"
 
     static let title = "Welcome to Inbox & Chill"
     static let message =
