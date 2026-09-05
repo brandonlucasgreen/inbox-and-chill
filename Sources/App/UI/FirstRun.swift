@@ -12,8 +12,9 @@ import SwiftUI
 ///
 /// - **A real welcome window on first launch**, not a state buried in the
 ///   panel: *"nothing popped up when I opened the app for the first time"*.
-///   `WelcomeWindowView` is that window; it opens once, via the scene's
-///   launch behaviour, and never again.
+///   `WelcomeWindowView` is that window's content; `WelcomeWindowController`
+///   opens it once, as an AppKit window the app presents itself, and never
+///   again.
 /// - **No featured sources.** Naming Mail and Reminders *"sells short the
 ///   depth of services I&C integrates with"* — so the welcome names the whole
 ///   roster and has one button, "Add Your First Source".
@@ -105,37 +106,30 @@ struct WelcomeView: View {
     private func add() {
         appState.requestAddSource(kind: nil)
         openSettings()
+        // The welcome window is AppKit-hosted, outside the scene tree, where
+        // the environment action may be inert — so also ask AppKit directly.
+        WindowActivation.openSettings()
         WindowActivation.focusSettings()
         afterAdd?()
     }
 }
 
-/// The window that opens on first launch. `InboxAndChillApp` presents it
-/// through the scene's launch behaviour when `AppState.wantsWelcomeWindow`
-/// is set, so nothing here decides *whether* to show — only what to do once
-/// shown: come to the front (an accessory app's window otherwise lands
-/// behind whatever is frontmost), and close itself once a source exists.
+/// The content of the first-launch window. `WelcomeWindowController` owns
+/// the window and decides nothing; `AppState` decides *whether* (see
+/// `wantsWelcomeWindow`). This view only knows how to close itself: after
+/// the button, or once a source exists by any other route.
 struct WelcomeWindowView: View {
-    @Environment(\.dismissWindow) private var dismissWindow
+    var onDismiss: () -> Void
     @Query private var sources: [SourceConfig]
 
     var body: some View {
-        WelcomeView(afterAdd: { dismissWindow(id: WelcomeWindowView.windowID) })
+        WelcomeView(afterAdd: onDismiss)
             .frame(width: 440)
             .padding(.vertical, 12)
-            .onAppear {
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate()
-            }
-            .onDisappear {
-                NSApp.setActivationPolicy(.accessory)
-            }
             // The user added a source some other way (the panel, Settings
             // directly): the welcome has done its job.
             .onChange(of: sources.isEmpty) { _, isEmpty in
-                if !isEmpty { dismissWindow(id: WelcomeWindowView.windowID) }
+                if !isEmpty { onDismiss() }
             }
     }
-
-    static let windowID = "welcome"
 }

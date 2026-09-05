@@ -19,6 +19,16 @@ enum WindowActivation {
         focus { $0.identifier?.rawValue.hasPrefix("main") == true }
     }
 
+    /// Opens the Settings scene the way the app menu's "Settings…" item does.
+    /// For a view hosted in a plain `NSWindow` (the welcome), the SwiftUI
+    /// `openSettings` environment action may have nothing behind it; this is
+    /// the AppKit route it resolves to. Harmless when Settings is already up.
+    static func openSettings() {
+        for name in ["showSettingsWindow:", "showPreferencesWindow:"] {
+            if NSApp.sendAction(Selector((name)), to: nil, from: nil) { return }
+        }
+    }
+
     /// The Settings scene window (SwiftUI names it
     /// "com_apple_SwiftUI_Settings_window"; match loosely so an OS rename
     /// degrades to the title check instead of a dead button).

@@ -201,6 +201,7 @@ final class AppState {
             // The controller evaluated its state before the callback above
             // existed, so the launch-time evaluation is replayed by hand.
             await nudgeIfTrialEnding(license.state)
+            await presentWelcomeIfNeeded()
         }
     }
 
@@ -222,10 +223,10 @@ final class AppState {
         pendingAddSource = AddSourceRequest(kind: kind)
     }
 
-    /// Whether this launch is the first one, with no source yet — read once,
-    /// synchronously, in `init`, because `InboxAndChillApp` needs the answer
-    /// while it builds its scenes: the welcome `Window` is presented through
-    /// its launch behaviour rather than opened afterwards. See `FirstRun`.
+    /// Whether this launch is the first one, with no source yet — read once
+    /// in `init` and stamped there, so a relaunch is never a first run again.
+    /// The window itself is opened by `presentWelcomeIfNeeded` once launch
+    /// has settled. See `FirstRun` and `WelcomeWindowController`.
     let wantsWelcomeWindow: Bool
 
     private static func decideWelcomeWindow(container: ModelContainer) -> Bool {
@@ -238,10 +239,27 @@ final class AppState {
         let kinds =
             ((try? container.mainContext.fetch(FetchDescriptor<SourceConfig>())) ?? [])
             .map(\.kind)
-        return FirstRun.shouldShowWelcomeWindow(
+        let decision = FirstRun.shouldShowWelcomeWindow(
             hasLaunchedBefore: launchedBefore,
             needsFirstSource: FirstRun.needsFirstSource(kinds: kinds))
+        // Default level, not .info: this is the line to read when someone
+        // says the welcome never appeared, and .info may never reach disk.
+        firstRunLog.notice(
+            "first run check: launchedBefore=\(launchedBefore) sources=\(kinds.count) welcome=\(decision)")
+        return decision
     }
+
+    /// Opens the welcome window a beat after launch. Not a SwiftUI `Window`
+    /// scene: on a real first launch that scene never appeared (the process
+    /// log read "No windows open yet"), so the app opens an `NSWindow` itself.
+    private func presentWelcomeIfNeeded() async {
+        guard wantsWelcomeWindow else { return }
+        try? await Task.sleep(for: .milliseconds(400))
+        WelcomeWindowController.shared.present(appState: self)
+        Self.firstRunLog.notice("welcome window presented")
+    }
+
+    private static let firstRunLog = AppLog.logger(.diagnostics)
 
     // MARK: Trial nudges
 
