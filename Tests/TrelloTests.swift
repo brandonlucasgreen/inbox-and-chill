@@ -237,7 +237,7 @@ struct TrelloTests {
     func editorCopyDoesNotRepeatItself() throws {
         let trello = try #require(ConnectorCatalog.descriptor(for: "trello"))
         let onScreen =
-            trello.authNote + trello.setupSteps.joined()
+            trello.sourceNote + trello.setupSteps.joined()
             + trello.fields.map(\.help).joined()
         #expect(onScreen.components(separatedBy: "Keychain").count - 1 <= 1)
         #expect(onScreen.components(separatedBy: "Power-Up").count - 1 <= 2)

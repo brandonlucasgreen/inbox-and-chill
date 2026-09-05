@@ -161,7 +161,9 @@ This matters because a fork is what would make the idea bad, and this is not one
 **So the blockers are no longer technical. Two remain, and both are worse.**
 
 1. **Onboarding, which collides with Guideline 2.1.** Every surviving source is
-   BYO-credential, and the `authNote` strings record *why* each one has to be:
+   BYO-credential, and **this section is where the reasoning lives** — the
+   `authNote` strings that used to carry it in the source editor were deleted
+   on 2026-09-05 as part of the copy cut:
    Slack needs the user to register their own app and paste a
    twelve-scope manifest, GitHub needs a classic PAT (fine-grained are
    rejected outright), Linear a personal API key, Sentry an org slug and token.
@@ -236,7 +238,7 @@ which changes §2.1.9's reasoning about what a purchase means. Three consequence
 **The direct build is the only one that can serve this buyer, and Apple Mail is
 why.** Mail is the sole zero-credential source in the app — no token, nothing to
 register, nothing to sign into — and it covers Gmail (§6.13). Every other source
-is BYO-credential by necessity, documented in its `authNote`. So the reduced MAS
+is BYO-credential by necessity, documented in §6.9. So the reduced MAS
 variant §2.1.10 costed out would have been aimed squarely at non-technical
 buyers while having cut the one source they could actually set up. That is the
 argument against MAS restated from the demand side, and it is the stronger form.
@@ -578,7 +580,7 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 | Slack | ❌ Pointless here | OAuth v2 requires **HTTPS redirect URIs** (no localhost/custom scheme), impossible for a serverless native app. And since every user installs their *own* workspace app, Slack's install page already runs the OAuth flow and displays the xoxp token — paste is the flow's last step, not an alternative to it. The `xapp` Socket Mode token can never come from OAuth. |
 | Linear | ⚠️ Viable, optional | PKCE public-client flow (no secret) with documented `http://localhost` loopback redirect; 24h tokens + refresh; near-identical rate limits. Requires registering a Linear OAuth app (client_id) first. The personal API key remains Linear's sanctioned personal path and is fewer steps — implement OAuth only if/when the GitHub release wants nicer onboarding. Sandbox note: the loopback listener would need `network.server` entitlement if the app is ever sandboxed. |
 
-**Decision (final, 2026-08-19): every source is paste-a-token; Linear PKCE was implemented and then removed.** Brandon's call — *"Let's remove the 'sign in with Linear' option for auth, personal API token is fine."* The table's original verdict was right and the 2026-08-17 supersession below was the mistake: OAuth still required the user to register their own Linear application and paste its client ID, so it traded one paste for a longer setup, a fixed loopback port, and a token that expires. `LinearOAuth.swift`, the auth-method picker and the token refresh path are gone; the source editor renders Linear like every other paste-a-token source and its `authNote` records this. Leftover `oauth*` Keychain material is cleared the next time a Linear source is saved. **If OAuth is ever revisited for a public release, the argument to beat is "fewer steps", not "more standard".**
+**Decision (final, 2026-08-19): every source is paste-a-token; Linear PKCE was implemented and then removed.** Brandon's call — *"Let's remove the 'sign in with Linear' option for auth, personal API token is fine."* The table's original verdict was right and the 2026-08-17 supersession below was the mistake: OAuth still required the user to register their own Linear application and paste its client ID, so it traded one paste for a longer setup, a fixed loopback port, and a token that expires. `LinearOAuth.swift`, the auth-method picker and the token refresh path are gone; the source editor renders Linear like every other paste-a-token source and this section records why. Leftover `oauth*` Keychain material is cleared the next time a Linear source is saved. **If OAuth is ever revisited for a public release, the argument to beat is "fewer steps", not "more standard".**
 
 **Decision (superseded 2026-08-17, reverted 2026-08-19): Linear PKCE is now implemented** — `LinearOAuth.swift`, loopback callback on fixed port 52180, bring-your-own client ID, tokens in Keychain with auto-refresh; the personal API key path remains the default/fewest-steps option. GitHub and Slack stay paste-a-token (verdicts above still hold), and the source editor now says why in-line.
 
@@ -586,7 +588,7 @@ The Vibe-Island-style feature: surface "Claude is waiting for you" / "your long 
 
 Five touchpoints, in the order you write them:
 
-1. `ConnectorCatalog.all` — fields (`isSecret`/`isToggle`), `setupSteps`, `setupURL`, `authNote`.
+1. `ConnectorCatalog.all` — fields (`isSecret`/`isToggle`), `setupSteps`, `setupURL`, `sourceNote` (one paragraph, and **not** the OAuth reasoning — that stays here in §6.9; see the copy budget in CLAUDE.md).
 2. `ConnectorFactory.make` — one `case`.
 3. The actor. Sizes already in the tree: **GitHub 260 lines** (poll + `markDone` + pagination), ntfy 342 (WebSocket push), Linear 535 + 136, Slack 1,397. A well-behaved REST poller is **~200–300 lines**, and `GitHubConnector` is the template.
 4. Optionally `AppState.openable(_:payload:)` — one case if the source has a desktop app worth landing in.

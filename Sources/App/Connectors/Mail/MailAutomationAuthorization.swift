@@ -168,22 +168,29 @@ enum MailAutomationAuthorization {
         var coldNote: String
     }
 
+    /// Three bullets, and they are the three the user cannot guess.
+    ///
+    /// Trimmed from ~150 words to ~70 on 2026-09-05, alongside the same cut
+    /// across every source editor. The claims are unchanged — each is a
+    /// statement about what `fetchScript` and `markDoneScript` really do,
+    /// and `preflightSaysTheLoadBearingThings` pins them — only the words
+    /// around them went. Reminders got this treatment first, on 2026-08-26.
     static let preflight = Preflight(
         title: "Reading your mail stays on this Mac",
         lead:
-            "Inbox & Chill asks Mail for the messages you've flagged or haven't read, so they queue up beside everything else you owe a reply.",
+            "Queues the messages you've flagged or haven't read, beside everything else you owe a reply.",
         bullets: [
             // True of fetchScript: it reads id, message id, subject, sender,
             // date received, flag and read state, account and mailbox name.
-            "It reads each message's subject, sender and date — never the body.",
+            "Reads each message's subject, sender and date — never the body.",
             // True of markDoneScript: sets read status, and clears the flag
             // only when a flag is what queued the row.
-            "It never sends, writes, deletes or files anything. Marking a row done marks that message read in Mail, and unflags it if a flag is what queued it.",
+            "Sends and deletes nothing. Done marks a message read, and unflags it if a flag queued it.",
             // True of the connector as a whole: no network path exists in it.
-            "Nothing leaves this Mac. There's no account to make and no server involved — it's reading the Mail app that's already on your dock.",
+            "Nothing leaves this Mac — it's reading the Mail app already on your dock.",
         ],
         promptNote:
-            "Next, macOS will ask whether Inbox & Chill may control Mail. That dialog is macOS's own, and allowing it is the only way any app can read Mail. If you decline, this source will look permanently empty rather than broken — so it's worth saying yes now, or leaving this source off.",
+            "macOS asks once. Decline and this source stays empty.",
         coldNote:
-            "The first read after Mail has been sitting idle takes about ten seconds. That's Mail waking up, not a problem.")
+            "The first read after Mail has been idle takes about ten seconds.")
 }

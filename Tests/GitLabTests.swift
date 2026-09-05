@@ -277,7 +277,7 @@ struct GitLabTests {
     func editorCopyDoesNotRepeatItself() throws {
         let gitlab = try #require(ConnectorCatalog.descriptor(for: "gitlab"))
         let onScreen =
-            gitlab.authNote + gitlab.setupSteps.joined()
+            gitlab.sourceNote + gitlab.setupSteps.joined()
             + gitlab.fields.map(\.help).joined()
         #expect(onScreen.components(separatedBy: "Keychain").count - 1 <= 1)
         #expect(onScreen.components(separatedBy: "read_api").count - 1 <= 1)

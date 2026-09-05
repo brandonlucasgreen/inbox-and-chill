@@ -34,10 +34,10 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
     /// opens. Numbered in order; one short imperative sentence each, and
     /// inline markdown is rendered.
     ///
-    /// `authNote` says *why* a source is paste-a-token; these say *how*.
-    /// Keeping them apart is what keeps the how brief — the reasoning is
-    /// underneath the fields for whoever wants it, and the steps are above
-    /// them where you need them.
+    /// Only for a source that asks for a credential. A source with nothing
+    /// to fetch gets none — steps there could only restate the access
+    /// section below them, which is the duplication Brandon called out on
+    /// 2026-08-26 (Reminders) and again on 2026-09-05 (Mail, and the rest).
     var setupSteps: [String] = []
     /// The provider page step 1 refers to, offered as a button.
     var setupURL: String = ""
@@ -45,9 +45,18 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
     /// Copy button beside the steps.
     var setupPayload: SetupPayload?
 
-    /// Shown in the source editor under the credential fields: why this
-    /// provider is paste-a-token rather than OAuth (PLAN §6.9 verdicts).
-    var authNote: String = ""
+    /// One or two sentences the fields cannot say: what this source will
+    /// actually put in the queue, or the one behaviour that surprises
+    /// people. Rendered under the fields, with inline markdown.
+    ///
+    /// Deliberately **not** a place for "why a token rather than OAuth".
+    /// That reasoning is real, and it lives in PLAN §6.9 and the connector
+    /// headers — but it was 789 words spread across these thirteen screens
+    /// until 2026-09-05, answering a question nobody standing in front of a
+    /// token field is asking. Nor is it the place to say where the secret
+    /// is kept: `SourceEditorSheet` states that once, under the fields of
+    /// every kind that has one.
+    var sourceNote: String = ""
 
     /// One line on what connecting this kind asks of the user, shown under
     /// the kind picker *before* any field asks it. Nil derives it: a kind
@@ -113,7 +122,7 @@ enum ConnectorCatalog {
                 .init(
                     key: "apiKey", label: "Personal API Key", isSecret: true,
                     placeholder: "lin_api_…",
-                    help: "Linear → Settings → Security & Access → Personal API keys")
+                    help: "")
             ],
             setupSteps: [
                 "Open Linear → Settings → Security & Access.",
@@ -121,7 +130,6 @@ enum ConnectorCatalog {
                 "Paste it below.",
             ],
             setupURL: "https://linear.app/settings/api",
-            authNote: "Why no “Sign in with Linear”? It existed and was removed: OAuth still required registering your own Linear application and pasting its client ID, so it traded one paste for a longer setup and a token that expires. The personal API key is Linear's own sanctioned path for personal use. The key is stored in your Keychain and never leaves this Mac.",
             grouping: .init(noun: "issue or project", defaultOn: true)),
         .init(
             id: "github", displayName: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right",
@@ -129,10 +137,10 @@ enum ConnectorCatalog {
                 .init(
                     key: "pat", label: "Classic Personal Access Token", isSecret: true,
                     placeholder: "ghp_…",
-                    help: "Classic PAT with the `notifications` scope. Fine-grained tokens cannot read notifications."),
+                    help: "Fine-grained tokens can't read notifications."),
                 .init(
                     key: "participating", label: "Only where I'm involved", isSecret: false,
-                    help: "Mentions, review requests, assignments and threads you've commented on. Off means every notification from every repo you watch — which on a busy org can be thousands.",
+                    help: "Off means every notification from every repo you watch.",
                     isToggle: true, defaultOn: true),
             ],
             setupSteps: [
@@ -142,7 +150,6 @@ enum ConnectorCatalog {
                 "Paste it below.",
             ],
             setupURL: "https://github.com/settings/tokens",
-            authNote: "Why no “Sign in with GitHub”? GitHub's notifications API only accepts classic personal access tokens — it rejects OAuth app tokens and fine-grained PATs outright. The token is stored in your Keychain and never leaves this Mac.",
             setupCost: "You'll paste a classic personal access token. An organization with SSO asks you to authorize it once.",
             grouping: .init(noun: "repository", defaultOn: true)),
         .init(
@@ -151,11 +158,11 @@ enum ConnectorCatalog {
                 .init(
                     key: "token", label: "Personal Access Token", isSecret: true,
                     placeholder: "glpat-…",
-                    help: "Needs the `api` scope. `read_api` can read this queue but not clear it, so E would fail."),
+                    help: "`read_api` can read this queue but not clear it."),
                 .init(
                     key: "host", label: "GitLab URL", isSecret: false,
                     placeholder: GitLabConnector.defaultHost,
-                    help: "Blank means gitlab.com. Set it for a self-managed instance, including any subpath."),
+                    help: "Blank means gitlab.com. Set it for a self-managed instance."),
             ],
             setupSteps: [
                 "In GitLab, open **Preferences → Access tokens**.",
@@ -163,7 +170,7 @@ enum ConnectorCatalog {
                 "Paste it below.",
             ],
             setupURL: "https://gitlab.com/-/user_settings/personal_access_tokens",
-            authNote: "GitLab's To-Do list *is* this queue: assigned work, mentions, approvals you owe, and pipelines that broke. Marking one done here marks it done in GitLab, so it stops arriving.\n\nWhy paste a token? GitLab's OAuth is built for applications you register and host; a personal access token is its own sanctioned path for acting as yourself. It is stored in your Keychain and never leaves this Mac.",
+            sourceNote: "Your GitLab **To-Do list** is this queue. Marking a row done marks it done there too, so it stops arriving.",
             grouping: .init(noun: "project", defaultOn: true)),
         .init(
             id: "trello", displayName: "Trello", systemImage: "rectangle.split.3x1",
@@ -171,10 +178,10 @@ enum ConnectorCatalog {
                 .init(
                     key: "apiKey", label: "API Key", isSecret: false,
                     placeholder: "0123456789abcdef…",
-                    help: "Trello treats this one as public — it is the token below that grants access."),
+                    help: "Trello treats this one as public."),
                 .init(
                     key: "token", label: "Token", isSecret: true,
-                    help: "Grants full access to your Trello account, so it is kept in your Keychain."),
+                    help: ""),
             ],
             setupSteps: [
                 "Open **trello.com/apps/admin** and create a Power-Up — Trello now issues keys through one, even for personal use.",
@@ -183,7 +190,7 @@ enum ConnectorCatalog {
                 "Paste both below.",
             ],
             setupURL: "https://trello.com/apps/admin",
-            authNote: "Trello's notification feed is a real inbox: mentions, cards you are added to, due dates, board invites. Marking a row done here marks it read in Trello, so it stops arriving.\n\nWhy two values? Trello's API pairs a public key with a personal token, and it has no OAuth flow a native app can complete on its own — the Token link *is* the flow, and it ends by showing you the token. Only the token is a secret, and it never leaves this Mac.",
+            sourceNote: "Your Trello **notifications** are this queue — mentions, cards you're added to, due dates. Marking a row done marks it read there too.",
             grouping: .init(noun: "board", defaultOn: true)),
         .init(
             id: "slack", displayName: "Slack", systemImage: "number",
@@ -191,23 +198,23 @@ enum ConnectorCatalog {
                 .init(
                     key: "userToken", label: "User OAuth Token", isSecret: true,
                     placeholder: "xoxp-…",
-                    help: "From your app's OAuth & Permissions page. Not the “xoxe.xoxp-” app configuration token offered on the apps list — that one is Manifest-API-only and expires in 12 hours."),
+                    help: "Not the “xoxe.xoxp-” token on the apps list — that one expires in 12 hours."),
                 .init(
                     key: "appToken", label: "App-Level Token (optional)", isSecret: true,
                     placeholder: "xapp-…",
-                    help: "Socket Mode token with connections:write. Leave blank and Slack still works — you just won't get channel mentions."),
+                    help: "Blank still works — you just won't get channel mentions."),
                 .init(
                     key: "saveEmoji", label: "Save Emoji", isSecret: false,
                     placeholder: "pushpin",
-                    help: "Reacting with this emoji saves a message to the queue"),
+                    help: "React with it to save a message to the queue."),
                 .init(
                     key: "searchTerms", label: "Keyword Watch", isSecret: false,
                     placeholder: "@you, your project, a customer name",
-                    help: "Comma-separated. Polls Slack search every 5 minutes and queues matches from the last 24 hours — including public channels you're NOT in, which events can't see and Slack itself won't notify you about. Needs the search:read scope (re-install the app after adding it). Blank turns it off."),
+                    help: "Comma-separated. Matches from the last 24 hours, including public channels you're not in. Blank turns it off."),
                 .init(
                     key: "mutedChannels", label: "Mute Channels", isSecret: false,
                     placeholder: "#random, #deploys",
-                    help: "Comma-separated channel names. Nothing from these channels reaches the queue — keyword hits and @-mentions both — so you can watch a term everywhere except the places it means nothing. DMs and emoji saves are never muted."),
+                    help: "Comma-separated. Nothing from these reaches the queue. DMs and emoji saves are never muted."),
             ],
             setupSteps: [
                 "Go to api.slack.com/apps → **Create New App** → **From an app manifest**.",
@@ -218,7 +225,6 @@ enum ConnectorCatalog {
             ],
             setupURL: "https://api.slack.com/apps",
             setupPayload: .init(label: "App Manifest", text: slackAppManifest),
-            authNote: "Why paste tokens? Your workspace app's install page *is* Slack's OAuth flow — it ends by displaying the user token. A native app can't run Slack's OAuth itself: the token exchange requires your client secret (Slack has no PKCE public-client mode), and redirect URLs must be HTTPS, so there's no loopback to come back to. The app-level token never comes from OAuth at all.\n\nOnly the user token is required. Adding the app-level token turns on Socket Mode, which is the only supported way to receive channel mentions — Slack publishes no API for “messages that mention me”, so without it you get DM unreads, emoji saves and read-state auto-clear, but not mentions. Both tokens live in your Keychain and never leave this Mac.",
             setupCost: "You'll create a Slack app from our manifest first — five steps, and your workspace admin may need to approve it.",
             grouping: .init(noun: "channel", defaultOn: true)),
         .init(
@@ -227,19 +233,19 @@ enum ConnectorCatalog {
                 .init(
                     key: "org", label: "Organization Slug", isSecret: false,
                     placeholder: "acme",
-                    help: "The `sentry.io/organizations/<slug>/` part of your URL — not the display name."),
+                    help: "The `sentry.io/organizations/<slug>/` part of your URL."),
                 .init(
                     key: "token", label: "User Auth Token", isSecret: true,
                     placeholder: "sntryu_…",
-                    help: "Needs the `event:read` scope, plus `event:write` only if you turn on resolving below."),
+                    help: ""),
                 .init(
                     key: "query", label: "Search", isSecret: false,
                     placeholder: SentryConnector.defaultQuery,
-                    help: "Sentry search syntax, the same as the issues page. Blank uses `\(SentryConnector.defaultQuery)` — Sentry's own For Review tab, which is already a triage queue."),
+                    help: "Sentry search syntax. Blank uses `\(SentryConnector.defaultQuery)` — its own For Review tab."),
                 .init(
                     key: "resolveOnDone", label: "Resolve in Sentry when I mark done",
                     isSecret: false,
-                    help: "Off by default, because resolving is team-visible — it closes the issue for everyone. Left off, marking done here just means “I've seen this”, and the issue comes back if the error happens again.",
+                    help: "Resolving is team-visible — it closes the issue for everyone. Left off, done here just means “I've seen this”.",
                     isToggle: true, defaultOn: false),
             ],
             setupSteps: [
@@ -248,31 +254,29 @@ enum ConnectorCatalog {
                 "Paste it below, along with your organization slug.",
             ],
             setupURL: "https://sentry.io/settings/account/api/auth-tokens/",
-            authNote: "Why paste a token? Sentry's own user auth tokens are the sanctioned path for acting as yourself — there is no app to register and nothing to approve. The token is stored in your Keychain and never leaves this Mac.\n\nSentry's REST API is available on every plan including the free Developer tier; what the paid tiers buy is event quota and higher rate limits, not API access.",
+            sourceNote: "Sentry's API works on every plan, the free tier included — what you pay for is event quota, not access.",
             grouping: .init(noun: "project", defaultOn: true)),
         .init(
             id: "appleMail", displayName: "Apple Mail", systemImage: "envelope",
             fields: [
                 .init(
                     key: "flagged", label: "Flagged messages", isSecret: false,
-                    help: "A message you flagged yourself is the strongest signal an inbox has, so these arrive high-signal. Marking one done marks it read in Mail and clears the flag.",
+                    help: "The strongest signal an inbox has, so these arrive high-signal.",
                     isToggle: true, defaultOn: true),
                 .init(
                     key: "unread", label: "Unread messages", isSecret: false,
-                    help: "Off by default on purpose: unread-in-inbox is thousands of messages for most people and would bury every other source. Marking one done marks it read in Mail, the same as reading it there.",
+                    help: "Off by default — unread-in-inbox is thousands of messages for most people.",
                     isToggle: true, defaultOn: false),
                 .init(
                     key: "mailbox", label: "Mailbox", isSecret: false,
                     placeholder: "INBOX",
-                    help: "Optional. Blank watches Mail's unified inbox across every account. Name one mailbox to narrow it."),
+                    help: "Blank watches every account. Name one to narrow it."),
             ],
             allowsMultiple: false,
-            setupSteps: [
-                "Nothing to paste — this source reads the Mail app that's already on this Mac.",
-                "macOS will ask once for permission to control Mail. **Allow it**, or the source stays permanently empty.",
-                "Flag a message in Mail and it appears here on the next refresh.",
-            ],
-            authNote: "No token, and nothing to sign in to: this reads the Mail app on this Mac over AppleScript, so it covers every account Mail has — **including Gmail**, which is why there is no separate Gmail source. Nothing is sent anywhere.\n\nmacOS gates this behind Privacy & Security → Automation. If you decline, Mail looks permanently empty rather than broken, so this source says so explicitly instead of showing you an empty queue.\n\nThe first refresh after Mail has been idle can take around ten seconds — that's Mail waking up, not a failure.",
+            // No `setupSteps`, for the reason Reminders has none: there is no
+            // credential to fetch, so they could only restate the access
+            // section rendered directly below them and the cost line above.
+            sourceNote: "Covers every account Mail has, **including Gmail** — which is why there's no separate Gmail source.",
             grouping: .init(noun: "sender", defaultOn: true),
             completeVerb: .init(
                 button: "Archive", menu: "Archive in Mail",
@@ -282,7 +286,7 @@ enum ConnectorCatalog {
             fields: [
                 .init(
                     key: "dueToday", label: "Due today or overdue", isSecret: false,
-                    help: "Anything you're late on, plus anything due before midnight. Undated reminders are never included.",
+                    help: "Anything you're late on, plus anything due before midnight.",
                     isToggle: true, defaultOn: true),
                 .init(
                     key: "lists", label: "Lists", isSecret: false,
@@ -291,7 +295,7 @@ enum ConnectorCatalog {
                     key: "listsIncludeUndated",
                     label: "Include undated reminders from those lists",
                     isSecret: false,
-                    help: "Off by default — a “someday” list is usually long enough to bury your other sources.",
+                    help: "A “someday” list is usually long enough to bury your other sources.",
                     isToggle: true, defaultOn: false),
             ],
             allowsMultiple: false,
@@ -300,7 +304,6 @@ enum ConnectorCatalog {
             // directly below them — which is exactly the duplication Brandon
             // called out on 2026-08-26. `credentialSourcesExplainThemselves`
             // only requires steps of sources that ask for a secret.
-            authNote: "No token and nothing to sign in to: this reads the Reminders app on this Mac, so it covers every account Reminders syncs — iCloud included. Nothing is sent anywhere.",
             grouping: .init(noun: "list", defaultOn: false),
             completeVerb: .init(
                 button: "Complete task", menu: "Complete Task",
@@ -311,10 +314,10 @@ enum ConnectorCatalog {
                 .init(
                     key: "token", label: "API Token", isSecret: true,
                     placeholder: "0123456789abcdef…",
-                    help: "Todoist → Settings → Integrations → Developer."),
+                    help: ""),
                 .init(
                     key: "dueToday", label: "Due today or overdue", isSecret: false,
-                    help: "Anything you're late on, plus anything due before midnight. Undated tasks are never included.",
+                    help: "Anything you're late on, plus anything due before midnight.",
                     isToggle: true, defaultOn: true),
                 .init(
                     key: "projects", label: "Projects", isSecret: false,
@@ -323,7 +326,7 @@ enum ConnectorCatalog {
                     key: "projectsIncludeUndated",
                     label: "Include undated tasks from those projects",
                     isSecret: false,
-                    help: "Off by default — a “someday” project is usually long enough to bury your other sources.",
+                    help: "A “someday” project is usually long enough to bury your other sources.",
                     isToggle: true, defaultOn: false),
             ],
             setupSteps: [
@@ -332,10 +335,8 @@ enum ConnectorCatalog {
                 "Paste it below, then pick what this source should watch.",
             ],
             setupURL: "https://app.todoist.com/app/settings/integrations/developer",
-            // Two facts only, each stated once (the 2026-08-26 copy note): why
-            // it is a token rather than a sign-in button, and the one thing
-            // about `C` that Todoist itself does differently from the row.
-            authNote: "Todoist's OAuth is built for apps distributed to other people — it wants a registered client and a redirect URL — so the personal API token is its own sanctioned path for your own account. The token is stored in your Keychain and never leaves this Mac.\n\nCompleting a repeating task with **C** reschedules it in Todoist rather than ticking it off, which is what Todoist itself does. Undo can't take that back.",
+            // The one thing `C` does here that the button cannot promise.
+            sourceNote: "**C** on a repeating task reschedules it rather than ticking it off — Todoist's own behaviour, and undo can't take it back.",
             grouping: .init(noun: "project", defaultOn: false),
             completeVerb: .init(
                 button: "Complete task", menu: "Complete Task",
@@ -346,19 +347,19 @@ enum ConnectorCatalog {
                 .init(
                     key: "token", label: "Personal Access Token", isSecret: true,
                     placeholder: "2/1234567890/…",
-                    help: "From Asana's developer console."),
+                    help: ""),
                 .init(
                     key: "dueToday", label: "Due today or overdue", isSecret: false,
-                    help: "Tasks assigned to you that you're late on, plus anything due before midnight. Undated tasks are never included.",
+                    help: "Assigned to you, and either late or due before midnight.",
                     isToggle: true, defaultOn: true),
                 .init(
                     key: "projects", label: "Projects", isSecret: false,
-                    help: "Everything open in the projects you tick — whoever it's assigned to, because Asana's API can't narrow a project to you."),
+                    help: "Everything open in them, whoever it's assigned to — Asana can't narrow a project to you."),
                 .init(
                     key: "projectsIncludeUndated",
                     label: "Include undated tasks from those projects",
                     isSecret: false,
-                    help: "Off by default — a shared project's undated backlog is usually long enough to bury your other sources.",
+                    help: "A shared project's undated backlog usually buries your other sources.",
                     isToggle: true, defaultOn: false),
             ],
             setupSteps: [
@@ -367,9 +368,8 @@ enum ConnectorCatalog {
                 "Paste it below, then pick what this source should watch.",
             ],
             setupURL: "https://app.asana.com/0/developer-console",
-            // Two facts, each once: why a token rather than a sign-in
-            // button, and the one thing Asana's API cannot see.
-            authNote: "Asana's OAuth is for apps that act for many users — it wants a registered client and a redirect URL — so a personal access token is its own sanctioned path for your own account. The token is stored in your Keychain and never leaves this Mac.\n\nAsana's Inbox is not in its API, so this source is the tasks assigned to you, not your notifications.",
+            // The one thing Asana's API cannot see.
+            sourceNote: "Asana's Inbox isn't in its API, so this is the tasks assigned to you — not your notifications.",
             grouping: .init(noun: "project", defaultOn: false),
             completeVerb: .init(
                 button: "Complete task", menu: "Complete Task",
@@ -381,11 +381,11 @@ enum ConnectorCatalog {
                     key: "url", label: "Feed URL", isSecret: false,
                     placeholder: "https://…"),
                 .init(key: "authHeader", label: "Authorization Header", isSecret: true,
-                    help: "Optional; sent as the Authorization header verbatim"),
+                    help: "Optional; sent verbatim."),
                 .init(
                     key: "mapping", label: "Field Mapping", isSecret: false,
                     placeholder: "id=id,title=title,url=url,time=created_at",
-                    help: "Maps feed JSON keys to item fields. Add `root=data` when the list sits under a key — most APIs nest it."),
+                    help: "Maps feed keys to item fields. Add `root=data` when the list is nested."),
             ],
             setupSteps: [
                 "Point **Feed URL** at any URL returning a JSON array — or an object holding one, like Stripe's `{\"data\": […]}`.",
@@ -399,22 +399,21 @@ enum ConnectorCatalog {
                 .init(
                     key: "server", label: "Server", isSecret: false,
                     placeholder: "https://ntfy.sh",
-                    help: "Leave as ntfy.sh, or point at your own instance"),
+                    help: "Leave as ntfy.sh, or point at your own instance."),
                 .init(
                     key: "topics", label: "Topics", isSecret: false,
                     placeholder: "deploys,alerts",
-                    help: "Comma-separated. On an unprotected topic the name is the only thing keeping strangers out — treat it like a password."),
+                    help: "Comma-separated. On an unprotected topic the name is the only thing keeping strangers out."),
                 .init(
                     key: "token", label: "Access Token", isSecret: true,
                     placeholder: "tk_…",
-                    help: "Optional — for a protected topic. Takes precedence over username/password below."),
+                    help: "Optional, for a protected topic. Wins over username and password."),
                 .init(
                     key: "username", label: "Username", isSecret: false,
                     placeholder: "phil",
-                    help: "Optional — use instead of a token if your server only has accounts."),
+                    help: "Optional — instead of a token."),
                 .init(
-                    key: "password", label: "Password", isSecret: true,
-                    help: "Optional — sent as HTTP basic auth alongside the username."),
+                    key: "password", label: "Password", isSecret: true),
             ],
             bannersDefaultOn: true,
             setupSteps: [
@@ -423,7 +422,7 @@ enum ConnectorCatalog {
                 "Only if your server protects the topic: add a token, or a username and password.",
             ],
             setupURL: "https://ntfy.sh",
-            authNote: "No OAuth needed, and none to skip: ntfy has no accounts on unprotected topics — publishing to a topic is the whole API. Priority 4–5 messages arrive as high-signal; `click` becomes the item's link.\n\nFor a protected topic, use either an access token or a username and password — whichever your server is set up for. A token wins if you fill in both, since it's the narrower credential and can be revoked without touching your account password. The token and password are stored in your Keychain and never leave this Mac.",
+            sourceNote: "Priority 4–5 messages arrive high-signal, and a message's `click` link becomes the item's.",
             setupCost: "A topic name. A token or password only if the topic is protected.",
             grouping: .init(noun: "topic", defaultOn: true)),
         .init(
@@ -431,11 +430,9 @@ enum ConnectorCatalog {
             fields: [],
             // One listener per Mac: a second would fight for the port.
             allowsMultiple: false, bannersDefaultOn: true,
-            setupSteps: [
-                "Nothing to configure — this source only shows what something pushes to it.",
-                "From a script or terminal: `inchill notify --title \"Build finished\"`.",
-                "For Claude Code and other agents, turn on the hooks in this source's editor.",
-            ],
+            // No `setupSteps`: the agents set themselves up in the section
+            // below, and the only other thing to say is the CLI one-liner.
+            sourceNote: "Anything can post here — `inchill notify --title \"Build finished\"` from a script or terminal.",
             setupCost: "Nothing to set up — it listens for the inchill CLI and your coding agents' hooks."),
     ]
 

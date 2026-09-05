@@ -28,19 +28,19 @@ struct AgentHooksSection: View {
         Section("Coding Agents") {
             VStack(alignment: .leading, spacing: 10) {
                 Text(
-                    "Sessions post to this queue, so one waiting on your reply shows up like any other item — and opening it takes you back to where it's running."
+                    "A session waiting on your reply shows up like any other item, and opening it takes you back to where it's running."
                 )
                 .fixedSize(horizontal: false, vertical: true)
 
                 if installers.isEmpty {
                     Text(
-                        "No coding agents found on this Mac yet. Claude Code, Codex CLI and Gemini CLI are connected automatically once they're installed."
+                        "None found yet. Claude Code, Codex CLI and Gemini CLI connect automatically once they're installed."
                     )
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(
-                        "Set up for you. Nothing is installed on your Mac — the inchill command already lives inside this app — and each config file is backed up first, with everything else in it left alone."
+                        "Set up for you. Each config file is backed up first, and everything else in it is left alone."
                     )
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

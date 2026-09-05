@@ -271,9 +271,11 @@ rather than ANDing, so a path filter exempts the whole file.
 ### 4. Read the verdicts this repo already recorded
 
 Before proposing a connector change or answering an API-capability question,
-read: `PLAN.md` §6.9, the `authNote` strings in `Sync/ConnectorCatalog.swift`,
-and the doc comments on the connector itself. They carry verified verdicts with
-their reasoning. Contradicting one has cost real time more than once — e.g.
+read: `PLAN.md` §6.9 and the doc comments on the connector itself. They carry
+verified verdicts with their reasoning. **The catalog no longer does** — the
+"why a token rather than OAuth" paragraphs were deleted from every source
+editor on 2026-09-05 (see the copy budget below); the verdicts they carried
+are unchanged and live in those two places. Contradicting one has cost real time more than once — e.g.
 offering a Slack `search.messages` rework that `SlackConnector`'s own header had
 already ruled out.
 
@@ -313,7 +315,25 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   cursors survive reconnects.
 - `Sync/Store.swift` — `@ModelActor` over SwiftData. Owns done/snooze/pin/purge.
 - `Sync/ConnectorCatalog.swift` — declares each source kind's settings fields
-  (`isSecret`, `isToggle`/`defaultOn`) and its `authNote`.
+  (`isSecret`, `isToggle`/`defaultOn`), its `setupSteps`, and its `sourceNote`.
+
+  **The add-source screen has a copy budget, and it is a test.** Four surfaces
+  can each explain the same thing — `setupCostLabel`, `setupSteps`, per-field
+  `help`, `sourceNote` — which is how thirteen kinds reached 2,018 words by
+  2026-09-05, when Brandon asked for the cut that took them to 975. Slack is
+  the ceiling at 157 words and `editorCopyStaysShort` caps a kind at 170;
+  `secretStorageHasOneHome` forbids restating where the secret is kept,
+  because `SourceEditorSheet` now says that once as the fields section's
+  footer. A `sourceNote` is one paragraph the fields cannot say — what lands
+  in the queue, or the one surprise — **never** why the source is
+  paste-a-token. Same rule for a source with no credential to fetch: it gets
+  no `setupSteps`, because they could only restate the permission section
+  rendered directly below them (Reminders 2026-08-26, Mail 2026-09-05).
+
+  All three of `setupSteps`, `help` and `sourceNote` render **inline
+  markdown** through `SourceEditorSheet.formatted`. Help did not until
+  2026-09-05 and drew its own backticks; only rendering the sheet catches
+  that, never a build or a test.
 - `AppState.makeConnector` — wires settings JSON into connector inits.
 - `Support/Keychain.swift` — service `lol.bgreen.inboxandchill`, account is
   `<sourceConfig UUID>.<field>` (**not** `<kind>.<field>`). Read-through cached
@@ -562,7 +582,7 @@ generalising `TodoistProjectPicker` into `TodoProjectPicker` (provider name
 Four things it deliberately does not have, each because Asana's API does not:
 
 - **No `/notifications`.** Asana's Inbox is not exposed, so this is an
-  assigned-to-me mirror, not an inbox mirror. The `authNote` says so once.
+  assigned-to-me mirror, not an inbox mirror. The `sourceNote` says so once.
 - **No priority.** Asana does priority through per-workspace custom fields,
   so every task is `.none` and only *overdue* raises the high-signal badge.
 - **No recurrence.** Asana repeats a task by spawning a *new* task when the
