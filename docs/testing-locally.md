@@ -12,7 +12,7 @@ That builds a Release configuration, verifies the signature, installs to
 is an `LSUIElement` app — no Dock icon until you open the ⌘0 window). First
 launch asks for notification permission.
 
-Add `--debug` for a Debug build (which includes the fake connector, §2), or
+Add `--debug` for a Debug build (which can run the fake connector, §2), or
 `--no-launch` to install without starting it.
 
 ### Why install instead of running from DerivedData
@@ -76,26 +76,17 @@ with `xcodebuild CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=NO`.
 
 ## 2. Ride the fake connector (no accounts needed)
 
-In Debug builds with no real sources configured, a **fake connector** feeds
-the queue: a Slack-style mention, a PR review request, a Linear-style
-assignment, plus a fresh fake DM every minute or so. Use it to exercise the
-whole triage loop:
+In a Debug build, set `INCHILL_FAKE=1` in the scheme's environment (Xcode:
+Product → Scheme → Edit Scheme → Run → Arguments) and configure no real
+source: a **fake connector** then feeds a rotating queue of items so the
+whole triage loop can be exercised without an account.
 
-- **⌥⌘I** (or click the tray icon) — open the panel
-- **↑/↓** select · **⏎** open · **E** done · **⌘Z** undo · **S** snooze
-  (presets popover) · **D** show the whole message (**Esc** closes it again) · **⌘P** pin · **⌘C** copy ·
-  type to filter · **⌘1…⌘9** source chips · **Esc** peels back one layer at a
-  time
-- Watch the fake "remote" behave: marking the mention done tells the fake
-  connector, so it stays gone on the next poll (write-through, same code
-  path real connectors use).
-- Toggle badge modes in Settings → General and watch the tray icon.
-- Footer: archive box icon → the 90-day archive with search + Restore;
-  window icon (**⌘0**) → the full triage window with sortable columns and
-  multi-select.
-
-To silence the fake source, set `INCHILL_NO_FAKE=1` in the scheme's
-environment (Xcode: Product → Scheme → Edit Scheme → Run → Arguments).
+It is **opt-in on purpose** (since 2026-09-04). It used to register itself in
+any Debug build with no real source, and once a fresh install meant zero
+sources that put fakes on the welcome screen — and, through the test host
+that `xcodebuild test` launches, into the live store the installed app reads
+(Debug and Release share one `store.sqlite`). The test host no longer starts
+any connector, and the fake one has to be asked for.
 
 ## 3. Test the local pipeline (terminal + Claude Code)
 

@@ -192,6 +192,12 @@ final class AppState {
         // not at launch (banners are opt-in; don't alert before the UI).
         notificationDelegate = NotificationDelegate(appState: self)
         UNUserNotificationCenter.current().delegate = notificationDelegate
+        // `xcodebuild test` runs this app as its test host, and the host
+        // shares the live `store.sqlite` with the installed app. Polling real
+        // sources — or the fake one — from a test run wrote rows into the
+        // queue Brandon actually uses (2026-09-04). Under tests the app stays
+        // inert: the tests build their own stores and connectors.
+        guard !DiagnosticsRecorder.isRunningTests else { return }
         Task {
             await bootstrapConnectors()
             await refreshBadge()
@@ -495,8 +501,11 @@ final class AppState {
         }
         completesTaskSourceIDs = taskSourceIDs
         #if DEBUG
-            if configs.allSatisfy({ $0.kind == "local" }),
-                ProcessInfo.processInfo.environment["INCHILL_NO_FAKE"] == nil {
+            if FakeConnector.shouldRegister(
+                configKinds: configs.map(\.kind),
+                environment: ProcessInfo.processInfo.environment,
+                runningTests: DiagnosticsRecorder.isRunningTests)
+            {
                 await engine.register(FakeConnector())
             }
         #endif
@@ -1381,7 +1390,9 @@ final class AppState {
             ?? []
         var ids = Set(configs.filter(\.countsTowardBadge).map(\.id))
         #if DEBUG
-            ids.insert("fake-1")
+            if ProcessInfo.processInfo.environment[FakeConnector.optInKey] != nil {
+                ids.insert("fake-1")
+            }
         #endif
         return ids
     }

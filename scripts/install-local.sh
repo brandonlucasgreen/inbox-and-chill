@@ -11,7 +11,7 @@
 #
 # Usage:
 #   scripts/install-local.sh            # Release build (the real thing)
-#   scripts/install-local.sh --debug    # Debug build (adds the fake connector)
+#   scripts/install-local.sh --debug    # Debug build (fake connector only with INCHILL_FAKE=1)
 #   scripts/install-local.sh --no-launch
 #
 set -euo pipefail

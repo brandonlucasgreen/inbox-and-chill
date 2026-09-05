@@ -56,6 +56,28 @@ struct FirstRunTests {
     }
 }
 
+// MARK: - Fake connector (Sources/App/Connectors/FakeConnector.swift)
+
+/// The fake source wrote rows into the live store from a test run on
+/// 2026-09-04, because a fresh install has zero sources and the connector
+/// registered itself whenever no real one existed. Three gates now.
+@Suite("Fake connector gating")
+struct FakeConnectorGatingTests {
+    @Test("Registers only when asked, only with no real source, never under tests")
+    func gates() {
+        let on = [FakeConnector.optInKey: "1"]
+        #expect(FakeConnector.shouldRegister(configKinds: [], environment: on, runningTests: false))
+        #expect(FakeConnector.shouldRegister(configKinds: ["local"], environment: on, runningTests: false))
+        // A real source anywhere means no fakes mixed in.
+        #expect(!FakeConnector.shouldRegister(configKinds: ["slack"], environment: on, runningTests: false))
+        // Not asked for: a fresh Debug install shows the welcome, not fakes.
+        #expect(!FakeConnector.shouldRegister(configKinds: [], environment: [:], runningTests: false))
+        #expect(!FakeConnector.shouldRegister(configKinds: [], environment: ["INCHILL_NO_FAKE": "1"], runningTests: false))
+        // The test host shares the live store; it must never register one.
+        #expect(!FakeConnector.shouldRegister(configKinds: [], environment: on, runningTests: true))
+    }
+}
+
 // MARK: - Setup cost (ConnectorKindDescriptor.setupCostLabel)
 
 @Suite("Setup cost line")
