@@ -164,6 +164,7 @@ final class AppState {
         }
         store = Store(modelContainer: container)
         license = LicenseController()
+        wantsWelcomeWindow = Self.decideWelcomeWindow(container: container)
         engine = SyncEngine(store: store) { [weak self] change in
             Task { @MainActor in self?.handle(change) }
         }
@@ -191,6 +192,12 @@ final class AppState {
         // not at launch (banners are opt-in; don't alert before the UI).
         notificationDelegate = NotificationDelegate(appState: self)
         UNUserNotificationCenter.current().delegate = notificationDelegate
+        // `xcodebuild test` runs this app as its test host, and the host
+        // shares the live `store.sqlite` with the installed app. Polling real
+        // sources — or the fake one — from a test run wrote rows into the
+        // queue Brandon actually uses (2026-09-04). Under tests the app stays
+        // inert: the tests build their own stores and connectors.
+        guard !DiagnosticsRecorder.isRunningTests else { return }
         Task {
             await bootstrapConnectors()
             await refreshBadge()
@@ -200,7 +207,7 @@ final class AppState {
             // The controller evaluated its state before the callback above
             // existed, so the launch-time evaluation is replayed by hand.
             await nudgeIfTrialEnding(license.state)
-            await presentFirstRunIfNeeded()
+            await presentWelcomeIfNeeded()
         }
     }
 
@@ -222,26 +229,46 @@ final class AppState {
         pendingAddSource = AddSourceRequest(kind: kind)
     }
 
-    /// Opens the panel once, on the very first launch of an install with no
-    /// source yet, so the welcome is seen. See `FirstRun`.
-    private func presentFirstRunIfNeeded() async {
-        // The test host is the app; a panel opening mid-test run is noise,
+    /// Whether this launch is the first one, with no source yet — read once
+    /// in `init` and stamped there, so a relaunch is never a first run again.
+    /// The window itself is opened by `presentWelcomeIfNeeded` once launch
+    /// has settled. See `FirstRun` and `WelcomeWindowController`.
+    let wantsWelcomeWindow: Bool
+
+    private static func decideWelcomeWindow(container: ModelContainer) -> Bool {
+        // The test host is the app; a window opening mid-test run is noise,
         // and stamping the developer's own defaults from a test is worse.
-        guard !DiagnosticsRecorder.isRunningTests else { return }
+        guard !DiagnosticsRecorder.isRunningTests else { return false }
         let defaults = UserDefaults.standard
         let launchedBefore = defaults.bool(forKey: FirstRun.hasLaunchedKey)
         defaults.set(true, forKey: FirstRun.hasLaunchedKey)
         let kinds =
             ((try? container.mainContext.fetch(FetchDescriptor<SourceConfig>())) ?? [])
             .map(\.kind)
-        guard FirstRun.shouldOpenPanelOnLaunch(
+        let forced =
+            ProcessInfo.processInfo.environment[FirstRun.previewEnvironmentKey] != nil
+        let decision = FirstRun.shouldShowWelcomeWindow(
             hasLaunchedBefore: launchedBefore,
-            needsFirstSource: FirstRun.needsFirstSource(kinds: kinds))
-        else { return }
-        // A beat after launch, so the status item exists to be clicked.
-        try? await Task.sleep(for: .seconds(1))
-        PanelToggler.toggle()
+            needsFirstSource: FirstRun.needsFirstSource(kinds: kinds),
+            forced: forced)
+        // Default level, not .info: this is the line to read when someone
+        // says the welcome never appeared, and .info may never reach disk.
+        firstRunLog.notice(
+            "first run check: launchedBefore=\(launchedBefore) sources=\(kinds.count) forced=\(forced) welcome=\(decision)")
+        return decision
     }
+
+    /// Opens the welcome window a beat after launch. Not a SwiftUI `Window`
+    /// scene: on a real first launch that scene never appeared (the process
+    /// log read "No windows open yet"), so the app opens an `NSWindow` itself.
+    private func presentWelcomeIfNeeded() async {
+        guard wantsWelcomeWindow else { return }
+        try? await Task.sleep(for: .milliseconds(400))
+        WelcomeWindowController.shared.present(appState: self)
+        Self.firstRunLog.notice("welcome window presented")
+    }
+
+    private static let firstRunLog = AppLog.logger(.diagnostics)
 
     // MARK: Trial nudges
 
@@ -441,22 +468,15 @@ final class AppState {
         // (`LicenseNotice`) — and gates nothing else: the queue, the archive
         // and every triage action keep working on what's already here.
         guard license.state.allowsSync else { return }
-        var configs =
+        let configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []
-        // The local source (terminal + coding agents) is built-in: create it
-        // on first run. Banners default on for local (decision §2.1.4).
-        if Self.shouldCreateLocalSource(
-            hasLocalConfig: configs.contains(where: { $0.kind == "local" }),
-            userRemoved: Self.localSourceUserRemoved)
-        {
-            let local = SourceConfig(
-                kind: "local", displayName: Self.localSourceDefaultName,
-                bannersEnabled: true)
-            container.mainContext.insert(local)
-            try? container.mainContext.save()
-            configs.append(local)
-        }
+        // The local source used to be created here on first run. It no
+        // longer is (Brandon, 2026-09-04: *"It's odd that Local Coding Agents
+        // is on and enabled already in a fresh setup"*) — every source,
+        // that one included, is added by the user from Settings › Sources.
+        // Installs that already have one keep it.
+        //
         // Renamed 2026-09-04 (Brandon: "Local coding agents"). A source's
         // name is stored at creation, so an existing install would keep the
         // old one forever without this; a name the user typed themselves is
@@ -484,17 +504,18 @@ final class AppState {
         }
         completesTaskSourceIDs = taskSourceIDs
         #if DEBUG
-            if configs.allSatisfy({ $0.kind == "local" }),
-                ProcessInfo.processInfo.environment["INCHILL_NO_FAKE"] == nil {
+            if FakeConnector.shouldRegister(
+                configKinds: configs.map(\.kind),
+                environment: ProcessInfo.processInfo.environment,
+                runningTests: DiagnosticsRecorder.isRunningTests)
+            {
                 await engine.register(FakeConnector())
             }
         #endif
     }
 
-    /// Whether `bootstrapConnectors()` should (re)create the built-in local
-    /// source. Pulled out as a pure function per rule 6 — the SwiftData
-    /// plumbing around it isn't worth testing, this decision is.
-    /// What the built-in local source is called when the app creates it.
+    /// What the local source was called when the app used to create it on
+    /// first run; still the target of the rename migration below.
     nonisolated static let localSourceDefaultName = "Local coding agents"
 
     /// The two names the app itself gave that source before 2026-09-04.
@@ -507,26 +528,6 @@ final class AppState {
         kind: String, displayName: String
     ) -> Bool {
         kind == "local" && formerLocalSourceNames.contains(displayName)
-    }
-
-    nonisolated static func shouldCreateLocalSource(
-        hasLocalConfig: Bool, userRemoved: Bool
-    ) -> Bool {
-        !hasLocalConfig && !userRemoved
-    }
-
-    private static let localSourceUserRemovedKey = "localSource.userRemoved"
-
-    /// Set when the user deletes the local source from Settings → Sources.
-    /// Without this, `bootstrapConnectors()` — which runs after every source
-    /// add/edit/toggle, and on every launch — would recreate the source it
-    /// was just told to remove, making the trash button in `SourcesPane` a
-    /// no-op for this one row.
-    static var localSourceUserRemoved: Bool {
-        get { UserDefaults.standard.bool(forKey: localSourceUserRemovedKey) }
-        set {
-            UserDefaults.standard.set(newValue, forKey: localSourceUserRemovedKey)
-        }
     }
 
     /// Why the app couldn't write an agent's hooks, keyed by harness id.
@@ -1392,7 +1393,9 @@ final class AppState {
             ?? []
         var ids = Set(configs.filter(\.countsTowardBadge).map(\.id))
         #if DEBUG
-            ids.insert("fake-1")
+            if ProcessInfo.processInfo.environment[FakeConnector.optInKey] != nil {
+                ids.insert("fake-1")
+            }
         #endif
         return ids
     }

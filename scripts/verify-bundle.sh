@@ -124,6 +124,19 @@ expect_plist_present NSAppleEventsUsageDescription
 # without EventKit. Nothing else in the build would notice it missing.
 expect_plist_present NSRemindersFullAccessUsageDescription
 
+# The welcome window's typefaces. AppKit registers whatever this key names
+# at launch and says nothing if the folder is missing — the window would
+# quietly render in SF. Both fonts are SIL OFL 1.1 and ship with their
+# licence text, which is the condition the licence puts on bundling them.
+expect_plist ATSApplicationFontsPath Fonts
+for font in Syne-Variable.ttf SpaceGrotesk-Variable.ttf OFL-Syne.txt OFL-SpaceGrotesk.txt; do
+  if [ -f "$APP/Contents/Resources/Fonts/$font" ]; then
+    note "fonts: $font present"
+  else
+    bad "fonts: Resources/Fonts/$font MISSING — the welcome falls back to SF and no build step says so"
+  fi
+done
+
 # --- Entitlements ---------------------------------------------------------
 # Only meaningful on a signed bundle; an unsigned build carries none at all.
 ENTITLEMENTS=$(codesign -d --entitlements - "$APP" 2>/dev/null || true)

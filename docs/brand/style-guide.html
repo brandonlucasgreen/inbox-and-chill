@@ -1,22 +1,24 @@
 <title>Inbox &amp; Chill Brand Kit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap">
 <style>
   /* ---- Tokens. The bare :root carries the complete light palette; the two
          blocks below redefine only the tokens, so nothing is ever defined
          solely inside a media query. ---- */
   :root {
-    --ground:   #F7F5F0;
-    --raised:   #FFFFFF;
-    --sunken:   #EFEBE4;
-    --text:     #200220;
-    --dim:      #6E5F6E;
-    --border:   #E2DCD4;
-    --hairline: #EAE4DC;
-    --accent:   #2A0B2A;
+    --ground:   #F3EDE1;
+    --raised:   #FAF6EE;
+    --sunken:   #EAE2D3;
+    --text:     #0E1A2B;
+    --dim:      #5C6573;
+    --border:   #E1D8C6;
+    --hairline: #E9E1D2;
+    --accent:   #0E1A2B;
     --warm:     #E8A33D;
-    --link:     #1565C0;
-    --shadow:   0 1px 2px rgba(32,2,32,.06), 0 6px 20px rgba(32,2,32,.05);
+    --link:     #1F4E8C;
+    --shadow:   0 1px 2px rgba(14,26,43,.06), 0 6px 20px rgba(14,26,43,.05);
 
-    --f-body: system-ui, -apple-system, "Helvetica Neue", sans-serif;
+    --f-display: "Syne", system-ui, -apple-system, sans-serif;
+    --f-body: "Space Grotesk", system-ui, -apple-system, "Helvetica Neue", sans-serif;
     --f-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
     --measure: 66ch;
@@ -24,28 +26,28 @@
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --ground:   #190118;
-      --raised:   #2A0B2A;
-      --sunken:   #120010;
-      --text:     #F5F4F0;
-      --dim:      #B3A6B3;
-      --border:   #3A203A;
-      --hairline: #32173182;
+      --ground:   #0E1A2B;
+      --raised:   #16263B;
+      --sunken:   #0A1322;
+      --text:     #F1E9D8;
+      --dim:      #B9AF9B;
+      --border:   #25364D;
+      --hairline: #1E2D4282;
       --accent:   #E8A33D;
-      --link:     #8E93AE;
+      --link:     #9DB4D8;
       --shadow:   0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
     }
   }
   :root[data-theme="dark"] {
-    --ground:   #190118;
-    --raised:   #2A0B2A;
-    --sunken:   #120010;
-    --text:     #F5F4F0;
-    --dim:      #B3A6B3;
-    --border:   #3A203A;
-    --hairline: #32173182;
+    --ground:   #0E1A2B;
+    --raised:   #16263B;
+    --sunken:   #0A1322;
+    --text:     #F1E9D8;
+    --dim:      #B9AF9B;
+    --border:   #25364D;
+    --hairline: #1E2D4282;
     --accent:   #E8A33D;
-    --link:     #8E93AE;
+    --link:     #9DB4D8;
     --shadow:   0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
   }
 
@@ -73,7 +75,8 @@
     margin: 0 0 .75rem;
   }
 
-  h1, h2, h3 { text-wrap: balance; margin: 0; letter-spacing: -.025em; }
+  h1, h2, h3 { text-wrap: balance; margin: 0; }
+  h1, h2 { font-family: var(--f-display); }
   h1 { font-size: clamp(2.4rem, 6vw, 3.6rem); font-weight: 600; line-height: 1.05; }
   h2 { font-size: clamp(1.5rem, 3vw, 1.9rem); font-weight: 600; line-height: 1.15; }
   h3 { font-size: 1.05rem; font-weight: 600; letter-spacing: -.01em; }
@@ -362,18 +365,18 @@
   <section>
     <div class="sec-head">
       <p class="eyebrow">Typography</p>
-      <h2>SN Pro, with mono for anything mechanical</h2>
+      <h2>Syne for display, Space Grotesk for text, mono for anything mechanical</h2>
       <p>
-        SN Pro is the face across bgreen.lol and Social Sindy, loaded from Google Fonts with a
-        <code>system-ui</code> fallback. This page renders in the fallback, so treat the specimen
-        below as scale and rhythm rather than letterforms.
+        Syne is the wide headline face; Space Grotesk carries body and buttons. Both are SIL OFL 1.1,
+        loaded here from Google Fonts with a <code>system-ui</code> fallback and bundled inside the
+        app for its welcome window. Decided 2026-09-04, replacing SN Pro.
       </p>
     </div>
 
     <div class="card spec">
       <div class="spec-row">
         <span class="spec-label">Display</span>
-        <span style="font-size:2rem; font-weight:600; letter-spacing:-.025em; line-height:1.1;">Get to zero</span>
+        <span style="font-family:var(--f-display); font-size:2rem; font-weight:600; line-height:1.1;">Get to zero</span>
       </div>
       <div class="spec-row">
         <span class="spec-label">Body</span>

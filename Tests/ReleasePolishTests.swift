@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -10,33 +11,42 @@ import Testing
 @Suite("First run")
 struct FirstRunTests {
 
-    @Test("Only the built-in local source means no source yet")
+    /// Nothing is pre-added any more — the local source included — so "no
+    /// source yet" means no source of any kind.
+    @Test("No source of any kind means no source yet")
     func needsFirstSource() {
         #expect(FirstRun.needsFirstSource(kinds: []))
-        #expect(FirstRun.needsFirstSource(kinds: ["local"]))
-        #expect(!FirstRun.needsFirstSource(kinds: ["local", "appleMail"]))
-        #expect(!FirstRun.needsFirstSource(kinds: ["reminders"]))
+        #expect(!FirstRun.needsFirstSource(kinds: ["local"]))
+        #expect(!FirstRun.needsFirstSource(kinds: ["appleMail"]))
     }
 
     /// Existence, not enablement: someone who switched everything off on
     /// purpose is not greeted like a stranger. The policy takes kinds only,
     /// so it cannot even see `isEnabled`.
-    @Test("The panel opens itself once, and only for an install with no source")
-    func opensPanelOnce() {
-        #expect(FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: false, needsFirstSource: true))
-        #expect(!FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: true, needsFirstSource: true))
+    @Test("The welcome window shows once, and only for an install with no source")
+    func welcomeWindowShowsOnce() {
+        #expect(FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: false, needsFirstSource: true))
+        #expect(!FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: true, needsFirstSource: true))
         // An upgrade is not a first run.
-        #expect(!FirstRun.shouldOpenPanelOnLaunch(hasLaunchedBefore: false, needsFirstSource: false))
+        #expect(!FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: false, needsFirstSource: false))
+        // The preview switch shows it anywhere, for design review.
+        #expect(FirstRun.shouldShowWelcomeWindow(hasLaunchedBefore: true, needsFirstSource: false, forced: true))
+        #expect(FirstRun.previewEnvironmentKey == "INCHILL_SHOW_WELCOME")
     }
 
-    @Test("The welcome offers the two kinds that need no credential, and they exist")
-    func zeroSetupKindsAreReal() {
-        #expect(FirstRun.zeroSetupKinds == ["appleMail", "reminders"])
-        for kind in FirstRun.zeroSetupKinds {
-            let descriptor = ConnectorCatalog.descriptor(for: kind)
-            #expect(descriptor != nil, "\(kind)")
-            #expect(descriptor?.fields.contains(where: \.isSecret) == false, "\(kind)")
+    /// Brandon: naming Mail and Reminders *"sells short the depth of services
+    /// I&C integrates with"*. The roster comes from the catalog, so a new
+    /// connector joins the sentence on its own.
+    @Test("The welcome names the whole roster and features no source")
+    func rosterNamesEverything() {
+        let roster = FirstRun.sourceRoster(from: ConnectorCatalog.all)
+        for descriptor in ConnectorCatalog.all where !["local", "jsonPoller", "ntfy"].contains(descriptor.id) {
+            #expect(roster.contains(descriptor.displayName), "\(descriptor.id)")
         }
+        #expect(roster.contains("ntfy"))
+        #expect(roster.contains("JSON feed"))
+        #expect(roster.contains("coding agents"))
+        #expect(FirstRun.addButton == "Add Your First Source")
     }
 
     /// Asking twice for the same kind must read as two requests, or the
@@ -47,6 +57,59 @@ struct FirstRunTests {
         let second = AppState.AddSourceRequest(kind: "appleMail")
         #expect(first.kind == second.kind)
         #expect(first != second)
+    }
+}
+
+// MARK: - Brand (Sources/App/UI/Brand.swift)
+
+/// The bundled typefaces register at launch through `ATSApplicationFontsPath`.
+/// This runs inside the app as test host, so if the folder or the plist key
+/// is wrong the faces are simply absent — and the welcome would render in
+/// SF with nothing failing anywhere else.
+@Suite("Brand fonts")
+struct BrandFontTests {
+    @Test("Syne and Space Grotesk are registered from the bundle")
+    func bundledFacesResolve() {
+        let available = Set(NSFontManager.shared.availableFonts)
+        #expect(Brand.firstAvailable(Brand.displayFaces, in: available) != nil,
+            "no Syne instance registered — check Resources/Fonts and ATSApplicationFontsPath")
+        #expect(Brand.firstAvailable(Brand.textFaces, in: available) != nil,
+            "no Space Grotesk instance registered")
+        #expect(NSFont(name: "Syne-SemiBold", size: 12) != nil)
+    }
+
+    @Test("A missing face falls back to the next, then to nil")
+    func fallbackOrder() {
+        #expect(Brand.firstAvailable(["A", "B"], in: ["B"]) == "B")
+        #expect(Brand.firstAvailable(["A", "B"], in: ["A", "B"]) == "A")
+        #expect(Brand.firstAvailable(["A"], in: []) == nil)
+    }
+
+    @Test("The house tagline has one home")
+    func taglineIsShared() {
+        #expect(Brand.tagline == "Everything waiting on you, in one queue, nice & chilled.")
+    }
+}
+
+// MARK: - Fake connector (Sources/App/Connectors/FakeConnector.swift)
+
+/// The fake source wrote rows into the live store from a test run on
+/// 2026-09-04, because a fresh install has zero sources and the connector
+/// registered itself whenever no real one existed. Three gates now.
+@Suite("Fake connector gating")
+struct FakeConnectorGatingTests {
+    @Test("Registers only when asked, only with no real source, never under tests")
+    func gates() {
+        let on = [FakeConnector.optInKey: "1"]
+        #expect(FakeConnector.shouldRegister(configKinds: [], environment: on, runningTests: false))
+        #expect(FakeConnector.shouldRegister(configKinds: ["local"], environment: on, runningTests: false))
+        // A real source anywhere means no fakes mixed in.
+        #expect(!FakeConnector.shouldRegister(configKinds: ["slack"], environment: on, runningTests: false))
+        // Not asked for: a fresh Debug install shows the welcome, not fakes.
+        #expect(!FakeConnector.shouldRegister(configKinds: [], environment: [:], runningTests: false))
+        #expect(!FakeConnector.shouldRegister(configKinds: [], environment: ["INCHILL_NO_FAKE": "1"], runningTests: false))
+        // The test host shares the live store; it must never register one.
+        #expect(!FakeConnector.shouldRegister(configKinds: [], environment: on, runningTests: true))
     }
 }
 

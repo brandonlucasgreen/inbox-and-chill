@@ -48,7 +48,7 @@ final class LicenseController {
     }
 
     /// DEBUG-only escape hatch for UI iteration, same pattern as
-    /// `INCHILL_NO_FAKE`: `INCHILL_LICENSE_STATE=licensed|expired|trialing`
+    /// `INCHILL_FAKE`: `INCHILL_LICENSE_STATE=licensed|expired|trialing`
     /// (or `trialing:3`) freezes the state and skips Keychain and network.
     private let forcedState: LicenseState?
     private var clockTask: Task<Void, Never>?

@@ -27,7 +27,7 @@ struct AboutPane: View {
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
-                        Text("Everything waiting on you, in one queue, nice & chilled.")
+                        Text(Brand.tagline)
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
