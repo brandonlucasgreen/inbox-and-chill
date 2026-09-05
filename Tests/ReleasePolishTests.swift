@@ -60,6 +60,40 @@ struct FirstRunTests {
     }
 }
 
+// MARK: - Keyboard hints (Sources/App/UI/KeyboardHintBar.swift)
+
+@Suite("Keyboard hint bar")
+struct KeyboardHintTests {
+    @Test("Shows for the first three opens with rows, then never; dismiss ends it early")
+    func policy() {
+        #expect(KeyboardHints.shouldShow(opensSoFar: 1, dismissed: false, queueIsEmpty: false))
+        #expect(KeyboardHints.shouldShow(opensSoFar: 3, dismissed: false, queueIsEmpty: false))
+        #expect(!KeyboardHints.shouldShow(opensSoFar: 4, dismissed: false, queueIsEmpty: false))
+        #expect(!KeyboardHints.shouldShow(opensSoFar: 1, dismissed: true, queueIsEmpty: false))
+        // An empty panel teaches nothing and shows nothing.
+        #expect(!KeyboardHints.shouldShow(opensSoFar: 1, dismissed: false, queueIsEmpty: true))
+    }
+
+    @Test("The hints name the keys the README documents")
+    func hintsMatchTheKeys() {
+        let keys = KeyboardHints.hints.map(\.key)
+        #expect(keys.contains("E") && keys.contains("S") && keys.contains("D") && keys.contains("⏎"))
+        #expect(keys.count <= 5, "one line, not a cheat sheet")
+    }
+}
+
+// MARK: - First source opens the queue (FirstRun.shouldOpenQueueAfterSave)
+
+@Suite("First source opens the queue")
+struct FirstSourceOpensQueueTests {
+    @Test("Only the first add pops the panel; edits and later adds do not")
+    func policy() {
+        #expect(FirstRun.shouldOpenQueueAfterSave(wasAdding: true, sourcesBefore: 0))
+        #expect(!FirstRun.shouldOpenQueueAfterSave(wasAdding: true, sourcesBefore: 1))
+        #expect(!FirstRun.shouldOpenQueueAfterSave(wasAdding: false, sourcesBefore: 0))
+    }
+}
+
 // MARK: - Brand (Sources/App/UI/Brand.swift)
 
 /// The bundled typefaces register at launch through `ATSApplicationFontsPath`.

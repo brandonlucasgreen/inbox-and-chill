@@ -17,6 +17,11 @@ struct SourcesPane: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
+                if sources.isEmpty {
+                    Text("No sources yet. Add one below and your queue starts filling.")
+                        .foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
+                }
                 ForEach(sources) { source in
                     SourceRow(
                         source: source,

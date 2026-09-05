@@ -45,6 +45,16 @@ enum FirstRun {
 
     static let hasLaunchedKey = "firstRun.hasLaunched"
 
+    /// After saving a source, open the panel once — only when that source is
+    /// the first one, so the arc that started with the welcome ends at the
+    /// queue instead of in Settings. Editing, or adding a second source, does
+    /// not pop the panel over what the user is doing.
+    nonisolated static func shouldOpenQueueAfterSave(
+        wasAdding: Bool, sourcesBefore: Int
+    ) -> Bool {
+        wasAdding && sourcesBefore == 0
+    }
+
     /// `open -a "Inbox & Chill" --env INCHILL_SHOW_WELCOME=1` shows the
     /// welcome on any install, for design review and screenshots. It does not
     /// stamp or clear the first-run flag. Works in Release on purpose: the
@@ -167,11 +177,22 @@ struct WelcomeWindowView: View {
                     .buttonStyle(BrandCapsuleButtonStyle())
                     .keyboardShortcut(.defaultAction)
                     .padding(.top, 8)
+                // A menu bar app that is not running is one that failed. The
+                // welcome is the one moment to ask; Settings › General keeps
+                // the same switch for later.
+                Toggle(isOn: launchAtLogin) {
+                    Text("Open at login")
+                        .font(Brand.text(12))
+                        .foregroundStyle(Brand.beigeDim)
+                }
+                .toggleStyle(.checkbox)
+                .tint(Brand.amber)
+                .padding(.top, 2)
             }
             .multilineTextAlignment(.center)
             .padding(.horizontal, 44)
             .padding(.top, 44)
-            .padding(.bottom, 40)
+            .padding(.bottom, 36)
         }
         .frame(width: 480)
         .accessibilityElement(children: .contain)
@@ -181,6 +202,12 @@ struct WelcomeWindowView: View {
         .onChange(of: sources.isEmpty) { _, isEmpty in
             if !isEmpty { onDismiss() }
         }
+    }
+
+    private var launchAtLogin: Binding<Bool> {
+        Binding(
+            get: { appState.launchAtLogin },
+            set: { appState.launchAtLogin = $0 })
     }
 
     /// Same route as `WelcomeView.add`, then close.

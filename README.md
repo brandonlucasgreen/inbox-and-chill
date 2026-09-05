@@ -2,19 +2,32 @@
 
 **MIT licensed** — free to use, build, fork, and ship. See [LICENSE](LICENSE).
 
-A native macOS menu bar app that pulls your unread/actionable items from Linear, GitHub, Slack, ntfy, custom JSON feeds, and your terminal (including Claude Code) into one queue — and then helps you empty it.
+A native macOS menu bar app that pulls the things that actually need you out of Linear, GitHub, GitLab, Slack, Trello, Sentry, Apple Mail, Apple Reminders, Todoist, Asana, ntfy, any JSON feed, and your local coding agents (Claude Code, Codex, Gemini) into one queue — and then helps you empty it.
 
 Inbox & Chill is a **triage queue, not a status mirror**. It doesn't try to be a client for any of these services — no composing Slack messages, no editing Linear issues. Items flow in, you act on them (open, done, snooze, pin, archive), and the queue goes to zero. The moment an item needs real work, it deep-links you into the app that owns it. The menu bar is the primary surface: click the icon (or hit a global hotkey) and a panel drops down with everything waiting for you, grouped by source.
 
 ## Features
 
 **Sources**
+
+Every source is added in Settings › Sources; nothing is pre-configured. Two need no account or token at all.
+
 - Linear — full inbox mirror (mentions, assignments, comments), with real remote snooze
-- GitHub — notifications inbox (review requests, mentions, assignments)
-- Slack — mentions and unreads via Socket Mode, plus an emoji-reaction "save for later"
+- GitHub — notifications inbox (review requests, mentions, assignments), folded by repository
+- GitLab — your To-Do list (assigned, mentioned, approvals, broken pipelines), marked done in GitLab when you clear it
+- Slack — mentions, DMs and keyword watches via Socket Mode, plus an emoji-reaction "save for later"
+- Trello — your notification feed (mentions, cards you're added to, due dates), marked read in Trello when you clear it
+- Sentry — the For Review tab, with resolving opt-in because it's team-visible
+- Apple Mail — flagged or unread messages from every account Mail has, Gmail included; no token, one permission prompt
+- Apple Reminders — what's due today or overdue, plus any lists you pick; no token
+- Todoist and Asana — your tasks, with `C` completing them in the app that owns them and `E` only dismissing here
 - ntfy — push notifications over a topic's WebSocket
-- Custom JSON feeds — point it at any URL that returns a JSON array (or `{items: [...]}`)
-- Terminal / Claude Code — local push from shell commands and Claude Code hooks
+- Custom JSON feeds — any URL that returns a JSON array, or an object holding one (`root=data`), with a one-line field mapping
+- Local coding agents — the `inchill` CLI and hooks for Claude Code, Codex and Gemini, so a session that's waiting on you is one row in the queue
+
+**Grouping**
+
+Rows from one source fold by what they share — a Slack channel, a GitHub repository, a Linear issue, a mail sender — and a Topic collects rows from several sources under one name you choose. Both count as one on the badge.
 
 **Two surfaces**
 The menu bar panel is the default: click the icon (or hit a global hotkey) and it drops down over everything waiting for you, grouped by source. `⌘0` (or the window icon in the footer) opens the same queue as a regular window instead, with every triage action mirrored as a real menu item under **Queue** — useful for keeping it around on a second display.
@@ -143,7 +156,7 @@ releases happen on a person's Mac, via `scripts/release.sh`.
 
 ## Status
 
-This is a personal tool, built for one person's daily use, and pre-release. Expect rough edges, and expect the shape of things (especially per-source setup) to shift.
+Built for one person's daily use first, and used that way every day. Three sources — GitLab, Trello and Asana — were written against their published APIs without a live account to test them on, and say so in their setup docs; if one misbehaves, [help@bgreen.lol](mailto:help@bgreen.lol) or an issue here is the fix.
 
 The code is MIT licensed and the repository is public as of 2026-08-21. In-app updates are live: 0.3.3 was the first release to carry Sparkle, so anything from 0.3.3 onwards updates itself. Installs older than that need one manual download to catch up. See [docs/releasing.md](docs/releasing.md) for how a release is cut, and [docs/homebrew.md](docs/homebrew.md) for the brew route.
 
@@ -156,8 +169,12 @@ Two dependencies and the icon are also MIT, and ship inside the app:
 [Sparkle](https://sparkle-project.org), and Microsoft's
 [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) victory hand — see
 [docs/brand/vendor/](docs/brand/vendor/) for the licence texts and how each
-shipped file is derived.
+shipped file is derived. The welcome window's typefaces,
+[Syne](https://fonts.google.com/specimen/Syne) and
+[Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk), are SIL Open
+Font License 1.1 and ship in `Sources/App/Resources/Fonts/` with their licence
+texts beside them.
 
 ## Design
 
-The product decisions, architecture, and per-service feasibility research behind this app are all written up in [PLAN.md](PLAN.md) — including why each connector works the way it does, what got scoped out (Notion, a push relay, Apple Reminders), and the milestone plan.
+The product decisions, architecture, and per-service feasibility research behind this app are all written up in [PLAN.md](PLAN.md) — including why each connector works the way it does, what got scoped out (Notion, a push relay, the Mac App Store), and the milestone plan.

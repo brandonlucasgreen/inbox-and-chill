@@ -72,6 +72,18 @@ struct AboutPane: View {
                         "Fluent Emoji by Microsoft (MIT)",
                         destination: URL(string: "https://github.com/microsoft/fluentui-emoji")!)
                 }
+                // The welcome window's faces. Both SIL Open Font License 1.1;
+                // the licence texts ship in Resources/Fonts beside them.
+                LabeledContent("Headline typeface") {
+                    Link(
+                        "Syne (SIL OFL 1.1)",
+                        destination: URL(string: "https://fonts.google.com/specimen/Syne")!)
+                }
+                LabeledContent("Text typeface") {
+                    Link(
+                        "Space Grotesk (SIL OFL 1.1)",
+                        destination: URL(string: "https://fonts.google.com/specimen/Space+Grotesk")!)
+                }
             }
         }
         .formStyle(.grouped)
