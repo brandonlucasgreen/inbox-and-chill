@@ -51,6 +51,11 @@ struct PanelView: View {
     @State private var showArchive = false
     @State private var snoozeTargetUID: String?
     @State private var isRefreshing = false
+    /// The first-run keyboard tips (`KeyboardHintBar`): how many opens
+    /// with rows have happened, and whether the user closed the bar.
+    @AppStorage(KeyboardHints.opensKey) private var keyHintOpens = 0
+    @AppStorage(KeyboardHints.dismissedKey) private var keyHintsDismissed = false
+
     /// Which footer control the mouse is over, if any — see `PanelHint`.
     @State private var hoveredHint: PanelHint?
     @FocusState private var focus: PanelFocus?
@@ -78,6 +83,13 @@ struct PanelView: View {
             }
             Divider()
             LicenseNotice()
+            if KeyboardHints.shouldShow(
+                opensSoFar: keyHintOpens, dismissed: keyHintsDismissed,
+                queueIsEmpty: queue.visibleUIDs.isEmpty)
+            {
+                KeyboardHintBar { keyHintsDismissed = true }
+                Divider()
+            }
             MarksBar(
                 items: items, snoozeTargetUID: $snoozeTargetUID,
                 onGroup: { beginGrouping() })
@@ -99,6 +111,9 @@ struct PanelView: View {
         .onAppear {
             focus = .list
             if selectedUID == nil { select(queue.visibleUIDs.first) }
+            // Counts only opens that had something to triage — an empty
+            // panel teaches nothing, so it does not spend one of the three.
+            if !queue.visibleUIDs.isEmpty { keyHintOpens += 1 }
         }
         .onChange(of: queue.visibleUIDs) { old, new in
             reconcileSelection(old: old, new: new)

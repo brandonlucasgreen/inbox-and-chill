@@ -351,6 +351,8 @@ struct SourceEditorSheet: View {
             return
         }
         saveErrorText = nil
+        let opensQueue = FirstRun.shouldOpenQueueAfterSave(
+            wasAdding: existing == nil, sourcesBefore: allSources.count)
         if existing == nil { modelContext.insert(target) }
         do {
             try modelContext.save()
@@ -359,7 +361,16 @@ struct SourceEditorSheet: View {
                 "Couldn't save this source — \(error.localizedDescription)"
             return
         }
-        Task { await appState.bootstrapConnectors() }
+        Task {
+            await appState.bootstrapConnectors()
+            // The very first source: finish the story the welcome started
+            // by showing where the queue lives, rather than leaving the
+            // user in Settings looking at a list of one.
+            if opensQueue {
+                try? await Task.sleep(for: .milliseconds(600))
+                PanelToggler.toggle()
+            }
+        }
         dismiss()
     }
 
