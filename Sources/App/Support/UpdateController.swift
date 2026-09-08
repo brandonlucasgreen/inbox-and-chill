@@ -1,7 +1,11 @@
 import AppKit
-import Sparkle
 import SwiftUI
 
+#if !APP_STORE
+import Sparkle
+#endif
+
+#if !APP_STORE
 /// In-app updates — and, more to the point, the reasons they might not be
 /// happening.
 ///
@@ -184,42 +188,6 @@ final class UpdateController: NSObject, SPUUpdaterDelegate,
         NSApp.setActivationPolicy(.accessory)
     }
 
-    // MARK: Pure helpers (rule 6)
-
-    /// Nil when this build is able to check for updates at all.
-    ///
-    /// Both keys are written by `project.yml`'s `info.properties`. In practice
-    /// it is the public key that goes missing: a clone that has never run
-    /// `scripts/sparkle-keys.sh` builds and runs perfectly, and would only
-    /// find out at install time that it cannot verify what it downloaded.
-    nonisolated static func configurationProblem(info: [String: Any]?) -> String? {
-        func value(_ key: String) -> String? {
-            guard
-                let string = info?[key] as? String,
-                !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else { return nil }
-            return string
-        }
-
-        if value("SUFeedURL") == nil {
-            return """
-                This build has no update feed (SUFeedURL is missing from its \
-                Info.plist), so it can't look for new versions. Reinstall from \
-                a release download, or rebuild after `xcodegen generate`.
-                """
-        }
-        if value("SUPublicEDKey") == nil {
-            return """
-                This build has no update-signing key, so an update couldn't be \
-                verified and automatic updates are switched off. That's \
-                expected if you built it yourself: run `scripts/sparkle-keys.sh`, \
-                paste the key into project.yml, and rebuild. Release downloads \
-                already have one.
-                """
-        }
-        return nil
-    }
-
     /// A sentence for a Sparkle failure, or nil if it wasn't one.
     ///
     /// Two of Sparkle's aborts are not failures, and printing either in red
@@ -256,5 +224,73 @@ final class UpdateController: NSObject, SPUUpdaterDelegate,
         default:
             return error.localizedDescription
         }
+    }
+}
+
+#else
+
+/// The App Store build. The store delivers updates, and guideline 2.4.5(vii)
+/// forbids any other mechanism, so Sparkle is not linked at all — its four
+/// nested executables would each need the sandbox entitlement besides. This
+/// keeps the surface the rest of the app reads (`UpdatesSection`,
+/// `MainWindowCommands`, `DiagnosticsPane`) so none of them needs a flag.
+///
+/// `configurationProblem` carries the explanation on purpose: `UpdatesSection`
+/// already prints it as secondary text and disables the toggle when it is
+/// set, which is exactly the right rendering here.
+///
+/// **Uncompiled until the store target exists** (phase 3 of
+/// docs/app-store-plan.md); the first `APP_STORE` build is what checks it.
+@MainActor
+@Observable
+final class UpdateController {
+    private(set) var configurationProblem: String? =
+        "This copy came from the App Store, which delivers updates itself — see the App Store app's Updates tab."
+    private(set) var lastFailure: String?
+    private(set) var isChecking = false
+    private(set) var lastCheck: Date?
+    var checksAutomatically = false
+    var canCheck: Bool { false }
+
+    func checkForUpdates() {}
+}
+
+#endif
+
+// MARK: Pure helpers (rule 6), shared by both builds
+
+extension UpdateController {
+    /// Nil when this build is able to check for updates at all.
+    ///
+    /// Both keys are written by `project.yml`'s `info.properties`. In practice
+    /// it is the public key that goes missing: a clone that has never run
+    /// `scripts/sparkle-keys.sh` builds and runs perfectly, and would only
+    /// find out at install time that it cannot verify what it downloaded.
+    nonisolated static func configurationProblem(info: [String: Any]?) -> String? {
+        func value(_ key: String) -> String? {
+            guard
+                let string = info?[key] as? String,
+                !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return nil }
+            return string
+        }
+
+        if value("SUFeedURL") == nil {
+            return """
+                This build has no update feed (SUFeedURL is missing from its \
+                Info.plist), so it can't look for new versions. Reinstall from \
+                a release download, or rebuild after `xcodegen generate`.
+                """
+        }
+        if value("SUPublicEDKey") == nil {
+            return """
+                This build has no update-signing key, so an update couldn't be \
+                verified and automatic updates are switched off. That's \
+                expected if you built it yourself: run `scripts/sparkle-keys.sh`, \
+                paste the key into project.yml, and rebuild. Release downloads \
+                already have one.
+                """
+        }
+        return nil
     }
 }

@@ -335,6 +335,16 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   2026-09-05 and drew its own backticks; only rendering the sheet catches
   that, never a build or a test.
 - `AppState.makeConnector` — wires settings JSON into connector inits.
+- **Features the App Store build leaves out live in their own folders and
+  reach `AppState` through an extension file** (since 2026-09-08, phase 2 of
+  `docs/app-store-plan.md`): `Journal/AppState+Journal.swift`,
+  `Licensing/AppState+License.swift`. `AppState.swift` keeps only the stored
+  properties an extension cannot hold (`license`, `journalError`) and calls
+  the extension's methods unchanged; the store target excludes the folder
+  and the extension file grows an `#else` of no-op stubs. Adding a feature
+  the sandbox cannot have? Put it in a folder, not in `AppState.swift`.
+  `UpdateController` is the other shape — one file, Sparkle behind
+  `#if !APP_STORE`, a stub in the `#else` — because six shared files read it.
 - `Support/Keychain.swift` — service `lol.bgreen.inboxandchill`, account is
   `<sourceConfig UUID>.<field>` (**not** `<kind>.<field>`). Read-through cached
   because connectors call it per operation.
