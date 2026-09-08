@@ -1125,8 +1125,11 @@ The app needs **no App ID registration and no provisioning profile**. Those only
 authorize entitlements Apple must bless — iCloud, App Groups, Push, Keychain
 Sharing — and this app uses none. (**True for Developer ID only.** The Mac App
 Store requires all three — App ID, embedded profile, Apple Distribution cert —
-plus a mandatory App Sandbox; that route was audited and declined, PLAN §2.1.8.) It is unsandboxed, so network access, the
-loopback listener and the Keychain all work without entitlements.
+plus a mandatory App Sandbox. That route was declined twice, PLAN §2.1.8 and
+§2.1.10, then re-opened 2026-09-08 as a **second target beside this one**:
+`docs/app-store-plan.md` is the plan and PLAN §2.1.12 the decision. Everything
+in this section describes the direct build.) It is unsandboxed, so network
+access, the loopback listener and the Keychain all work without entitlements.
 
 Release ships **exactly one entitlement** — `com.apple.security.automation.apple-events`
 (see the AppleScript rule below; it needs no App ID or profile) — plus a
