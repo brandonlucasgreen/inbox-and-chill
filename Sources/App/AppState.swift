@@ -12,6 +12,8 @@ import UserNotifications
 final class AppState {
     let container: ModelContainer
     let store: Store
+    /// Stored here because a stored property cannot live in an extension;
+    /// everything else about licensing is in `Licensing/AppState+License.swift`.
     let license: LicenseController
     private(set) var engine: SyncEngine!
 
@@ -168,26 +170,8 @@ final class AppState {
         engine = SyncEngine(store: store) { [weak self] change in
             Task { @MainActor in self?.handle(change) }
         }
-        // Trial expiry and activation both land mid-run — a menu bar app
-        // lives for weeks, so launch-time gating alone would keep syncing
-        // for days past the end of a trial.
-        license.onSyncPermissionChange = { [weak self] allowed in
-            guard let self else { return }
-            Task { @MainActor in
-                if allowed {
-                    await self.bootstrapConnectors()
-                    await self.engine.refreshNow()
-                } else {
-                    await self.engine.unregisterAll()
-                }
-            }
-        }
-        // The trial's last days are said out loud even to someone who has not
-        // opened the panel; the in-panel bar (`LicenseNotice`) covers the rest.
-        license.onStateEvaluated = { [weak self] state in
-            guard let self else { return }
-            Task { @MainActor in await self.nudgeIfTrialEnding(state) }
-        }
+        // Sync gating and trial nudges: `Licensing/AppState+License.swift`.
+        configureLicensing()
         // Permission is requested lazily, right before the first banner —
         // not at launch (banners are opt-in; don't alert before the UI).
         notificationDelegate = NotificationDelegate(appState: self)
@@ -270,40 +254,6 @@ final class AppState {
 
     private static let firstRunLog = AppLog.logger(.diagnostics)
 
-    // MARK: Trial nudges
-
-    /// A system banner at three days and at one day left, once each.
-    ///
-    /// `prompting: false` on purpose: a timer must not spend the banner
-    /// permission prompt (the same rule Mail's Automation prompt follows), so
-    /// with banners never granted this stays silent and `LicenseNotice` in
-    /// the panel carries the countdown alone.
-    func nudgeIfTrialEnding(_ state: LicenseState) async {
-        guard Licensing.isEnforced, case .trialing(let daysLeft) = state else { return }
-        let defaults = UserDefaults.standard
-        let sent = Set(defaults.array(forKey: TrialNudge.sentKey) as? [Int] ?? [])
-        guard let threshold = TrialNudge.due(daysLeft: daysLeft, sent: sent) else { return }
-        defaults.set(
-            Array(TrialNudge.markSent(daysLeft: daysLeft, sent: sent)).sorted(),
-            forKey: TrialNudge.sentKey)
-        guard await resolveBannerAuthorization(prompting: false) else { return }
-        let content = UNMutableNotificationContent()
-        content.title = TrialNudge.title(daysLeft: daysLeft)
-        content.body = TrialNudge.body
-        content.userInfo = ["panel": true]
-        do {
-            try await UNUserNotificationCenter.current().add(
-                UNNotificationRequest(
-                    identifier: "license.nudge.\(threshold)", content: content,
-                    trigger: nil))
-        } catch {
-            Self.licenseLog.notice(
-                "trial nudge not delivered: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    private static let licenseLog = AppLog.logger(.license)
-
     private var notificationDelegate: NotificationDelegate?
 
     /// Banner sound is off by default (§2.1.4: silent posture).
@@ -319,141 +269,21 @@ final class AppState {
         }
     }
 
-    // MARK: Journal (Sources/App/Journal/JournalWriter.swift)
-
-    /// Off by default, and with no default path: the useful value is a
-    /// personal vault location that only the user can supply.
-    var journalEnabled: Bool {
-        get {
-            access(keyPath: \.journalEnabled)
-            return UserDefaults.standard.bool(forKey: "journalEnabled")
-        }
-        set {
-            withMutation(keyPath: \.journalEnabled) {
-                UserDefaults.standard.set(newValue, forKey: "journalEnabled")
-            }
-        }
-    }
-
-    var journalPath: String {
-        get {
-            access(keyPath: \.journalPath)
-            return UserDefaults.standard.string(forKey: "journalPath") ?? ""
-        }
-        set {
-            withMutation(keyPath: \.journalPath) {
-                UserDefaults.standard.set(newValue, forKey: "journalPath")
-            }
-        }
-    }
-
-    var journalHeading: String {
-        get {
-            access(keyPath: \.journalHeading)
-            let stored = UserDefaults.standard.string(forKey: "journalHeading")
-            return (stored?.isEmpty == false) ? stored! : "## Inbox & Chill"
-        }
-        set {
-            withMutation(keyPath: \.journalHeading) {
-                UserDefaults.standard.set(newValue, forKey: "journalHeading")
-            }
-        }
-    }
-
-    /// The two halves of Brandon's ask: log what arrives, and log what you
-    /// did about it. Either can be turned off independently.
-    var journalLogArrivals: Bool {
-        get {
-            access(keyPath: \.journalLogArrivals)
-            return UserDefaults.standard.object(forKey: "journalLogArrivals")
-                as? Bool ?? true
-        }
-        set {
-            withMutation(keyPath: \.journalLogArrivals) {
-                UserDefaults.standard.set(newValue, forKey: "journalLogArrivals")
-            }
-        }
-    }
-
-    var journalLogActions: Bool {
-        get {
-            access(keyPath: \.journalLogActions)
-            return UserDefaults.standard.object(forKey: "journalLogActions")
-                as? Bool ?? true
-        }
-        set {
-            withMutation(keyPath: \.journalLogActions) {
-                UserDefaults.standard.set(newValue, forKey: "journalLogActions")
-            }
-        }
-    }
+    // MARK: Journal (Sources/App/Journal/)
 
     /// Last write failure, surfaced in Settings. Writing to a vault under
     /// ~/Documents needs a one-time macOS Files-and-Folders grant, and a
     /// denial has to be visible rather than swallowed (the write-through bug
     /// taught us that once already).
+    ///
+    /// Stored here because a stored property cannot live in an extension;
+    /// every other journal preference and the recording itself are in
+    /// `Journal/AppState+Journal.swift`.
     var journalError: String?
 
-    private var journalConfig: JournalConfig {
-        JournalConfig(pathTemplate: journalPath, heading: journalHeading)
-    }
-
-    /// Fire-and-forget, but never silent: failures land in `journalError`.
-    private func journal(_ entries: [JournalEntry]) {
-        guard journalEnabled, !entries.isEmpty else { return }
-        let config = journalConfig
-        Task {
-            for entry in entries {
-                do {
-                    try await JournalWriter.shared.record(entry, config: config)
-                } catch {
-                    await MainActor.run {
-                        self.journalError = String(describing: error)
-                    }
-                    ProblemLog.note(
-                        .journal,
-                        "Couldn't write the journal: \(error.localizedDescription)",
-                        detail: String(describing: error))
-                    return
-                }
-            }
-            await MainActor.run { self.journalError = nil }
-        }
-    }
-
-    private func journal(
-        _ action: JournalAction, item: Item, detail: String? = nil
-    ) {
-        guard journalEnabled, journalLogActions else { return }
-        journal([
-            JournalEntry(
-                at: .now, action: action,
-                sourceName: sourceName(forID: item.sourceID),
-                title: item.title, url: item.url?.absoluteString, detail: detail)
-        ])
-    }
-
-    /// The batch form, carrying the same `journalLogActions` guard.
-    ///
-    /// One line per item, not one per gesture: the journal is a record of
-    /// notifications, and folding four of them into "dismissed a topic" would
-    /// lose the four things that were actually dealt with.
-    private func journal(
-        _ action: JournalAction, items: [Item],
-        detail: (Item) -> String? = { _ in nil }
-    ) {
-        guard journalEnabled, journalLogActions else { return }
-        journal(
-            items.map { item in
-                JournalEntry(
-                    at: .now, action: action,
-                    sourceName: sourceName(forID: item.sourceID),
-                    title: item.title, url: item.url?.absoluteString,
-                    detail: detail(item))
-            })
-    }
-
-    private func sourceName(forID sourceID: String) -> String {
+    /// The display name a source was given, or "" if it is gone. Used by
+    /// banners and by the journal.
+    func sourceName(forID sourceID: String) -> String {
         var descriptor = FetchDescriptor<SourceConfig>(
             predicate: #Predicate { $0.id == sourceID })
         descriptor.fetchLimit = 1
@@ -1206,16 +1036,6 @@ final class AppState {
             externalID: externalID(of: item), payload: item.payload)
     }
 
-    /// "waited 4m" for a lone row, "waited 4m · EPD-1873" inside a topic.
-    private static func waited(
-        _ item: Item, topicName: String?
-    ) -> String? {
-        let waited = JournalWriter.waited(from: item.firstSeenAt, to: .now)
-        guard let topicName else { return waited }
-        guard let waited else { return topicName }
-        return "\(waited) · \(topicName)"
-    }
-
     /// Bring a done item back to the queue (⌘Z and archive Restore).
     ///
     /// Carries the external id and payload as well as the source, because a
@@ -1252,15 +1072,6 @@ final class AppState {
         descriptor.fetchLimit = 1
         return try? container.mainContext.fetch(descriptor).first
     }
-
-    /// Snooze targets are read by humans in a note, so this one is localised
-    /// (unlike the journal's machine-stable `HH:mm` timestamp).
-    private static let journalDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter
-    }()
 
     private func sourceID(forUID uid: String) -> String {
         var descriptor = FetchDescriptor<Item>(

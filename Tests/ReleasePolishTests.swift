@@ -181,7 +181,7 @@ struct SetupCostTests {
     }
 }
 
-// MARK: - Trial nudges (Sources/App/Support/Licensing.swift)
+// MARK: - Trial nudges (Sources/App/Licensing/Licensing.swift)
 
 @Suite("Trial nudges")
 struct TrialNudgeTests {
