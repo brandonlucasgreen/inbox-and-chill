@@ -22,7 +22,7 @@ To-dos and "things awaiting me" live in at least seven places: Linear inbox, Sla
 4. **App notifications**: silent by default; per-source opt-in banners; Claude/terminal sources default on; Focus modes respected.
 5. **Snooze**: write-through for Linear (real remote snooze), local for the rest, identical UI; snoozed items visible in a collapsed section; a waking item always banners (snoozing is consent to be interrupted). *Amendment: under a Focus mode, wake banners defer like any notification — honoring "always" literally would require the time-sensitive entitlement; politeness wins.*
 6. **Done items archive for 90 days** (searchable, ⌘Z undo-done), then purge. **Pin (⌘P)** exempts an item from *all* auto-clears, done, and purge — pinned section at top of panel, leaves only by unpinning.
-7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store **audited and declined 2026-08-20 — see §2.1.8**, **re-audited 2026-08-21 against a pared-down variant — see §2.1.10** (the sandbox objection does not survive cutting the CLI/Mail/journal; the case against MAS is now onboarding and differentiation). Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
+7. **Distribution**: personal-first, built for eventual GitHub release ("I very much want to share this"); Developer ID + notarization, **no App Sandbox** (it fights the terminal/CLI features); App Store **audited and declined 2026-08-20 — see §2.1.8**, **re-audited 2026-08-21 against a pared-down variant — see §2.1.10**, **re-opened 2026-09-08 as a second target beside the direct build — see §2.1.12 and `docs/app-store-plan.md`**. Shared users bring their own Slack app via a bundled manifest (keeps everyone in Slack's internal-app rate-limit tier) and their own PATs/keys.
 8. **Cloudflare relay deferred; Notion connector demoted to build-on-demand** (Notion's tenure in the stack is itself uncertain). v1 is fully self-contained — zero infrastructure.
 9. **Slack save emoji**: configurable, default 📌 `:pushpin:`. Slack app created + install attempted immediately.
 10. **Naming**: app **Inbox & Chill**, CLI **`inchill`**, bundle ID **`lol.bgreen.inboxandchill`**.
@@ -267,6 +267,32 @@ background poll. See §6.16.
 
 - **Item** — one actionable notification (a Slack mention, a Linear inbox entry, a PR review request, a Claude-waiting event). Can be: opened (deep link), selected, copied (URL + title), marked done (with write-through + ⌘Z undo), snoozed, **pinned**, archived, filtered, grouped.
 - **Source** — a configured connection (Slack workspace, Linear org, GitHub account, webhook endpoint). Can be: added, paused, removed, reordered, badge-toggled.
+
+### 2.1.12 Mac App Store, re-opened 2026-09-08 — a second target, not a fork
+
+Brandon re-read the §2.1.10 verdict with the app as it stands and reversed
+it: *"far less kneecapped of an app than I thought … I only built sparkle
+and lemonsqueezy because of the assumption this would not fly in the App
+Store."* The decision is to ship a store build **and** keep the richer direct
+build, from one tree.
+
+The full audit, mechanism, seam inventory, MetricKit decision and phased plan
+live in **`docs/app-store-plan.md`**. The parts that amend earlier sections:
+
+- §2.1.8's sandbox evidence still holds and is the basis of the cut list;
+  §2.1.10's "variant, not a fork" mechanism is what is being built. What
+  changed since §2.1.10: licensing (a hard 2.4.5(vi)/3.1.1 rejection on its
+  own), Diagnostics (loses the OS crash report and log breadcrumbs under the
+  sandbox), and one private-API call in `PanelToggler` that blocked review
+  regardless of any feature cut. The last is fixed.
+- §2.1.9's Sparkle stays, for the direct build only. `UpdateController` is a
+  stub in the store build.
+- §4.5's crash pipeline gains **MetricKit** as a second source, so the store
+  build still reads its own crashes. Rejected alternatives and why are in the
+  doc.
+- The blocker §2.1.10 named — onboarding under Guideline 2.1 — is unchanged
+  and is now a review-notes problem (demo credentials) rather than a reason
+  not to ship.
 
 ## 4. Architecture
 

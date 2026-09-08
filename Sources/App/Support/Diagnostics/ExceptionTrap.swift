@@ -15,11 +15,12 @@ struct UncaughtException: Codable, Sendable, Equatable {
 /// the bug, is not reliably in it. `NSSetUncaughtExceptionHandler` runs while
 /// that string still exists.
 ///
-/// This app raises them for real rather than hypothetically: `PanelToggler`
-/// reaches a private `statusItem` selector on `NSStatusBarWindow` by KVC, and
-/// `AppState` does key-path work against AppKit. Both are `NSException`
-/// territory, and both are guarded — but a guard that is wrong once is exactly
-/// the case worth having the reason for.
+/// This app raises them for real rather than hypothetically: `AppState` does
+/// key-path work against AppKit, which is `NSException` territory. (Until
+/// 2026-09-08 `PanelToggler` was the other live example — a private
+/// `statusItem` selector reached by KVC — before it was rewritten on public
+/// API for App Review.) Guarded, but a guard that is wrong once is exactly the
+/// case worth having the reason for.
 ///
 /// This is **not** a crash handler. It does not catch signals, Swift runtime
 /// traps (`fatalError`, a nil force-unwrap, an out-of-range index) or memory
