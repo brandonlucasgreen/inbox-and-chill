@@ -411,23 +411,29 @@ actor AppleMailConnector: Connector {
     /// *that* reference to All Mail moves nothing — the message would stay
     /// in the inbox and the row would come straight back on the next poll.
     static func archiveScript(handle: MessageHandle) -> String {
-        var body = lookupPreamble(handle: handle)
-        body += """
-
+        // Joined with newlines rather than concatenated: a Swift multi-line
+        // literal carries no trailing newline, so `body += """…"""` glues the
+        // last statement of one fragment onto the first of the next and Mail
+        // refuses the whole script with -2741. That shipped to `main` and
+        // made `C` a silent no-op — see `generatedScriptsCompile`.
+        let lines = [
+            lookupPreamble(handle: handle),
+            """
                 set acct to account of mailbox of m
                 set mover to m
+            """,
+            findAccountInbox(),
             """
-        body += findAccountInbox()
-        body += """
                 if dest is not missing value then
                     set inboxHits to (messages of dest whose message id is (message id of m))
                     if (count of inboxHits) > 0 then set mover to item 1 of inboxHits
                 end if
                 set read status of mover to true
-            """
-        body += findArchiveMailbox()
-        body += "\n    move mover to target"
-        return wrapped(body)
+            """,
+            findArchiveMailbox(),
+            "    move mover to target",
+        ]
+        return wrapped(lines.joined(separator: "\n"))
     }
 
     /// nil when the handle lacks the account or the RFC Message-ID — the two
@@ -437,19 +443,21 @@ actor AppleMailConnector: Connector {
         guard let account = handle.account, !account.isEmpty,
             let messageID = handle.messageID, !messageID.isEmpty
         else { return nil }
-        var body = "set acct to account id \(quoted(account))\n"
-        body += findArchiveMailbox()
-        body += """
-
+        // Newline-joined for the reason `archiveScript` gives.
+        let lines = [
+            "    set acct to account id \(quoted(account))",
+            findArchiveMailbox(),
+            """
                 set hits to (messages of target whose message id is \(quoted(messageID)))
                 if (count of hits) is 0 then error \(quoted(notFoundInArchiveMessage)) number -1728
+            """,
+            findAccountInbox(),
             """
-        body += findAccountInbox()
-        body += """
                 if dest is missing value then error \(quoted(noInboxMessage)) number -1728
                 move item 1 of hits to dest
-            """
-        return wrapped(body)
+            """,
+        ]
+        return wrapped(lines.joined(separator: "\n"))
     }
 
     private static func wrapped(_ body: String) -> String {
