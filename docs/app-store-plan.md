@@ -282,6 +282,16 @@ direct build running beside it.
   direct build's dylib and absent from the store binary only after the
   control was pointed at the dylib. Recorded under rule 1 in CLAUDE.md.
 
+- **The store build shows no UI about a cut feature.** Brandon's first look
+  found the Updates section still there with a disabled toggle and a
+  sentence about the App Store — the rendering §5's phase 2 had accepted.
+  Gone, along with the "Updates:" export line, the Mail clause in the `C`
+  refusal, and the journal in the Diagnostics caption. The sweep was a grep of
+  every quoted string in the shared files for the cut features' vocabulary
+  (updates, Sparkle, journal, license, Mail, inchill, hooks, coding agents);
+  the rule is that a store user must never read the name of something the
+  build cannot do.
+
 Not measured, and needing a person at the keyboard: whether the crash
 prompt's alert actually appears in front (no screen access from this
 session; the log shows it was reached and not yet answered), Reminders under

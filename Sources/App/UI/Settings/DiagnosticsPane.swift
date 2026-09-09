@@ -183,16 +183,25 @@ struct DiagnosticsPane: View {
                 }
             }
 
-            Text(
-                "Errors the app has run into — a source that couldn't connect, "
-                + "a journal it couldn't write. These are kept so a problem "
-                + "that fixed itself can still be looked at afterwards."
-            )
+            Text(Self.problemsCaption)
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    /// The journal is named only where it exists.
+    #if !APP_STORE
+    private static let problemsCaption =
+        "Errors the app has run into — a source that couldn't connect, "
+        + "a journal it couldn't write. These are kept so a problem "
+        + "that fixed itself can still be looked at afterwards."
+    #else
+    private static let problemsCaption =
+        "Errors the app has run into — a source that couldn't connect, "
+        + "a banner that couldn't be shown. These are kept so a problem "
+        + "that fixed itself can still be looked at afterwards."
+    #endif
 
     private func caption(for problem: Problem) -> String {
         let when = problem.date.formatted(date: .abbreviated, time: .shortened)

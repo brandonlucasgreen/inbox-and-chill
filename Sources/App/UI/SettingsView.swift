@@ -70,11 +70,14 @@ struct GeneralPane: View {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
             }
-            UpdatesSection()
+            // Neither section exists in the App Store build: the store
+            // delivers updates and is the checkout, so a toggle that can only
+            // be disabled would be UI about a feature the app does not have.
+            // (Brandon, 2026-09-08, on seeing exactly that toggle.)
             #if !APP_STORE
+            UpdatesSection()
             // Hidden while the mechanic is off, so an alpha build shows no
-            // trace of a product that isn't for sale yet. Not compiled into
-            // the App Store build at all: there, the store is the checkout.
+            // trace of a product that isn't for sale yet.
             if Licensing.isEnforced {
                 LicenseSection()
             }

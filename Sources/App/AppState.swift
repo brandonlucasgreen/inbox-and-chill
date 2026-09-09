@@ -867,6 +867,21 @@ final class AppState {
         !items.isEmpty && items.allSatisfy(canComplete)
     }
 
+    /// What `C` says when the row is not one it can finish. Mail is named
+    /// only where Mail is a source: the App Store build has no Mail
+    /// connector, so its copy promises nothing about messages.
+    #if !APP_STORE
+    nonisolated static let completeRefusal =
+        "Only to-dos and mail can be completed — a to-do is finished in its app, a message is archived in Mail. Press E to dismiss this instead."
+    nonisolated static let completeRefusalMixed =
+        "Only to-dos and mail can be completed, and not every item here is one. Press E to dismiss them instead."
+    #else
+    nonisolated static let completeRefusal =
+        "Only to-dos can be completed — the task is finished in its app. Press E to dismiss this instead."
+    nonisolated static let completeRefusalMixed =
+        "Only to-dos can be completed, and not every item here is one. Press E to dismiss them instead."
+    #endif
+
     /// The word `C` uses for this row — "Complete" for a to-do, "Archive"
     /// for a mail message.
     nonisolated static func completeVerb(
@@ -887,8 +902,7 @@ final class AppState {
     /// `restore` reopens it remotely.
     func completeTask(_ item: Item) {
         guard canComplete(item) else {
-            openProblem =
-                "Only to-dos and mail can be completed — a to-do is finished in its app, a message is archived in Mail. Press E to dismiss this instead."
+            openProblem = Self.completeRefusal
             return
         }
         undoStack.append([item.uid])
@@ -910,10 +924,7 @@ final class AppState {
     /// rule-5 failure this app exists to avoid.
     func completeTask(_ items: [Item], topicName: String? = nil) {
         guard canCompleteAll(items) else {
-            openProblem =
-                items.isEmpty
-                ? "Nothing to complete."
-                : "Only to-dos and mail can be completed, and not every item here is one. Press E to dismiss them instead."
+            openProblem = items.isEmpty ? "Nothing to complete." : Self.completeRefusalMixed
             return
         }
         undoStack.append(items.map(\.uid))
