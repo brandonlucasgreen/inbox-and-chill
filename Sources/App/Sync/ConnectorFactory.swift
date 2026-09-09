@@ -21,8 +21,10 @@ enum ConnectorFactory {
         case "trello":
             return TrelloConnector(
                 sourceID: config.id, apiKey: settings["apiKey"] ?? "")
+        #if !APP_STORE
         case "local":
             return LocalConnector(sourceID: config.id)
+        #endif
         case "ntfy":
             return NtfyConnector(
                 sourceID: config.id, server: settings["server"] ?? "",
@@ -40,6 +42,7 @@ enum ConnectorFactory {
                 org: settings["org"] ?? "",
                 query: settings["query"] ?? "",
                 resolveOnDone: field?.boolValue(in: settings) ?? false)
+        #if !APP_STORE
         case "appleMail":
             let fields = ConnectorCatalog.descriptor(for: "appleMail")?.fields ?? []
             func toggle(_ key: String) -> Bool {
@@ -50,6 +53,7 @@ enum ConnectorFactory {
                 scope: .init(
                     flagged: toggle("flagged"), unread: toggle("unread"),
                     mailbox: settings["mailbox"] ?? ""))
+        #endif
         case "reminders":
             let fields = ConnectorCatalog.descriptor(for: "reminders")?.fields ?? []
             func toggle(_ key: String) -> Bool {

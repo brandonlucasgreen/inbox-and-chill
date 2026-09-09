@@ -1,9 +1,12 @@
 # Mac App Store — one tree, two targets (plan, 2026-09-08)
 
-Status: **phases 1–2 built (this and the following PR); phases 3–5 to do on a
-Mac.** Brandon's call, 2026-09-08, after the audit below: *"far less
-kneecapped of an app than I thought … I want to still reserve the right to
-release a 'richer' app outside the MAS."*
+Status: **phases 1–3 built; phase 3 run sandboxed on a Mac and measured (§7);
+phase 4 is Brandon's paperwork, phase 5 partly done.** Brandon's call,
+2026-09-08, after the audit below: *"far less kneecapped of an app than I
+thought … I want to still reserve the right to release a 'richer' app outside
+the MAS."*
+
+Build and run the store target with `scripts/build-app-store.sh --launch`.
 
 This supersedes the *conclusions* of PLAN §2.1.8 and §2.1.10 without
 contradicting their evidence: the sandbox findings there still hold, and this
@@ -73,12 +76,31 @@ stays a `scripts/release.sh` away.
 - **Gate direction is `#if !APP_STORE`** around the rich code, never
   `#if APP_STORE` around store code. The unflagged read of any file is the
   full app, which is the one you develop against.
-- **Excluded folders carry their own stubs.** `Journal/AppState+Journal.swift`
-  and `Licensing/AppState+License.swift` hold the real extension methods and,
-  in phase 3, an `#else` block of no-op methods with the same signatures.
-  `AppState`'s call sites then compile unchanged in both builds; only its
-  two *stored* properties (`license`, `journalError`) need a flag, because
-  stored properties cannot live in extensions.
+- **The excluded folders' extension files carry the stubs, and are compiled
+  into both targets.** `Journal/AppState+Journal.swift` and
+  `Licensing/AppState+License.swift` hold the real extension methods under
+  `#if !APP_STORE` and an `#else` block of no-op methods with the same
+  signatures. The store target excludes each folder whole and then lists
+  those two files as extra sources — an `#else` in a file the target does not
+  compile would be no stub at all, which is what the first draft of this
+  paragraph got wrong. `AppState`'s call sites then compile unchanged in both
+  builds; only its two *stored* properties (`license`, `journalError`) need a
+  flag, because stored properties cannot live in extensions. `JournalAction`
+  lives above the `#if` in the journal file, because every triage verb names
+  one when it calls `journal(...)`.
+- **A settings view that belongs to a cut feature lives in the feature's
+  folder**, not in `UI/Settings`: `Connectors/Mail/MailAccessView.swift`,
+  `Connectors/Local/AgentHooksView.swift`. Same rule as phase 2's
+  `Journal/JournalSettingsSection.swift`.
+- **Both targets produce `Inbox & Chill.app`**, so built into one DerivedData
+  they overwrite each other. `scripts/build-app-store.sh` builds into
+  `build/AppStore` and copies to `dist/app-store/` — never `/Applications`,
+  which would replace the direct build; `verify-bundle.sh --app-store` looks
+  in the same derived data when not given `--app`.
+- **`PrivacyInfo.xcprivacy` is at `Sources/App/Resources/`**, picked up by
+  both targets as a resource; `verify-bundle.sh` checks it landed in
+  `Contents/Resources/` in both flavours, because a resource that fails to
+  copy produces no build error and the rejection arrives by e-mail.
 - **Own entitlements and Info.plist per target.** Direct keeps apple-events.
   Store: app-sandbox, network.client, personal-information.calendars,
   files.user-selected.read-write (diagnostics export). Store plist drops the
@@ -170,16 +192,19 @@ relaunch to see delivery.
      `Journal/AppState+Journal.swift`; `JournalSettingsSection` into
      `Journal/`. Licensing files move into `Licensing/`, with the trial
      nudge and callback wiring in `Licensing/AppState+License.swift`.
-3. **The store target.** `project.yml` second target, store entitlements and
-   Info.plist, `PrivacyInfo.xcprivacy` for both, the `#if !APP_STORE` seams
-   from §3 plus the `#else` stubs, Diagnostics degrading *out loud* (rule 5:
-   the pane says why crash reports are unavailable rather than showing
-   nothing), MetricKit source for `CrashHarvester`, the crash-relaunch send
-   prompt, `verify-bundle.sh --app-store`, CI building both. Then build the
-   store target locally and **run it sandboxed**: Reminders under the
-   calendars entitlement, Slack Socket Mode connects, Keychain writes land in
-   the container, Export via the save panel works, `OSLogStore` behaviour,
-   MetricKit delivery.
+3. **The store target** — done 2026-09-08. `project.yml` second target,
+   store entitlements and Info.plist, `PrivacyInfo.xcprivacy` for both, the
+   `#if !APP_STORE` seams from §3 plus the `#else` stubs, Diagnostics
+   degrading *out loud* (the pane carries a secondary note saying the OS
+   report is out of reach and MetricKit is the source), `MetricKitCrashes`
+   feeding `DiagnosticsRecorder` beside the `.ips` reader, the
+   crash-relaunch send prompt (`CrashPrompt`), `verify-bundle.sh
+   --app-store`, `scripts/build-app-store.sh`, CI building and auditing the
+   store target on every PR. Built and run sandboxed on this Mac; what was
+   measured and what was not is in §7. **Still to exercise by hand** (needs
+   a token or a click): Reminders under the calendars entitlement, Slack
+   Socket Mode, a Keychain write from the sandboxed source editor, Export via
+   the save panel, and the alert itself being visible.
 4. **Apple paperwork (Brandon, on the Mac):** App ID, Apple Distribution
    certificate, provisioning profile, App Store Connect record, privacy
    policy URL, screenshots, review notes carrying demo credentials for Slack,
@@ -203,4 +228,62 @@ scripts/install-local.sh          # then press ⌥⌘I — phase 1's real test
 
 Then phase 3, in this order: `project.yml` target → entitlements + plist →
 `#if` seams + stubs → build the store scheme → run it sandboxed → MetricKit →
-`verify-bundle.sh --app-store` → CI.
+`verify-bundle.sh --app-store` → CI. (Done; see §7.)
+
+## 7. Phase 3 as built and measured (2026-09-08, macOS 26.6.2, Xcode 26.6)
+
+Everything below was read from the sandboxed build's own log or its
+container, running from `dist/app-store/`, signed Developer ID, with the
+direct build running beside it.
+
+- **It runs sandboxed, from nothing.** The first launch created
+  `~/Library/Containers/lol.bgreen.inboxandchill/Data/Library/Application
+  Support/InboxAndChill/store.sqlite`, logged `first run check:
+  launchedBefore=false sources=0 … welcome=true` and `welcome window
+  presented`, with **no sandbox denials** in the unified log. The relaunch
+  logged `launchedBefore=true … welcome=false`.
+- **TCC grants follow the bundle id.** Banner permission resolved `granted`
+  on the store build's first launch, because the direct build had been
+  granted it. Expect the same for Reminders — and expect the two builds'
+  global hotkeys to clash while both run.
+- **`OSLogStore.local()` is refused under the sandbox**: `Connection to logd
+  failed`. `OSLogStore(scope: .currentProcessIdentifier)` works, so
+  breadcrumbs in the store build cover the current run only and the export
+  says so. §4's "add a bounded file sink once confirmed" is now a live
+  question rather than a hypothetical; not done in this pass, because
+  MetricKit turned out to carry the crash itself.
+- **MetricKit delivers to a sandboxed `LSUIElement` app, immediately.** After
+  `kill -SEGV` and a relaunch, `didReceive` fired **24 ms after launch**
+  with one `MXCrashDiagnostic`; the report was on disk and in the pane's
+  model before the first `refresh` finished, so no "quit unexpectedly with no
+  report" line was written for a run MetricKit could explain.
+- **The MetricKit frame offsets are the `.ips` offsets.** The crash's
+  `.ips` (readable from a normal shell, not from the app) lists the same
+  faulting-thread frames for our image; MetricKit's topmost own frame was
+  `+ 0x8f450`, matching the `.ips` frame for `main`. So `atos -o <dSYM>`
+  against these offsets will resolve — the release dSYM `notarize.sh`
+  archives is the one to keep.
+- **MetricKit's date is not the crash time.** The payload's `timeStampEnd`
+  was `01:00:00Z`, forty-eight seconds *before* the kill at `01:00:48Z` —
+  the window boundary, not the event. Ordering and "since dismissed" work;
+  correlating against a log by time does not.
+- **An external kill reads as a crash in `main`.** MetricKit has no
+  `terminatedByProcess`, so the fallback signature names the outermost own
+  frame; the `.ips` reader would say "sent by zsh" for the same event. A
+  MetricKit-only crash titled `… in Inbox & Chill + <offset of main>` is
+  therefore worth a second look before treating it as a bug in `main`.
+- **A locally signed store build carries `get-task-allow`; an archive does
+  not.** `xcodebuild archive` of the store scheme produced an app with
+  exactly the four sandbox entitlements. `verify-bundle.sh --app-store`
+  notes the key rather than failing on it.
+- **`strings` on a Debug build's executable proves nothing.** Xcode 26 puts
+  the code in `Contents/MacOS/Inbox & Chill.debug.dylib`; the executable is
+  a 60 KB stub. The cut-feature literals were confirmed present in the
+  direct build's dylib and absent from the store binary only after the
+  control was pointed at the dylib. Recorded under rule 1 in CLAUDE.md.
+
+Not measured, and needing a person at the keyboard: whether the crash
+prompt's alert actually appears in front (no screen access from this
+session; the log shows it was reached and not yet answered), Reminders under
+the calendars entitlement, Slack Socket Mode, a Keychain write from the
+sandboxed source editor, Export through the save panel.

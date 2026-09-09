@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Privacy manifest, shipped in both builds. App Store Connect requires
+	     one for apps that call "required reason" APIs; the direct build
+	     carries it too so the two bundles differ only where the sandbox
+	     forces them to (docs/app-store-plan.md §1, blocker 8).
+
+	     Nothing here is tracking, and nothing leaves the Mac on its own:
+	     every source is polled at the user's request with their own token,
+	     and diagnostics leave only when the user presses a button. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- UserDefaults: the app's own preferences (badge switches, hotkey,
+		     first-run flag, dismissed-crash dates). CA92.1 = read and write
+		     only this app's own defaults. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!-- File timestamps: the modification date of the app's own problem
+		     log (rotation) and, in the direct build, of macOS crash reports
+		     whose date is shown to the user in Settings › Diagnostics.
+		     C617.1 = files inside the app's own container; DDA9.1 = a
+		     timestamp displayed to the person using the app. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>DDA9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -59,11 +59,13 @@ struct AboutPane: View {
                         "KeyboardShortcuts by Sindre Sorhus (MIT)",
                         destination: URL(string: "https://github.com/sindresorhus/KeyboardShortcuts")!)
                 }
+                #if !APP_STORE
                 LabeledContent("In-app updates") {
                     Link(
                         "Sparkle (MIT)",
                         destination: URL(string: "https://sparkle-project.org")!)
                 }
+                #endif
                 // The icon is Fluent's artwork, not ours, and its licence asks
                 // to travel with it. docs/brand/vendor/ carries the licence
                 // text; this is the credit a user can actually see.

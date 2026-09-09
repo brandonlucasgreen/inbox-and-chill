@@ -1,19 +1,5 @@
 import Foundation
 
-/// What happened to an item, as recorded in the journal.
-enum JournalAction: String, Sendable {
-    case arrived
-    case done
-    /// Finished for real in its source, by `C` on a to-do row. Distinct from
-    /// `done` on purpose: reading back a week of triage, "I dismissed this"
-    /// and "I did this" are not the same admission.
-    case completed
-    case snoozed
-    case pinned
-    case unpinned
-    case restored
-}
-
 /// One line's worth of journal. Built on the MainActor from a live `Item`,
 /// then handed to the writer actor.
 struct JournalEntry: Sendable {

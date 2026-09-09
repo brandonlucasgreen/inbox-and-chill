@@ -44,5 +44,11 @@ struct CrashReport: Sendable, Equatable, Codable {
         var symbol: String?
         var symbolLocation: Int
         var address: UInt64
+        /// Offset into the image's `__TEXT` segment, when the report carried
+        /// one. The `.ips` reader always has it; MetricKit has *only* it —
+        /// its frames arrive with no symbol at all, so this is what an
+        /// `atos` run against the release dSYM needs. Optional so a report
+        /// persisted before the field existed still decodes.
+        var imageOffset: UInt64? = nil
     }
 }

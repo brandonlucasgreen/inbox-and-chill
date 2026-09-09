@@ -71,11 +71,14 @@ struct GeneralPane: View {
                 }
             }
             UpdatesSection()
+            #if !APP_STORE
             // Hidden while the mechanic is off, so an alpha build shows no
-            // trace of a product that isn't for sale yet.
+            // trace of a product that isn't for sale yet. Not compiled into
+            // the App Store build at all: there, the store is the checkout.
             if Licensing.isEnforced {
                 LicenseSection()
             }
+            #endif
         }
         .formStyle(.grouped)
     }
@@ -116,7 +119,9 @@ struct NotificationsPane: View {
                 BannerPermissionNotice()
             }
 
+            #if !APP_STORE
             JournalSettingsSection()
+            #endif
         }
         .formStyle(.grouped)
     }

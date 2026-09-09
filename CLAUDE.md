@@ -34,6 +34,7 @@ xcodebuild -project InboxAndChill.xcodeproj -scheme InboxAndChill -configuration
 scripts/check-shell.sh                                   # what CI runs on scripts/
 scripts/verify-bundle.sh                                 # audit a built .app (see CI, below)
 scripts/install-local.sh                                 # Release → /Applications → launch
+scripts/build-app-store.sh --launch                      # the sandboxed App Store target → dist/app-store/ (NOT /Applications)
 scripts/reset-first-run.sh --dry-run                     # back to a fresh install (see below)
 scripts/release.sh --dry-run                             # show what a release would do
 scripts/release.sh                                       # notarize + tag + release + appcast (runbook: docs/releasing.md)
@@ -143,6 +144,12 @@ Two traps in that check:
   this message` returns nothing; `t describe this message` returns 2. Hit this
   on 2026-08-19 — if a literal you are sure about reports `0`, check it for
   typographic punctuation before believing the build is stale.
+- **A Debug build's main executable is a 60 KB stub with ~80 strings in it.**
+  Xcode 26 puts the app's code in `Contents/MacOS/Inbox & Chill.debug.dylib`
+  (the previews/hot-reload mechanism) and `strings` on the executable reports
+  `0` for *everything*, including the bundle id. Cost a false control on
+  2026-09-08. Grep the `.debug.dylib` for Debug, or use a Release build;
+  expect **1** hit from a Debug dylib (arm64 only) and **2** from Release.
 
 mtime and size are not evidence. A behavioural test that "fails" is very often a
 stale binary.
@@ -336,15 +343,37 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   that, never a build or a test.
 - `AppState.makeConnector` — wires settings JSON into connector inits.
 - **Features the App Store build leaves out live in their own folders and
-  reach `AppState` through an extension file** (since 2026-09-08, phase 2 of
+  reach `AppState` through an extension file** (since 2026-09-08,
   `docs/app-store-plan.md`): `Journal/AppState+Journal.swift`,
   `Licensing/AppState+License.swift`. `AppState.swift` keeps only the stored
-  properties an extension cannot hold (`license`, `journalError`) and calls
-  the extension's methods unchanged; the store target excludes the folder
-  and the extension file grows an `#else` of no-op stubs. Adding a feature
-  the sandbox cannot have? Put it in a folder, not in `AppState.swift`.
+  properties an extension cannot hold (`license`, `journalError`, both
+  flagged) and calls the extension's methods unchanged. **The store target
+  (`InboxAndChill-AppStore` in `project.yml`) excludes the whole folder and
+  then adds that one extension file back**, so the file is compiled into
+  *both* targets and its `#else` branch is where the no-op stubs live — an
+  `#else` in an excluded file would never compile. The excluded folders are
+  `Connectors/Local`, `Connectors/Mail`, `Journal`, `Licensing`; a settings
+  view that belongs to one of them lives *in* it (`Connectors/Mail/
+  MailAccessView.swift`), not in `UI/Settings`. Adding a feature the sandbox
+  cannot have? Put it in a folder, not in `AppState.swift`.
   `UpdateController` is the other shape — one file, Sparkle behind
   `#if !APP_STORE`, a stub in the `#else` — because six shared files read it.
+  Gate direction is always `#if !APP_STORE` around the rich code: the
+  unflagged read of any file is the full app. About twenty such seams exist
+  in shared files; CI builds the store target on every PR so a new reference
+  to a cut type fails there rather than at submission.
+- **Both targets produce `Inbox & Chill.app`, same bundle id.** Built into
+  one DerivedData they overwrite each other, so `scripts/build-app-store.sh`
+  uses `build/AppStore` and copies to `dist/app-store/` — never
+  `/Applications`, which would replace the direct build you use. The store
+  build has its own container (`~/Library/Containers/lol.bgreen.inboxandchill`),
+  so it starts from nothing; it does inherit the bundle id's TCC grants
+  (notifications came up `granted` on first launch, 2026-09-08) and its global
+  hotkey clashes with a running direct build.
+- **`get-task-allow` is in a locally signed store build and gone from an
+  archive.** Measured 2026-09-08 with `xcodebuild archive`: the archived app
+  carries exactly the four sandbox entitlements. So `verify-bundle.sh
+  --app-store` only *notes* it, where the direct audit fails on it.
 - `Support/Keychain.swift` — service `lol.bgreen.inboxandchill`, account is
   `<sourceConfig UUID>.<field>` (**not** `<kind>.<field>`). Read-through cached
   because connectors call it per operation.
@@ -748,7 +777,7 @@ measured 2026-09-03):
   account's inbox, found by account rather than by the name "INBOX". A 0.3.0
   handle with no account or Message-ID cannot be undone in Mail and says so.
 
-## Diagnostics — crashes and errors (added 2026-08-26)
+## Diagnostics — crashes and errors (added 2026-08-26; MetricKit 2026-09-08)
 
 `Sources/App/Support/Diagnostics/`, surfaced in **Settings › Diagnostics**.
 Rule 5 turned on the app itself: a crash used to leave nothing but a menu bar
@@ -814,11 +843,13 @@ one removed a dependency someone would otherwise reach for:
 |---|---|
 | `AppLog` | The one subsystem constant + a closed category set. Was seven copies of a string literal; `UnifiedLogReader`'s predicate is only honest because it is now one. |
 | `CrashReportFile` | Pure parsing, signature, backtrace rendering and redaction. All `nonisolated static`, all unit-tested against a real trimmed report. |
-| `CrashHarvester` | Sweeps `DiagnosticReports` **and `Retired/`** — macOS moves reports there, so a top-level-only sweep goes blind on exactly the older crashes people report. |
+| `CrashHarvester` | Sweeps `DiagnosticReports` **and `Retired/`** — macOS moves reports there, so a top-level-only sweep goes blind on exactly the older crashes people report. Direct build only: the sandbox redirects `~/Library` into the container, so in the store build the folder is *absent*, not merely unreadable. |
+| `MetricKitCrashes` | The second crash source (both builds; the only one the store build has). `MXCrashDiagnostic` arrives on the launch after a crash, **unsymbolicated** — image, UUID, `__TEXT` offset, no symbol — so its signature is `EXC_… in Inbox & Chill + 0x1234` and the export keeps the offset for `atos`. Written to `MetricKit/` beside the store the moment it arrives; `merge` drops MetricKit's copy of a crash the `.ips` reader also saw (same build, within 48h) because the `.ips` is the better report. |
+| `CrashPrompt` | The one alert the app raises on its own: "quit unexpectedly last time. Send the report?" on the launch that first sees a new crash, gated by the same "recorded once" mark as the problem-log line. Send = the pane's Email Support path (clipboard + `mailto:`); nothing leaves without the user pressing Send in Mail. |
 | `RunMarker` | The only thing that can tell a crash from a quit, and the only evidence of a run macOS wrote no report for at all (force quit, jetsam, lost power). |
 | `ExceptionTrap` | `NSSetUncaughtExceptionHandler`, chained. Fills one gap — the Objective-C exception *reason* — and is **not** a crash handler. `PanelToggler`'s KVC against a private `statusItem` selector is the live example. |
 | `ProblemLog` | Bounded JSONL beside the store. A tee off sentences the app already computes, with a 15-minute repeat window so a source failing every 30s writes one line, not one per poll. |
-| `UnifiedLogReader` | Breadcrumbs, straight out of the unified log. |
+| `UnifiedLogReader` | Breadcrumbs, straight out of the unified log. Falls back to `OSLogStore(scope: .currentProcessIdentifier)` when `.local()` refuses, and the export says so — that fallback is what the sandboxed build runs on. Logs which store it got at launch (`log store: …`). |
 | `DiagnosticsReport` | Assembles the export. **The single choke point where `redact` runs**, so a section added later cannot forget to. |
 | `DiagnosticsRecorder` | `@MainActor @Observable`, created at App scope beside `UpdateController` and started from `init` — with `.menuBarExtraStyle(.window)` the panel's content is not built until the user first clicks, so a `.task` there would miss the launch entirely. |
 

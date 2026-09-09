@@ -48,6 +48,17 @@ struct DiagnosticsPane: View {
                     .textSelection(.enabled)
             }
 
+            // A fact about the build, not a fault — so secondary, not red.
+            // The sandboxed build cannot read macOS's own crash reports and
+            // gets them from MetricKit on the next launch instead.
+            if let note = diagnostics.crashSourceNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
             if let crash = diagnostics.crash {
                 headline(
                     CrashReportFile.signature(crash),
@@ -260,20 +271,15 @@ struct DiagnosticsPane: View {
     }
 
     /// Copies the report, then opens a message with the subject filled in.
-    /// The body says the report is on the clipboard rather than carrying it
-    /// — see `DiagnosticsReport.supportMailURL`.
+    /// Shared with the crash prompt at launch — `DiagnosticsRecorder` owns
+    /// it so the two doors to the same e-mail cannot drift.
     private func emailSupport() {
-        withSnapshot { snapshot in
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(
-                DiagnosticsReport.text(snapshot), forType: .string)
-            guard let url = DiagnosticsReport.supportMailURL(snapshot) else {
-                exportProblem = "Couldn't open a mail message. The report is on your "
-                    + "clipboard — paste it into an e-mail to \(SupportContact.email)."
-                return
-            }
-            exportProblem = nil
-            NSWorkspace.shared.open(url)
+        isWorking = true
+        Task {
+            exportProblem = await diagnostics.emailSupport(
+                sourceKinds: sourceKinds,
+                updateProblem: updates.lastFailure ?? updates.configurationProblem)
+            isWorking = false
         }
     }
 

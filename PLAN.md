@@ -277,7 +277,9 @@ Store."* The decision is to ship a store build **and** keep the richer direct
 build, from one tree.
 
 The full audit, mechanism, seam inventory, MetricKit decision and phased plan
-live in **`docs/app-store-plan.md`**. The parts that amend earlier sections:
+live in **`docs/app-store-plan.md`** — phases 1–3 built 2026-09-08 and the
+store target run sandboxed the same day (its §7 has the measurements). The
+parts that amend earlier sections:
 
 - §2.1.8's sandbox evidence still holds and is the basis of the cut list;
   §2.1.10's "variant, not a fork" mechanism is what is being built. What
