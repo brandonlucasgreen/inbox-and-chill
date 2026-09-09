@@ -2137,6 +2137,46 @@ struct AppleMailScriptTests {
             handle: .init(mailID: 42, messageID: "a@b", unflag: false)) == nil)
     }
 
+    /// The test the other Mail script tests could not be: every one of them
+    /// asserts on substrings, and a substring check cannot see a **missing
+    /// newline**. `archiveScript` and `unarchiveScript` concatenated Swift
+    /// multi-line literals, which carry no trailing newline, so two
+    /// AppleScript statements landed on one line
+    /// (`set mover to m        set dest to missing value`). Mail refused the
+    /// whole script with -2741 and `C` was a silent no-op from 2026-09-04
+    /// until 2026-09-08, past a green suite and a hand-assembled live probe.
+    ///
+    /// Compiling needs no Mail launch, no Apple event and no Automation
+    /// consent — only Mail's terminology, read from the app bundle. If a
+    /// machine has no Mail to read terminology from, that is not this bug and
+    /// the test says which error it saw rather than failing blind.
+    @Test("Every script the connector generates actually compiles")
+    func generatedScriptsCompile() {
+        let handle = AppleMailConnector.MessageHandle(
+            mailID: 42, messageID: "<a@b.example>", unflag: true,
+            account: "ACCT-1", mailbox: "All Mail")
+        let scripts: [(String, String)] = [
+            ("fetch", AppleMailConnector.fetchScript(
+                scope: .init(flagged: true, unread: true, mailbox: ""))),
+            ("markDone", AppleMailConnector.markDoneScript(handle: handle)),
+            ("archive", AppleMailConnector.archiveScript(handle: handle)),
+            ("unarchive", AppleMailConnector.unarchiveScript(handle: handle) ?? ""),
+        ]
+        for (name, source) in scripts {
+            #expect(!source.isEmpty, "\(name) produced no script")
+            var error: NSDictionary?
+            let compiled = NSAppleScript(source: source)?
+                .compileAndReturnError(&error) ?? false
+            if compiled { continue }
+            let code = (error?["NSAppleScriptErrorNumber"] as? Int) ?? 0
+            let message = (error?["NSAppleScriptErrorMessage"] as? String) ?? ""
+            // -1728 / -10814: Mail itself could not be resolved on this
+            // machine, so there was no terminology to compile against.
+            let missingMail = code == -1728 || code == -10814
+            #expect(missingMail, "\(name) does not compile: \(code) — \(message)")
+        }
+    }
+
     @Test("Mail carries both verbs, and C says Archive on its rows")
     func mailHasBothVerbs() {
         let connector = AppleMailConnector(sourceID: "m", scope: .init(flagged: true, unread: false, mailbox: ""))
