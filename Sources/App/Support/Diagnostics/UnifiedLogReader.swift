@@ -15,6 +15,11 @@ struct LogBreadcrumbs: Sendable {
     /// Why the log could not be read, or nil. Rule 5: an empty breadcrumb
     /// list and an unreadable log must not render the same.
     var problem: String?
+    /// A limit on what *was* read, or nil. Set when only the current
+    /// process's lines were available — true under the App Sandbox, where
+    /// the system-wide store refuses — so a reader knows the run that
+    /// crashed is not in here.
+    var note: String?
 }
 
 /// Reads this app's own entries back out of the unified log.
@@ -57,7 +62,20 @@ enum UnifiedLogReader {
     ) -> LogBreadcrumbs {
         var result = LogBreadcrumbs()
         do {
-            let store = try OSLogStore.local()
+            let store: OSLogStore
+            do {
+                store = try OSLogStore.local()
+            } catch let refusal {
+                // The App Sandbox refuses the system-wide store (and Apple's
+                // docs would have it need an entitlement nobody can get).
+                // The current process's own entries are always readable, so
+                // fall back to those and say so: they cover this run, not
+                // the one that crashed.
+                store = try OSLogStore(scope: .currentProcessIdentifier)
+                result.note = "Only this run's log lines could be read — the "
+                    + "system log store refused (\(refusal.localizedDescription)), "
+                    + "so lines from the run that crashed are not included."
+            }
             let start = store.position(date: before.addingTimeInterval(-window))
             let predicate = NSPredicate(format: "subsystem == %@", subsystem)
             let entries = try store.getEntries(
@@ -82,17 +100,54 @@ enum UnifiedLogReader {
         return result
     }
 
+    /// Which store this process can open. Logged once at launch by
+    /// `DiagnosticsRecorder` so the answer is in the log rather than in
+    /// somebody's memory: the system-wide store was measured readable from a
+    /// Developer ID, hardened-runtime app (2026-08-26), and the App Sandbox
+    /// was expected to refuse it — this is what settles it, per build.
+    enum Availability: Sendable, Equatable, CustomStringConvertible {
+        /// `OSLogStore.local()`: every process's entries, including past runs.
+        case system
+        /// Only `.currentProcessIdentifier`: this run's entries and no more.
+        case currentProcessOnly(refusal: String)
+        case none(String)
+
+        var description: String {
+            switch self {
+            case .system: "system store readable"
+            case .currentProcessOnly(let refusal):
+                "current process only; system store refused: \(refusal)"
+            case .none(let reason): "no log store readable: \(reason)"
+            }
+        }
+    }
+
+    static func availability() -> Availability {
+        do {
+            _ = try OSLogStore.local()
+            return .system
+        } catch let refusal {
+            do {
+                _ = try OSLogStore(scope: .currentProcessIdentifier)
+                return .currentProcessOnly(refusal: refusal.localizedDescription)
+            } catch {
+                return .none("\(refusal.localizedDescription); \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Renders breadcrumbs for the export. Pure, so it is tested directly.
     nonisolated static func render(_ breadcrumbs: LogBreadcrumbs) -> String {
         if let problem = breadcrumbs.problem {
             return problem
         }
+        let preamble = breadcrumbs.note.map { $0 + "\n" } ?? ""
         guard !breadcrumbs.entries.isEmpty else {
-            return "(the app wrote nothing to the log in this window)"
+            return preamble + "(the app wrote nothing to the log in this window)"
         }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return breadcrumbs.entries.map { entry in
+        return preamble + breadcrumbs.entries.map { entry in
             "\(formatter.string(from: entry.date))  \(entry.level.uppercased())  "
             + "[\(entry.category)] \(entry.message)"
         }

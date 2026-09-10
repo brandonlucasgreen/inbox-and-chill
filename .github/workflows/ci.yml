@@ -195,6 +195,39 @@ jobs:
           if-no-files-found: ignore
 
       # ------------------------------------------------------------------
+      # The Mac App Store target, on EVERY pull request — unlike the Release
+      # audit below. A second target over the same sources is the easiest
+      # thing in the repo to break without noticing: a new file that
+      # mentions Sparkle, Mail or the CLI compiles fine in the default
+      # scheme, and only the store build objects. Runs the same script a
+      # person runs (scripts/build-app-store.sh), with CI's ad-hoc signing
+      # overrides passed through, and audits the bundle with
+      # `verify-bundle.sh --app-store`: sandbox present, apple-events and
+      # Sparkle absent, no inchill, privacy manifest present.
+      #
+      # `--no-copy` skips the dist/ copy and the launch instructions.
+      # ------------------------------------------------------------------
+      - name: Build and audit (App Store target)
+        run: |
+          scripts/build-app-store.sh --no-copy -- \
+            -clonedSourcePackagesDirPath .spm \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM= \
+            OTHER_CODE_SIGN_FLAGS=--timestamp=none
+
+      - name: Upload App Store build log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-store-build-log
+          path: /tmp/inchill-appstore-build.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ------------------------------------------------------------------
       # Release-shaped build, audited for the traps that produce no build
       # failure: a missing SUFeedURL, a version pinned to 1.0, an injected
       # get-task-allow, Sparkle moving its nested helpers.
@@ -219,7 +252,7 @@ jobs:
           CHANGED=$(git diff --name-only "origin/$BASE_REF...HEAD")
           echo "Changed files:"
           echo "$CHANGED" | sed 's/^/    /'
-          if echo "$CHANGED" | grep -qE '^(project\.yml|InboxAndChill\.entitlements|scripts/|\.github/workflows/)'; then
+          if echo "$CHANGED" | grep -qE '^(project\.yml|InboxAndChill\.entitlements|Sources/App/Resources/PrivacyInfo\.xcprivacy|scripts/|\.github/workflows/)'; then
             echo "Touches the build or signing configuration — auditing."
             echo "run=true" >> "$GITHUB_OUTPUT"
           else

@@ -115,7 +115,19 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
 }
 
 enum ConnectorCatalog {
-    static let all: [ConnectorKindDescriptor] = [
+    /// Every kind, in the order the add-source picker shows them.
+    ///
+    /// Assembled from slices rather than written as one literal because two
+    /// kinds exist only in the direct build and Swift allows no `#if` between
+    /// the elements of an array literal. The App Store build drops Apple Mail
+    /// (a sandboxed app's scripting access to Mail is compose-only) and the
+    /// local coding agents (no `inchill`, no hooks written into `~/.claude`);
+    /// docs/app-store-plan.md has the audit behind both.
+    static let all: [ConnectorKindDescriptor] =
+        inboxKinds + mailKinds + todoAndFeedKinds + localKinds
+
+    /// Work tools with a notification inbox of their own.
+    private static let inboxKinds: [ConnectorKindDescriptor] = [
         .init(
             id: "linear", displayName: "Linear", systemImage: "line.3.horizontal.decrease.circle",
             fields: [
@@ -256,6 +268,11 @@ enum ConnectorCatalog {
             setupURL: "https://sentry.io/settings/account/api/auth-tokens/",
             sourceNote: "Sentry's API works on every plan, the free tier included — what you pay for is event quota, not access.",
             grouping: .init(noun: "project", defaultOn: true)),
+    ]
+
+    #if !APP_STORE
+    /// Direct build only — see `all`.
+    private static let mailKinds: [ConnectorKindDescriptor] = [
         .init(
             id: "appleMail", displayName: "Apple Mail", systemImage: "envelope",
             fields: [
@@ -281,6 +298,13 @@ enum ConnectorCatalog {
             completeVerb: .init(
                 button: "Archive", menu: "Archive in Mail",
                 help: "Archive it in Mail and mark it read (C)")),
+    ]
+    #else
+    private static let mailKinds: [ConnectorKindDescriptor] = []
+    #endif
+
+    /// To-do lists, then the two generic transports.
+    private static let todoAndFeedKinds: [ConnectorKindDescriptor] = [
         .init(
             id: "reminders", displayName: "Apple Reminders", systemImage: "checklist",
             fields: [
@@ -425,6 +449,11 @@ enum ConnectorCatalog {
             sourceNote: "Priority 4–5 messages arrive high-signal, and a message's `click` link becomes the item's.",
             setupCost: "A topic name. A token or password only if the topic is protected.",
             grouping: .init(noun: "topic", defaultOn: true)),
+    ]
+
+    #if !APP_STORE
+    /// Direct build only — see `all`.
+    private static let localKinds: [ConnectorKindDescriptor] = [
         .init(
             id: "local", displayName: "Local coding agents", systemImage: "terminal",
             fields: [],
@@ -435,6 +464,9 @@ enum ConnectorCatalog {
             sourceNote: "Anything can post here — `inchill notify --title \"Build finished\"` from a script or terminal.",
             setupCost: "Nothing to set up — it listens for the inchill CLI and your coding agents' hooks."),
     ]
+    #else
+    private static let localKinds: [ConnectorKindDescriptor] = []
+    #endif
 
     /// The Slack app manifest, offered as a Copy button in the source
     /// editor. Setting twelve user scopes and six event subscriptions by

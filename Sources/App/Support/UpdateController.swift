@@ -232,20 +232,20 @@ final class UpdateController: NSObject, SPUUpdaterDelegate,
 /// The App Store build. The store delivers updates, and guideline 2.4.5(vii)
 /// forbids any other mechanism, so Sparkle is not linked at all — its four
 /// nested executables would each need the sandbox entitlement besides. This
-/// keeps the surface the rest of the app reads (`UpdatesSection`,
-/// `MainWindowCommands`, `DiagnosticsPane`) so none of them needs a flag.
+/// keeps the type the app root and `DiagnosticsPane` read, so neither needs
+/// a flag; `UpdatesSection` and the "Check for Updates…" menu item are not
+/// compiled into this build at all.
 ///
-/// `configurationProblem` carries the explanation on purpose: `UpdatesSection`
-/// already prints it as secondary text and disables the toggle when it is
-/// set, which is exactly the right rendering here.
-///
-/// **Uncompiled until the store target exists** (phase 3 of
-/// docs/app-store-plan.md); the first `APP_STORE` build is what checks it.
+/// Every property is its "nothing to say" value on purpose. The first store
+/// build carried an explanatory `configurationProblem` here, and the result
+/// was an Updates section with a disabled toggle and a sentence about the
+/// App Store — UI about a feature the app does not have (Brandon,
+/// 2026-09-08). Nil here also keeps the "Updates:" line out of the
+/// diagnostics export.
 @MainActor
 @Observable
 final class UpdateController {
-    private(set) var configurationProblem: String? =
-        "This copy came from the App Store, which delivers updates itself — see the App Store app's Updates tab."
+    private(set) var configurationProblem: String?
     private(set) var lastFailure: String?
     private(set) var isChecking = false
     private(set) var lastCheck: Date?

@@ -12,9 +12,12 @@ import UserNotifications
 final class AppState {
     let container: ModelContainer
     let store: Store
+    #if !APP_STORE
     /// Stored here because a stored property cannot live in an extension;
     /// everything else about licensing is in `Licensing/AppState+License.swift`.
+    /// Absent from the App Store build, where the store is the checkout.
     let license: LicenseController
+    #endif
     private(set) var engine: SyncEngine!
 
     /// Bumped whenever the queue changes so views can re-query.
@@ -44,11 +47,13 @@ final class AppState {
     /// get must never fail silently (PLAN §2).
     private(set) var bannerAuthorization: BannerAuthorization.Outcome?
 
+    #if !APP_STORE
     /// Whether macOS will let the app read Mail; `nil` until something has
     /// looked. Same contract as `bannerAuthorization` and for the same
     /// reason — a refusal here is invisible from the queue, because it looks
     /// exactly like an inbox with nothing in it.
     private(set) var mailAutomation: MailAutomationAuthorization.Outcome?
+    #endif
     private(set) var remindersAccess: RemindersAuthorization.Outcome?
 
     /// Persisted across relaunch (§5.3). nil = All.
@@ -165,7 +170,9 @@ final class AppState {
             fatalError("Cannot open store: \(error)")
         }
         store = Store(modelContainer: container)
+        #if !APP_STORE
         license = LicenseController()
+        #endif
         wantsWelcomeWindow = Self.decideWelcomeWindow(container: container)
         engine = SyncEngine(store: store) { [weak self] change in
             Task { @MainActor in self?.handle(change) }
@@ -190,7 +197,7 @@ final class AppState {
             await resolveBannerAuthorization(prompting: false)
             // The controller evaluated its state before the callback above
             // existed, so the launch-time evaluation is replayed by hand.
-            await nudgeIfTrialEnding(license.state)
+            await replayLicenseEvaluation()
             await presentWelcomeIfNeeded()
         }
     }
@@ -278,8 +285,11 @@ final class AppState {
     ///
     /// Stored here because a stored property cannot live in an extension;
     /// every other journal preference and the recording itself are in
-    /// `Journal/AppState+Journal.swift`.
+    /// `Journal/AppState+Journal.swift`. Absent from the App Store build,
+    /// which has no journal to fail.
+    #if !APP_STORE
     var journalError: String?
+    #endif
 
     /// The display name a source was given, or "" if it is gone. Used by
     /// banners and by the journal.
@@ -297,7 +307,8 @@ final class AppState {
         // An ended trial pauses syncing — loudly, in the panel and Settings
         // (`LicenseNotice`) — and gates nothing else: the queue, the archive
         // and every triage action keep working on what's already here.
-        guard license.state.allowsSync else { return }
+        // Always true in the App Store build.
+        guard syncAllowedByLicense else { return }
         let configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))
             ?? []
@@ -319,7 +330,9 @@ final class AppState {
             renamed = true
         }
         if renamed { try? container.mainContext.save() }
+        #if !APP_STORE
         ensureClaudeCodeHooks(configs: configs)
+        #endif
         var taskSourceIDs: Set<String> = []
         for config in configs where config.isEnabled {
             if let connector = ConnectorFactory.make(config: config) {
@@ -360,6 +373,7 @@ final class AppState {
         kind == "local" && formerLocalSourceNames.contains(displayName)
     }
 
+    #if !APP_STORE
     /// Why the app couldn't write an agent's hooks, keyed by harness id.
     /// Surfaced in Sources and in the local source's editor.
     private(set) var hookProblems: [String: String] = [:]
@@ -456,6 +470,7 @@ final class AppState {
     }
 
     private static let hooksLog = AppLog.logger(.claudeHooks)
+    #endif
 
     // MARK: Queue change handling
 
@@ -484,15 +499,7 @@ final class AppState {
             let sound = bannerSound
             Task { await self.postBanners(bannerItems, sound: sound) }
         }
-        if journalEnabled, journalLogArrivals, !change.inserted.isEmpty {
-            let name = sourceName(forID: change.sourceID)
-            journal(
-                change.inserted.map {
-                    JournalEntry(
-                        at: .now, action: .arrived, sourceName: name,
-                        title: $0.title, url: $0.urlString, detail: nil)
-                })
-        }
+        journalArrivals(change)
         Task { await refreshBadge() }
     }
 
@@ -588,6 +595,7 @@ final class AppState {
     /// permission state is recorded where it can be read after the fact.
     private static let bannerLog = AppLog.logger(.banners)
 
+    #if !APP_STORE
     /// Resolves permission to read Mail, recording the outcome in
     /// `mailAutomation`, and reports whether a read can go ahead.
     ///
@@ -612,6 +620,7 @@ final class AppState {
         }
         return outcome.allowsFetch
     }
+    #endif
 
     /// Resolves permission to read Reminders, recording the outcome in
     /// `remindersAccess`, and reports whether a read can go ahead.
@@ -651,6 +660,7 @@ final class AppState {
     /// list of lists otherwise reads as "you have no reminders".
     func remindersListNames() -> [String] { RemindersAccess.listTitles() }
 
+    #if !APP_STORE
     /// Whether any configured, enabled source actually needs Mail — the
     /// notice is silent otherwise, exactly like `hasBannerEnabledSource`.
     var hasEnabledMailSource: Bool {
@@ -668,6 +678,7 @@ final class AppState {
             ?? []
         return configs.contains { $0.kind == "local" && $0.isEnabled }
     }
+    #endif
 
     /// Requests permission on first use (if undetermined), then posts.
     private func postBanners(_ items: [ItemSummary], sound: Bool) async {
@@ -716,6 +727,7 @@ final class AppState {
         // in the folder that session happens to be working in. `reveal`
         // returns `.fallBack` whenever it can't get there — including when it
         // has nothing to say about why — so the URL below stays the floor.
+        #if !APP_STORE
         if item.sourceKind == "local", item.kind.hasPrefix("claude") {
             switch ClaudeSessionOpener.reveal(ClaudeSessionTarget.target(payload: item.payload)) {
             case .reached:
@@ -725,6 +737,7 @@ final class AppState {
                 openProblem = problem
             }
         }
+        #endif
         guard let url = item.url else { return }
         // A remote source can put any string in a row's URL: ntfy topics
         // are public by default, and a JSON feed is whatever its publisher
@@ -812,7 +825,7 @@ final class AppState {
         undoStack.append([item.uid])
         journal(
             .done, item: item,
-            detail: JournalWriter.waited(from: item.firstSeenAt, to: .now))
+            detail: Self.waited(item, topicName: nil))
         let (uid, sourceID, ext, payload) =
             (item.uid, item.sourceID, externalID(of: item), item.payload)
         Task {
@@ -854,6 +867,21 @@ final class AppState {
         !items.isEmpty && items.allSatisfy(canComplete)
     }
 
+    /// What `C` says when the row is not one it can finish. Mail is named
+    /// only where Mail is a source: the App Store build has no Mail
+    /// connector, so its copy promises nothing about messages.
+    #if !APP_STORE
+    nonisolated static let completeRefusal =
+        "Only to-dos and mail can be completed — a to-do is finished in its app, a message is archived in Mail. Press E to dismiss this instead."
+    nonisolated static let completeRefusalMixed =
+        "Only to-dos and mail can be completed, and not every item here is one. Press E to dismiss them instead."
+    #else
+    nonisolated static let completeRefusal =
+        "Only to-dos can be completed — the task is finished in its app. Press E to dismiss this instead."
+    nonisolated static let completeRefusalMixed =
+        "Only to-dos can be completed, and not every item here is one. Press E to dismiss them instead."
+    #endif
+
     /// The word `C` uses for this row — "Complete" for a to-do, "Archive"
     /// for a mail message.
     nonisolated static func completeVerb(
@@ -874,14 +902,13 @@ final class AppState {
     /// `restore` reopens it remotely.
     func completeTask(_ item: Item) {
         guard canComplete(item) else {
-            openProblem =
-                "Only to-dos and mail can be completed — a to-do is finished in its app, a message is archived in Mail. Press E to dismiss this instead."
+            openProblem = Self.completeRefusal
             return
         }
         undoStack.append([item.uid])
         journal(
             .completed, item: item,
-            detail: JournalWriter.waited(from: item.firstSeenAt, to: .now))
+            detail: Self.waited(item, topicName: nil))
         let (uid, sourceID, ext, payload) =
             (item.uid, item.sourceID, externalID(of: item), item.payload)
         Task {
@@ -897,10 +924,7 @@ final class AppState {
     /// rule-5 failure this app exists to avoid.
     func completeTask(_ items: [Item], topicName: String? = nil) {
         guard canCompleteAll(items) else {
-            openProblem =
-                items.isEmpty
-                ? "Nothing to complete."
-                : "Only to-dos and mail can be completed, and not every item here is one. Press E to dismiss them instead."
+            openProblem = items.isEmpty ? "Nothing to complete." : Self.completeRefusalMixed
             return
         }
         undoStack.append(items.map(\.uid))

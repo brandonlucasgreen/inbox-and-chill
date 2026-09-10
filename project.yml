@@ -12,6 +12,10 @@ packages:
   # Xcode re-signs it with our Developer ID — see the nested-code preflight in
   # scripts/notarize.sh, which exists because that re-signing is the one part
   # notarization cares about and the one part no build failure would reveal.
+  #
+  # Linked by the direct target only. The App Store target never lists it:
+  # the store delivers updates (guideline 2.4.5(vii)), and Sparkle's four
+  # nested executables would each need the sandbox entitlement besides.
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.9.6
@@ -19,6 +23,13 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
+    # One version for both app targets. They are the same app built two ways
+    # (docs/app-store-plan.md), and a store resubmission after a rejection
+    # bumps CURRENT_PROJECT_VERSION for the direct build too — a known cost,
+    # accepted there. Project-level so scripts/verify-bundle.sh and
+    # scripts/release.sh keep reading one value from one place.
+    MARKETING_VERSION: "0.6.0"
+    CURRENT_PROJECT_VERSION: "11"
     # Real Developer ID signing, not ad-hoc ("-"), even for local builds.
     # macOS keys Keychain ACLs, TCC permissions, and firewall decisions to
     # the code signature: an ad-hoc signature has no stable identity, so
@@ -31,22 +42,11 @@ settings:
     DEVELOPMENT_TEAM: CV926C8KS8
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Developer ID Application"
-  configs:
-    Release:
-      # Xcode otherwise injects `com.apple.security.get-task-allow` — the
-      # entitlement that lets a debugger attach to the process. It is correct
-      # for Debug and wrong for anything shipped: it weakens the hardened
-      # runtime, and notarization rejects a Developer ID binary that carries
-      # it. Scoped to Release so debugging a Debug build still works.
-      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
-      # Xcode signs local builds with `--timestamp=none`. Notarization
-      # requires a secure timestamp, so a Release build without this is
-      # rejected — and the failure surfaces at `notarytool submit`, long
-      # after the build looked fine. The embedded `inchill` already asks for
-      # one in its post-build signing step; this is the app bundle catching
-      # up. Costs a round trip to Apple's timestamp server per Release build.
-      OTHER_CODE_SIGN_FLAGS: "--timestamp"
 targets:
+  # ---------------------------------------------------------------------
+  # The direct build: Developer ID, notarized, Sparkle, every feature.
+  # This is the default scheme and the one the tests run against.
+  # ---------------------------------------------------------------------
   InboxAndChill:
     type: application
     platform: macOS
@@ -144,8 +144,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: lol.bgreen.inboxandchill
         PRODUCT_NAME: Inbox & Chill
         PRODUCT_MODULE_NAME: InboxAndChill
-        MARKETING_VERSION: "0.6.0"
-        CURRENT_PROJECT_VERSION: "11"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: true
         ENABLE_USER_SCRIPT_SANDBOXING: false
@@ -165,6 +163,28 @@ targets:
         # hardened-runtime resource-access entitlement — no App ID, no
         # provisioning profile, accepted by notarization.
         CODE_SIGN_ENTITLEMENTS: InboxAndChill.entitlements
+      configs:
+        Release:
+          # Xcode otherwise injects `com.apple.security.get-task-allow` — the
+          # entitlement that lets a debugger attach to the process. It is
+          # correct for Debug and wrong for anything shipped: it weakens the
+          # hardened runtime, and notarization rejects a Developer ID binary
+          # that carries it. Scoped to Release so debugging a Debug build
+          # still works.
+          #
+          # On THIS target only. The App Store target needs the injected base
+          # entitlements — `com.apple.application-identifier` and the team
+          # identifier come from them, and a sandboxed app is keyed by them.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          # Xcode signs local builds with `--timestamp=none`. Notarization
+          # requires a secure timestamp, so a Release build without this is
+          # rejected — and the failure surfaces at `notarytool submit`, long
+          # after the build looked fine. The embedded `inchill` already asks
+          # for one in its post-build signing step; this is the app bundle
+          # catching up. Costs a round trip to Apple's timestamp server per
+          # Release build. A store upload is not notarized, so the store
+          # target does not pay it.
+          OTHER_CODE_SIGN_FLAGS: "--timestamp"
     # A GENERATED Info.plist, not a hand-maintained one — gitignored exactly
     # like the .xcodeproj, so project.yml stays the single source of truth and
     # `xcodegen generate` is what produces both.
@@ -187,6 +207,14 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: Inbox & Chill
         LSUIElement: true
+        # App Store Connect refuses an upload with no category, and the key
+        # is harmless in the direct build — so it lives in both plists rather
+        # than being the one thing the store plist has that this one lacks.
+        LSApplicationCategoryType: public.app-category.productivity
+        # The app uses only the TLS that URLSession provides, which is exempt
+        # from export compliance. Saying so here answers App Store Connect's
+        # encryption question once, for every upload, instead of on each one.
+        ITSAppUsesNonExemptEncryption: false
         # Syne and Space Grotesk (both SIL OFL 1.1, licences shipped beside
         # them) for the first-launch welcome window — the one branded surface
         # in the app. AppKit registers everything in this folder at launch;
@@ -209,8 +237,9 @@ targets:
         # entitlements, which was granted full Reminders access. That is the
         # opposite of the Apple-events case above, so if the Reminders source
         # ever looks empty, do NOT "fix" it by adding an entitlement — Release
-        # ships exactly one and that is deliberate. The sandbox entitlement
-        # PLAN §6.6 mentions applies only to the declined MAS variant.
+        # ships exactly one and that is deliberate. (The *sandboxed* store
+        # target is the exception, and carries the calendars entitlement in
+        # its own file for exactly that reason.)
         NSRemindersFullAccessUsageDescription: Inbox & Chill reads the reminders you're due so they queue up beside your other notifications. Dismissing one here does not complete it in Reminders.
 
         # --- Sparkle in-app updates -----------------------------------------
@@ -240,6 +269,84 @@ targets:
         # app that says so in Settings rather than one that fails mid-install
         # (UpdateController.configurationProblem).
         SUPublicEDKey: B7RS84O0N7JK6Fv3uqBMuD6+1Qo7mg8o9nbYMp1FLnc=
+
+  # ---------------------------------------------------------------------
+  # The Mac App Store build: the same tree with a shorter sources list, one
+  # compile flag, its own entitlements and its own plist. Design and the
+  # audit behind every exclusion: docs/app-store-plan.md.
+  #
+  # Gate direction is `#if !APP_STORE` around the rich code, never
+  # `#if APP_STORE` around store code — the unflagged read of any file is
+  # the full app, which is the one you develop against.
+  #
+  # Build it with scripts/build-app-store.sh, which uses its own derived
+  # data path. Both targets produce `Inbox & Chill.app`, so built in the same
+  # DerivedData they would overwrite each other.
+  #
+  # Signing here is the LOCAL configuration: Developer ID, like the direct
+  # target, which is enough to run the sandboxed app on this Mac and is what
+  # CI's ad-hoc override replaces. An upload to App Store Connect is signed
+  # "Apple Distribution" with an embedded provisioning profile, supplied at
+  # archive time through Xcode Organizer or an xcodebuild override — phase 4
+  # of the plan, not baked in here.
+  # ---------------------------------------------------------------------
+  InboxAndChill-AppStore:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/App
+        excludes:
+          - "Resources/Fonts"
+          # The four features the sandbox cannot have. Each folder is
+          # excluded whole so a file added to it later is left out
+          # automatically; the two AppState extension files are added back
+          # below because they carry the `#else` no-op stubs AppState's
+          # call sites compile against.
+          - "Connectors/Local"      # inchill listener, agent hooks, session jump
+          - "Connectors/Mail"       # AppleScript into Mail: compose-only under the sandbox
+          - "Journal"               # user-typed vault path; iCloud needs Full Disk Access
+          - "Licensing"             # license keys are a 2.4.5(vi) rejection
+      - path: Sources/App/Journal/AppState+Journal.swift
+      - path: Sources/App/Licensing/AppState+License.swift
+      - path: Sources/App/Resources/Fonts
+        type: folder
+    dependencies:
+      - package: KeyboardShortcuts
+      # No Sparkle, no inchill: see the header comment.
+    settings:
+      base:
+        # Same bundle ID as the direct build on purpose: Keychain ACLs, the
+        # sandbox container, TCC grants and Shortcuts all key off it, and a
+        # person installs one or the other. Two IDs only if both must run on
+        # one Mac at once.
+        PRODUCT_BUNDLE_IDENTIFIER: lol.bgreen.inboxandchill
+        PRODUCT_NAME: Inbox & Chill
+        PRODUCT_MODULE_NAME: InboxAndChill
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: true
+        ENABLE_USER_SCRIPT_SANDBOXING: false
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APP_STORE"
+        CODE_SIGN_ENTITLEMENTS: InboxAndChill-AppStore.entitlements
+    info:
+      path: InboxAndChill-AppStore-Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDisplayName: Inbox & Chill
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+        ITSAppUsesNonExemptEncryption: false
+        ATSApplicationFontsPath: Fonts
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        # Reminders is the one TCC-gated source that survives the sandbox.
+        # The string is still mandatory (its absence crashes EventKit); the
+        # sandbox additionally needs the calendars entitlement, which is in
+        # InboxAndChill-AppStore.entitlements.
+        NSRemindersFullAccessUsageDescription: Inbox & Chill reads the reminders you're due so they queue up beside your other notifications. Dismissing one here does not complete it in Reminders.
+        # Deliberately absent: SUFeedURL, SUPublicEDKey (no Sparkle) and
+        # NSAppleEventsUsageDescription (nothing sends Apple events).
+        # scripts/verify-bundle.sh --app-store checks all three stay absent.
+
   inchill:
     type: tool
     platform: macOS
@@ -257,6 +364,9 @@ targets:
     # a test bundle. Compiling the one pure, Foundation-only file keeps the
     # hook payload mapping testable (CLAUDE.md rule 6) without giving the CLI
     # a dependency on the app.
+    #
+    # Tests run against the direct target only: they exercise the features
+    # the store build leaves out.
     sources: [Tests, Sources/CLI/ClaudeHook.swift]
     dependencies:
       - target: InboxAndChill
@@ -273,3 +383,7 @@ schemes:
         inchill: all
     test:
       targets: [InboxAndChillTests]
+  InboxAndChill-AppStore:
+    build:
+      targets:
+        InboxAndChill-AppStore: all

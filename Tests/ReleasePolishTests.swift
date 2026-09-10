@@ -46,6 +46,9 @@ struct FirstRunTests {
         #expect(roster.contains("ntfy"))
         #expect(roster.contains("JSON feed"))
         #expect(roster.contains("coding agents"))
+        // The tail is what the App Store build drops — it has no coding
+        // agents to promise. Pinned here so the direct build keeps it.
+        #expect(FirstRun.rosterTail.contains("coding agents"))
         #expect(FirstRun.addButton == "Add Your First Source")
     }
 

@@ -76,10 +76,19 @@ enum FirstRun {
         let named = descriptors
             .filter { $0.id != "local" && $0.id != "jsonPoller" && $0.id != "ntfy" }
             .map(\.displayName)
-        guard !named.isEmpty else { return "Custom feeds, ntfy, and local coding agents." }
+        guard !named.isEmpty else { return "Custom feeds and ntfy\(rosterTail)." }
         return named.joined(separator: ", ")
-            + " — plus ntfy, any JSON feed, and your local coding agents."
+            + " — plus ntfy, any JSON feed\(rosterTail)."
     }
+
+    /// The roster's closing clause names the local coding agents only where
+    /// that source exists. The App Store build has no `inchill` and writes no
+    /// hooks, so promising them on its welcome would be the copy lying.
+    #if !APP_STORE
+    nonisolated static let rosterTail = ", and your local coding agents"
+    #else
+    nonisolated static let rosterTail = ""
+    #endif
 }
 
 /// What an empty queue shows before the first source exists. Used by the

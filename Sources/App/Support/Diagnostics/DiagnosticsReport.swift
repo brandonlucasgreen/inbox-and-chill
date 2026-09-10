@@ -20,6 +20,9 @@ struct DiagnosticsSnapshot: Sendable {
     /// A previous run that ended with no crash report to explain it.
     var unexplainedEnding: RunMarker?
     var harvestProblem: String?
+    /// Why this build reads crashes the way it does, when that needs saying
+    /// — the sandboxed build cannot read the OS report and says so.
+    var crashSourceNote: String?
     var logWriteProblem: String?
     var problems: [Problem] = []
     var breadcrumbs = LogBreadcrumbs()
@@ -59,6 +62,9 @@ enum DiagnosticsReport {
 
         out.append("")
         out.append("── Last crash ─────────────────────────────────────────")
+        if let note = snapshot.crashSourceNote {
+            out.append(note)
+        }
         if let problem = snapshot.harvestProblem {
             out.append(problem)
         }

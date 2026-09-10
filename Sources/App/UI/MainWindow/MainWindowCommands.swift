@@ -21,10 +21,12 @@ struct MainWindowCommands: Commands {
         // It is only on screen while the triage window is open — an accessory
         // app has no menu bar otherwise — which is why Settings carries the
         // same controls rather than deferring to this.
+        #if !APP_STORE
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { updates.checkForUpdates() }
                 .disabled(!updates.canCheck)
         }
+        #endif
         CommandMenu("Queue") { queueMenu }
         CommandGroup(after: .sidebar) { scopeMenu }
     }

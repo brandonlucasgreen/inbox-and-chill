@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The Mac App Store build. Guideline 2.4.5(i): every executable in a
+	     store app runs in the App Sandbox. This is the whole reason the
+	     store target has a shorter sources list — see docs/app-store-plan.md
+	     for what the sandbox rules out and why each cut was made. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+
+	<!-- Every surviving source is REST, GraphQL or a WebSocket to a host the
+	     user names. Outbound only: the loopback listener the inchill CLI
+	     posted to is one of the cuts, so there is no network.server. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!-- Apple Reminders through EventKit. Unsandboxed, EventKit needs no
+	     entitlement at all (measured 2026-08-26, CLAUDE.md); under the
+	     sandbox the calendars entitlement is what lets the TCC prompt appear.
+	     PLAN §6.6 recorded this before there was a sandboxed build to need it. -->
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+
+	<!-- Export Diagnostics… writes wherever the save panel points. The panel
+	     itself runs out of process, so this grants access only to the one
+	     file the user picked. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+
+	<!-- Deliberately absent: com.apple.security.automation.apple-events.
+	     The two Apple-event callers (Apple Mail, the Claude Code terminal
+	     jump) are not compiled into this build, and a sandboxed app's
+	     scripting access to Mail is compose-only regardless (PLAN §2.1.10). -->
+</dict>
+</plist>

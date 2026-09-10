@@ -1,15 +1,35 @@
 import Foundation
 import SwiftData
 
+/// What a journal line records. Declared here, outside the `#if`, because
+/// every triage verb in `AppState` names one of these when it calls
+/// `journal(...)` — the call sites are the same in both builds, so the
+/// vocabulary has to be too. `JournalWriter` (direct build only) renders it.
+enum JournalAction: String, Sendable {
+    case arrived
+    case done
+    /// Finished for real in its source, by `C` on a to-do row. Distinct from
+    /// `done` on purpose: reading back a week of triage, "I dismissed this"
+    /// and "I did this" are not the same admission.
+    case completed
+    case snoozed
+    case pinned
+    case unpinned
+    case restored
+}
+
+#if !APP_STORE
+
 /// `AppState`'s side of the journal: the preferences, and the fire-and-forget
 /// recording every triage verb calls into.
 ///
-/// Lives in `Journal/` rather than in `AppState.swift` so the whole folder can
-/// be left out of the App Store build, where a sandboxed app cannot write to a
-/// user-typed vault path (see `docs/app-store-plan.md`). `AppState` keeps only
-/// the stored `journalError`, which an extension cannot hold. The triage
-/// methods in `AppState` call `journal(...)` unchanged; in the store build the
-/// same signatures will be no-ops declared in an `#else` branch here.
+/// Lives in `Journal/` rather than in `AppState.swift` so the rest of the
+/// folder can be left out of the App Store build, where a sandboxed app cannot
+/// write to a user-typed vault path (see `docs/app-store-plan.md`). This one
+/// file is compiled into **both** targets: the `#else` branch below is the
+/// store build's no-op version of every method `AppState` calls, so those call
+/// sites compile unchanged. `AppState` keeps only the stored `journalError`,
+/// which an extension cannot hold.
 ///
 /// Preferences use the manual `access`/`withMutation` pair because they are
 /// computed over `UserDefaults`, exactly as they did inside the class body.
@@ -108,6 +128,20 @@ extension AppState {
         }
     }
 
+    /// The arrivals half, called from `AppState.handle` for every reconcile.
+    /// Owns its own `journalLogArrivals` guard so the call site is one line
+    /// in both builds.
+    func journalArrivals(_ change: QueueChange) {
+        guard journalEnabled, journalLogArrivals, !change.inserted.isEmpty else { return }
+        let name = sourceName(forID: change.sourceID)
+        journal(
+            change.inserted.map {
+                JournalEntry(
+                    at: .now, action: .arrived, sourceName: name,
+                    title: $0.title, url: $0.urlString, detail: nil)
+            })
+    }
+
     func journal(
         _ action: JournalAction, item: Item, detail: String? = nil
     ) {
@@ -159,3 +193,36 @@ extension AppState {
         return formatter
     }()
 }
+
+#else
+
+/// The App Store build has no journal: a sandboxed app cannot write to a
+/// vault path the user typed, and an iCloud Obsidian vault needs Full Disk
+/// Access, which a sandboxed app cannot be granted. Every method `AppState`
+/// calls is here with the same signature and does nothing, so the triage
+/// verbs compile unchanged. `journalEnabled` stays `false` so any remaining
+/// `if journalEnabled` read in shared code is honest about it.
+extension AppState {
+    var journalEnabled: Bool { false }
+    var journalLogActions: Bool { false }
+
+    func journalArrivals(_ change: QueueChange) {}
+
+    func journal(_ action: JournalAction, item: Item, detail: String? = nil) {}
+
+    func journal(
+        _ action: JournalAction, items: [Item],
+        detail: (Item) -> String? = { _ in nil }
+    ) {}
+
+    static func waited(_ item: Item, topicName: String?) -> String? { nil }
+
+    static let journalDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+#endif

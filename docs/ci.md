@@ -40,6 +40,35 @@ will fail on someone else's — and this repo has other contributors now.
 If tests fail, the results bundle is attached to the run so the failure can be
 opened in Xcode rather than read out of a log.
 
+### 2b. The App Store target (macOS, same job, every pull request)
+
+Since 2026-09-08 the project has a second application target,
+`InboxAndChill-AppStore` — the same sources minus the four features the App
+Sandbox cannot have, built with the `APP_STORE` compile flag
+(`docs/app-store-plan.md`). CI builds it on **every** pull request, not just
+when the build configuration changes, because a second target over one
+source tree is the easiest thing in the repo to break without noticing: a
+new file that mentions Sparkle, Mail or the `inchill` CLI compiles fine in
+the default scheme, and only the store build objects.
+
+It runs the same script a person runs, `scripts/build-app-store.sh`, with
+CI's ad-hoc signing overrides passed through after `--`, and that script
+ends by running `scripts/verify-bundle.sh --app-store` on the result:
+
+| Checked | Why |
+|---|---|
+| `com.apple.security.app-sandbox`, `network.client`, `personal-information.calendars`, `files.user-selected.read-write` are present | Guideline 2.4.5(i), and each absence is a silent runtime denial: no dialog, the source just fails. |
+| The `apple-events` entitlement is **absent** | Nothing in the store build sends Apple events; the sandbox makes Mail compose-only regardless. |
+| `SUFeedURL`, `SUPublicEDKey`, `NSAppleEventsUsageDescription` are **absent** from the plist | Their presence means the target's plist regressed toward the direct build's. |
+| No `Sparkle.framework`, no `MacOS/inchill`, one executable, no nested bundles | Every executable in a store bundle needs the sandbox entitlement; these are exactly the ones this build must not carry. |
+| `lemonsqueezy.com` and the appcast URL are not in the binary | A URL literal survives optimisation, so this is the one `strings` check worth having: either is a rejection (3.1.1, 2.4.5(vii)). |
+| `PrivacyInfo.xcprivacy`, `LSApplicationCategoryType`, `ITSAppUsesNonExemptEncryption` | Required for an upload; the rejection arrives by e-mail after the fact. Both builds carry them, so both flavours of the audit check them. |
+
+The store target builds into its own derived data (`build/AppStore`),
+because both targets produce `Inbox & Chill.app` and would otherwise
+overwrite each other's product. The build log is attached to the run when
+this step fails.
+
 ### 3. Release-shaped bundle audit (macOS, same job, conditional)
 
 Builds a second time in Release configuration and runs
@@ -74,6 +103,7 @@ commit happened to.
 ```bash
 scripts/verify-bundle.sh                      # audit the Release build
 scripts/verify-bundle.sh --configuration Debug
+scripts/verify-bundle.sh --app-store          # the store target's build
 ```
 
 It overlaps a little with `scripts/notarize.sh`'s preflight. That's on purpose:

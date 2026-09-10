@@ -2,14 +2,18 @@ import Foundation
 import OSLog
 import UserNotifications
 
+#if !APP_STORE
+
 /// `AppState`'s side of licensing: how the trial gates syncing, and the two
 /// system banners the trial sends on its way out.
 ///
-/// Lives in `Licensing/` rather than in `AppState.swift` so the whole folder
-/// can be left out of the App Store build, where a license key is a rejection
-/// (guideline 2.4.5(vi); see `docs/app-store-plan.md`). `AppState` keeps only
-/// the stored `license` property, which an extension cannot hold, and calls
-/// `configureLicensing()` from `init`.
+/// Lives in `Licensing/` rather than in `AppState.swift` so the rest of the
+/// folder can be left out of the App Store build, where a license key is a
+/// rejection (guideline 2.4.5(vi); see `docs/app-store-plan.md`). This one
+/// file is compiled into **both** targets: the `#else` branch below is the
+/// store build's version of the three things `AppState` calls, so those call
+/// sites compile unchanged. `AppState` keeps only the stored `license`
+/// property, which an extension cannot hold, and that one is flagged.
 extension AppState {
     /// Wires the controller's callbacks. Called once from `AppState.init`,
     /// after `engine` exists.
@@ -34,6 +38,18 @@ extension AppState {
             guard let self else { return }
             Task { @MainActor in await self.nudgeIfTrialEnding(state) }
         }
+    }
+
+    /// Whether connectors may run right now. An ended trial pauses syncing
+    /// — loudly, in the panel and Settings (`LicenseNotice`) — and gates
+    /// nothing else: the queue, the archive and every triage action keep
+    /// working on what's already here.
+    var syncAllowedByLicense: Bool { license.state.allowsSync }
+
+    /// The controller evaluated its state before `configureLicensing` set
+    /// the callback, so the launch-time evaluation is replayed by hand.
+    func replayLicenseEvaluation() async {
+        await nudgeIfTrialEnding(license.state)
     }
 
     // MARK: Trial nudges
@@ -70,3 +86,17 @@ extension AppState {
 
     private static let licenseLog = AppLog.logger(.license)
 }
+
+#else
+
+/// The App Store build has no trial and no license key — the store is the
+/// checkout (guideline 3.1.1), and a key of our own is a 2.4.5(vi) rejection.
+/// Syncing is always allowed, and the two calls `AppState.init` makes are
+/// no-ops with the same names.
+extension AppState {
+    func configureLicensing() {}
+    var syncAllowedByLicense: Bool { true }
+    func replayLicenseEvaluation() async {}
+}
+
+#endif

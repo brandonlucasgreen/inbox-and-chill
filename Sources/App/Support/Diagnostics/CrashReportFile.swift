@@ -62,7 +62,8 @@ enum CrashReportFile {
                 image: image?.name ?? "???",
                 symbol: frame.symbol,
                 symbolLocation: frame.symbolLocation ?? 0,
-                address: (image?.base ?? 0) &+ offset)
+                address: (image?.base ?? 0) &+ offset,
+                imageOffset: offset)
         }
 
         return CrashReport(
@@ -128,6 +129,16 @@ enum CrashReportFile {
         if let symbol = topmostOwnSymbol(report) {
             return "\(head) in \(symbol)"
         }
+        // A MetricKit report has frames of ours but no symbols for them. The
+        // image and offset are still *ours*, and still one crash site — two
+        // reports with the same offset are the same bug, which is what a
+        // signature is for. `atos` turns the offset into a name later.
+        if let frame = topmostOwnFrame(report) {
+            if let offset = frame.imageOffset {
+                return "\(head) in \(frame.image) + 0x\(String(offset, radix: 16))"
+            }
+            return "\(head) in \(frame.image) at 0x\(String(frame.address, radix: 16))"
+        }
         if let killer = report.terminatedByProcess, !killer.isEmpty {
             return "\(head), sent by \(killer)"
         }
@@ -146,6 +157,12 @@ enum CrashReportFile {
             .symbol
     }
 
+    /// The first frame in our own binary, symbol or not. Same rule as above
+    /// about never borrowing someone else's frame.
+    nonisolated static func topmostOwnFrame(_ report: CrashReport) -> CrashReport.Frame? {
+        report.frames.first { $0.image == report.procName }
+    }
+
     /// The faulting thread, rendered the way Apple's own text crash reports
     /// render it. Frames with no symbol keep their image and address so they
     /// can still be resolved later with `atos` against the release dSYM.
@@ -159,7 +176,10 @@ enum CrashReportFile {
             let image = frame.image.padding(
                 toLength: max(width, 8), withPad: " ", startingAt: 0)
             let address = String(format: "0x%016llx", frame.address)
+            // An unsymbolicated frame keeps its offset into the image, which
+            // with the address is exactly what `atos -o <dSYM>` wants.
             let symbol = frame.symbol.map { "\($0) + \(frame.symbolLocation)" }
+                ?? frame.imageOffset.map { "(no symbol) +0x\(String($0, radix: 16))" }
                 ?? "(no symbol)"
             return "\(index) \(image)  \(address)  \(symbol)"
         }

@@ -1214,6 +1214,201 @@ struct ProblemLogTests {
     }
 }
 
+// MARK: - MetricKit crashes (Sources/App/Support/Diagnostics/MetricKitCrashes.swift)
+
+/// The shape a real `MXCallStackTree.jsonRepresentation()` had on
+/// 2026-09-08: one stack per thread, the **root frame is the one that was
+/// executing**, `subFrames` walk outward to the thread's entry point, and
+/// `threadAttributed` marks the thread the crash is charged to. Settled by
+/// comparing a live payload with the `.ips` for the same crash — the first
+/// parser reversed it. Frame values are lifted from the `.ips` fixture above
+/// so the two readers can be compared.
+private let metricKitCallStackTree = """
+{"callStackPerThread":true,"callStacks":[
+ {"threadAttributed":false,"callStackRootFrames":[{"binaryName":"libsystem_kernel.dylib","binaryUUID":"cccccccc-0000-0000-0000-000000000000","offsetIntoBinaryTextSegment":5488,"address":6900005488,"sampleCount":1,"subFrames":[{"binaryName":"libsystem_pthread.dylib","binaryUUID":"aaaaaaaa-0000-0000-0000-000000000000","offsetIntoBinaryTextSegment":8000,"address":6800008000,"sampleCount":1}]}]},
+ {"threadAttributed":true,"callStackRootFrames":[{"binaryName":"Inbox & Chill","binaryUUID":"43130ba1-50b4-3adf-bc62-027948988b82","offsetIntoBinaryTextSegment":4660,"address":4295741990,"sampleCount":1,"subFrames":[{"binaryName":"Inbox & Chill","binaryUUID":"43130ba1-50b4-3adf-bc62-027948988b82","offsetIntoBinaryTextSegment":1193046,"address":4296930390,"sampleCount":1,"subFrames":[{"binaryName":"dyld","binaryUUID":"11111111-2222-3333-4444-555555555555","offsetIntoBinaryTextSegment":130560,"address":6800130560,"sampleCount":1}]}]}]}
+]}
+"""
+
+@Suite("MetricKit crashes")
+struct MetricKitCrashesTests {
+    private func diagnostic(
+        tree: String = metricKitCallStackTree,
+        exceptionType: Int? = 1, exceptionCode: Int? = 1, signal: Int? = 11,
+        terminationReason: String? = nil, objectiveC: String? = nil,
+        build: String = "8"
+    ) -> MetricKitCrashes.Diagnostic {
+        MetricKitCrashes.Diagnostic(
+            callStackTree: Data(tree.utf8),
+            exceptionType: exceptionType, exceptionCode: exceptionCode, signal: signal,
+            terminationReason: terminationReason,
+            virtualMemoryRegionInfo: "0 is not in any region.  Bytes before following region: 4295000000\n      REGION TYPE …",
+            objectiveCExceptionMessage: objectiveC,
+            buildVersion: build, osVersion: "macOS 26.6.2 (25G83)", architecture: "arm64")
+    }
+
+    private func report(
+        _ diagnostic: MetricKitCrashes.Diagnostic,
+        date: Date = Date(timeIntervalSince1970: 1_800_000_000)
+    ) -> CrashReport {
+        MetricKitCrashes.report(
+            diagnostic, date: date, fileName: "metrickit-1.json",
+            procName: "Inbox & Chill", bundleID: "lol.bgreen.inboxandchill",
+            currentVersion: (short: "0.6.0", build: "8"))
+    }
+
+    /// Frame 0 is the root frame, which MetricKit makes the executing one —
+    /// the parser must not "helpfully" reverse it (it did, once).
+    @Test("The attributed thread's frames come out innermost first, unreversed")
+    func framesAreInnermostFirst() {
+        let (frames, thread) = MetricKitCrashes.frames(
+            callStackTree: Data(metricKitCallStackTree.utf8))
+        #expect(thread == 1)
+        #expect(frames.map(\.image) == ["Inbox & Chill", "Inbox & Chill", "dyld"])
+        #expect(frames.map(\.index) == [0, 1, 2])
+        #expect(frames[0].imageOffset == 4660)
+        #expect(frames[1].imageOffset == 1_193_046)
+        #expect(frames[0].address == 4_295_741_990)
+        // No symbols: MetricKit never sends them.
+        #expect(frames.allSatisfy { $0.symbol == nil })
+    }
+
+    @Test("A tree that is not the documented shape yields no frames, not a crash")
+    func malformedTreeIsEmpty() {
+        #expect(MetricKitCrashes.frames(callStackTree: Data("nope".utf8)).frames.isEmpty)
+        #expect(MetricKitCrashes.frames(callStackTree: Data("{}".utf8)).frames.isEmpty)
+        #expect(MetricKitCrashes.frames(callStackTree: Data("{\"callStacks\":[]}".utf8)).frames.isEmpty)
+    }
+
+    @Test("Numbers become the names every crash report prints")
+    func namesTheNumbers() {
+        #expect(MetricKitCrashes.exceptionName(1) == "EXC_BAD_ACCESS")
+        #expect(MetricKitCrashes.exceptionName(6) == "EXC_BREAKPOINT")
+        #expect(MetricKitCrashes.exceptionName(10) == "EXC_CRASH")
+        #expect(MetricKitCrashes.exceptionName(99) == "EXC_99")
+        #expect(MetricKitCrashes.signalName(11) == "SIGSEGV")
+        #expect(MetricKitCrashes.signalName(6) == "SIGABRT")
+        #expect(MetricKitCrashes.signalName(5) == "SIGTRAP")
+        #expect(MetricKitCrashes.signalName(40) == "SIG40")
+    }
+
+    /// The whole point of a signature is that two of the same crash share
+    /// one. With no symbol, the image and offset are still one crash site.
+    @Test("Without symbols the signature names our binary and the offset")
+    func signatureUsesOffset() {
+        let crash = report(diagnostic())
+        #expect(CrashReportFile.signature(crash) == "EXC_BAD_ACCESS (SIGSEGV) in Inbox & Chill + 0x1234")
+        #expect(CrashReportFile.topmostOwnSymbol(crash) == nil)
+        #expect(CrashReportFile.topmostOwnFrame(crash)?.imageOffset == 4660)
+    }
+
+    @Test("The backtrace keeps the offset an unsymbolicated frame needs for atos")
+    func backtraceShowsOffset() {
+        let text = CrashReportFile.backtrace(report(diagnostic()))
+        #expect(text.contains("(no symbol) +0x1234"))
+        #expect(text.contains("(no symbol) +0x123456"))
+        #expect(text.contains(String(format: "0x%016llx", UInt64(4_295_741_990))))
+    }
+
+    @Test("An Objective-C exception's message and the region info become termination reasons")
+    func carriesReasons() {
+        let crash = report(diagnostic(
+            terminationReason: "Namespace SIGNAL, Code 11",
+            objectiveC: "NSInvalidArgumentException: -[NSNull length]: unrecognized selector"))
+        #expect(crash.terminationReasons.first?.contains("unrecognized selector") == true)
+        #expect(crash.terminationReasons.contains("Namespace SIGNAL, Code 11"))
+        // Only the first line of the region dump: the rest is a table.
+        #expect(crash.terminationReasons.contains { $0.hasPrefix("0 is not in any region") })
+        #expect(!crash.terminationReasons.contains { $0.contains("REGION TYPE") })
+        #expect(crash.subtype == "exception code 1")
+    }
+
+    /// MetricKit names the build number only. Guessing the marketing version
+    /// for a different build would be exactly the wrong kind of helpful.
+    @Test("The marketing version is filled in only for a matching build")
+    func versionOnlyWhenBuildMatches() {
+        #expect(report(diagnostic(build: "8")).appVersion == "0.6.0")
+        #expect(report(diagnostic(build: "7")).appVersion == "?")
+        #expect(report(diagnostic(build: "7")).buildVersion == "7")
+    }
+
+    @Test("A report with no exception numbers still renders")
+    func tolerantOfMissingNumbers() {
+        let crash = report(diagnostic(exceptionType: nil, exceptionCode: nil, signal: nil))
+        #expect(crash.exceptionType == nil)
+        #expect(crash.signal == nil)
+        #expect(crash.subtype == nil)
+        #expect(CrashReportFile.signature(crash) == "Crash in Inbox & Chill + 0x1234")
+    }
+
+    /// In the direct build every crash arrives twice — once as the OS's
+    /// symbolicated `.ips`, once from MetricKit within a day. Same build and
+    /// close in time means the same crash, and the `.ips` copy is the better one.
+    @Test("MetricKit's copy of a crash the .ips reader also saw is dropped")
+    func mergeDropsDuplicates() throws {
+        let ips = try #require(CrashReportFile.parse(
+            ips: sampleCrashIPS, fileName: "sample.ips", fallbackDate: .now))
+        // Same build (8), dated twelve hours after the .ips report.
+        let duplicate = report(diagnostic(build: "8"), date: ips.date.addingTimeInterval(12 * 3600))
+        // Same build, but a week later — a second crash, not a duplicate.
+        let later = report(diagnostic(build: "8"), date: ips.date.addingTimeInterval(7 * 86_400))
+        // Different build, same hour — not the same crash either.
+        let otherBuild = report(diagnostic(build: "9"), date: ips.date.addingTimeInterval(3600))
+
+        let merged = MetricKitCrashes.merge(ips: [ips], metricKit: [duplicate, later, otherBuild])
+        #expect(merged.count == 3)
+        #expect(merged.first?.date == later.date)
+        #expect(merged.contains { $0.fileName == "sample.ips" })
+        #expect(!merged.contains { $0 == duplicate })
+        #expect(merged.contains { $0 == otherBuild })
+
+        // With no .ips at all (the store build), MetricKit's list is the list.
+        #expect(MetricKitCrashes.merge(ips: [], metricKit: [duplicate]) == [duplicate])
+    }
+
+    @Test("The store round-trips reports through JSON, newest first, capped")
+    func storeRoundTrips() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appending(path: "metrickit-\(UUID().uuidString)")
+        let url = dir.appending(path: "crashes.json")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(MetricKitCrashStore.load(url: url).isEmpty)
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = report(diagnostic(), date: base)
+        #expect(MetricKitCrashStore.append([first], url: url) == nil)
+        #expect(MetricKitCrashStore.load(url: url) == [first])
+
+        let more = (1...12).map { report(diagnostic(), date: base.addingTimeInterval(Double($0) * 86_400)) }
+        #expect(MetricKitCrashStore.append(more, url: url) == nil)
+        let loaded = MetricKitCrashStore.load(url: url)
+        #expect(loaded.count == MetricKitCrashStore.limit)
+        #expect(loaded.first?.date == more.last?.date)
+        #expect(loaded == loaded.sorted { $0.date > $1.date })
+    }
+
+    /// A report persisted before `imageOffset` existed must still decode.
+    @Test("A frame without an image offset decodes")
+    func decodesLegacyFrame() throws {
+        let json = """
+        {"index":0,"image":"Inbox & Chill","symbol":"AppState.handle(_:)","symbolLocation":128,"address":4296930390}
+        """
+        let frame = try JSONDecoder().decode(CrashReport.Frame.self, from: Data(json.utf8))
+        #expect(frame.imageOffset == nil)
+        #expect(frame.symbol == "AppState.handle(_:)")
+    }
+
+    @Test("The after-crash prompt names the crash and says nothing is sent yet")
+    func promptCopy() {
+        let body = CrashPrompt.body(signature: "EXC_BAD_ACCESS (SIGSEGV) in AppState.handle(_:)")
+        #expect(body.hasPrefix("EXC_BAD_ACCESS (SIGSEGV) in AppState.handle(_:)"))
+        #expect(body.contains(SupportContact.email))
+        #expect(body.contains("Nothing is sent until you press Send"))
+        #expect(CrashPrompt.sendButton.hasSuffix("…"))
+        #expect(DiagnosticsRecorder.sandboxCrashSourceNote.contains("MetricKit"))
+    }
+}
+
 @Suite("Diagnostics report")
 struct DiagnosticsReportTests {
     private func snapshot(crash: CrashReport? = nil) -> DiagnosticsSnapshot {

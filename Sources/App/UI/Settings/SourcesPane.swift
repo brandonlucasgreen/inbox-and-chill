@@ -33,13 +33,17 @@ struct SourcesPane: View {
             BannerPermissionNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            #if !APP_STORE
             MailPermissionNotice()
+            #endif
             RemindersPermissionNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            #if !APP_STORE
             AgentHooksNotice()
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            #endif
             HStack {
                 Button { isAdding = true } label: {
                     Label("Add Source", systemImage: "plus")

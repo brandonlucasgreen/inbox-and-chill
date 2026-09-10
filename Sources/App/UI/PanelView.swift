@@ -82,7 +82,9 @@ struct PanelView: View {
                 queueList(queue)
             }
             Divider()
+            #if !APP_STORE
             LicenseNotice()
+            #endif
             if KeyboardHints.shouldShow(
                 opensSoFar: keyHintOpens, dismissed: keyHintsDismissed,
                 queueIsEmpty: queue.visibleUIDs.isEmpty)
@@ -456,11 +458,16 @@ struct PanelView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
+                #if !APP_STORE
+                // Points at Privacy & Security › Automation, which is where a
+                // Claude Code terminal jump gets stuck. The App Store build
+                // has no session jump and sends no Apple events.
                 Button("Open Settings") {
                     NSWorkspace.shared.open(ClaudeSessionTarget.systemSettingsAutomationURL)
                     appState.openProblem = nil
                 }
                 .font(.system(size: 11))
+                #endif
                 Button {
                     appState.openProblem = nil
                 } label: {

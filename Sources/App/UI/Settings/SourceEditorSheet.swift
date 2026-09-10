@@ -115,17 +115,21 @@ struct SourceEditorSheet: View {
                 // are: this is what you need before deciding anything. It is
                 // also the only place in the app that can raise macOS's
                 // Automation dialog, and it does so from a button.
+                #if !APP_STORE
                 if descriptor.id == "appleMail" {
                     MailAccessSection()
                 }
+                #endif
 
                 // Same placement argument as Mail's: the local source can
                 // receive nothing until each coding agent is told where to
                 // post, so the setup belongs with the source rather than in
                 // General, where it used to sit.
+                #if !APP_STORE
                 if descriptor.id == "local" {
                     AgentHooksSection()
                 }
+                #endif
 
                 // Same argument again, and one addition: the list picker below
                 // can only show real list names once access exists, so the
