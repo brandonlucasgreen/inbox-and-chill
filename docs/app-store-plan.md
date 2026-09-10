@@ -1,7 +1,9 @@
 # Mac App Store — one tree, two targets (plan, 2026-09-08)
 
 Status: **phases 1–3 built; phase 3 run sandboxed on a Mac and measured (§7);
-phase 4 is Brandon's paperwork, phase 5 partly done.** Brandon's call,
+the trial + in-app purchase are built (2026-09-09, `docs/app-store-release.md`,
+which is also the phase-4 runbook); phase 4 is Brandon's paperwork, not
+started; phase 5 done.** Brandon's call,
 2026-09-08, after the audit below: *"far less kneecapped of an app than I
 thought … I want to still reserve the right to release a 'richer' app outside
 the MAS."*
@@ -209,9 +211,16 @@ relaunch to see delivery.
    certificate, provisioning profile, App Store Connect record, privacy
    policy URL, screenshots, review notes carrying demo credentials for Slack,
    GitHub and Linear. Archive through Xcode Organizer the first time, dSYM
-   included. TestFlight for Mac before submission.
-5. **Record.** Amend CLAUDE.md's Distribution section (which still says MAS
-   was declined) and this doc's status line.
+   included. TestFlight for Mac before submission. **Now a numbered runbook
+   with the in-app purchase added: `docs/app-store-release.md` §2.**
+5. **Record.** Done: CLAUDE.md's Distribution section and this doc's status
+   line.
+6. **Being paid** — built 2026-09-09. `Licensing/AppStore/` is a StoreKit 2
+   `LicenseController` compiled in place of the Lemon Squeezy one, so the
+   trial, the notice bar and the nudge are shared code again and the store
+   build is no longer the one that never expires. Row 1 of the audit table
+   above is therefore superseded: licensing is *not* compiled out any more,
+   only the key-based provider is. `docs/app-store-release.md` §3.
 
 Two known costs, not problems. `CURRENT_PROJECT_VERSION` is shared, so a store
 resubmission after a rejection bumps it and the direct build skips a number.
@@ -304,3 +313,9 @@ prompt's alert actually appears in front (no screen access from this
 session; the log shows it was reached and not yet answered), Reminders under
 the calendars entitlement, Slack Socket Mode, a Keychain write from the
 sandboxed source editor, Export through the save panel.
+
+- **A sandboxed Keychain write works** (2026-09-09): the store build's
+  trial stamp — `Keychain.set` of `license.trialStartedAt`, the same helper
+  the source editor uses — logged `trial started on this Mac` on first
+  launch. The source-editor path itself is still unexercised, but the
+  primitive under it is not.

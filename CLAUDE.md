@@ -344,18 +344,30 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
 - `AppState.makeConnector` — wires settings JSON into connector inits.
 - **Features the App Store build leaves out live in their own folders and
   reach `AppState` through an extension file** (since 2026-09-08,
-  `docs/app-store-plan.md`): `Journal/AppState+Journal.swift`,
-  `Licensing/AppState+License.swift`. `AppState.swift` keeps only the stored
-  properties an extension cannot hold (`license`, `journalError`, both
-  flagged) and calls the extension's methods unchanged. **The store target
-  (`InboxAndChill-AppStore` in `project.yml`) excludes the whole folder and
-  then adds that one extension file back**, so the file is compiled into
-  *both* targets and its `#else` branch is where the no-op stubs live — an
-  `#else` in an excluded file would never compile. The excluded folders are
-  `Connectors/Local`, `Connectors/Mail`, `Journal`, `Licensing`; a settings
-  view that belongs to one of them lives *in* it (`Connectors/Mail/
-  MailAccessView.swift`), not in `UI/Settings`. Adding a feature the sandbox
-  cannot have? Put it in a folder, not in `AppState.swift`.
+  `docs/app-store-plan.md`): `Journal/AppState+Journal.swift`.
+  `AppState.swift` keeps only the stored property an extension cannot hold
+  (`journalError`, flagged) and calls the extension's methods unchanged.
+  **The store target (`InboxAndChill-AppStore` in `project.yml`) excludes
+  the whole folder and then adds that one extension file back**, so the
+  file is compiled into *both* targets and its `#else` branch is where the
+  no-op stubs live — an `#else` in an excluded file would never compile.
+  The excluded folders are `Connectors/Local`, `Connectors/Mail`,
+  `Journal`, `Licensing/LemonSqueezy`; a settings view that belongs to one
+  of them lives *in* it (`Connectors/Mail/MailAccessView.swift`), not in
+  `UI/Settings`. Adding a feature the sandbox cannot have? Put it in a
+  folder, not in `AppState.swift`.
+- **Licensing is the one feature with a provider per build, not a stub**
+  (since 2026-09-09, `docs/app-store-release.md`). `Licensing/` is shared
+  — state, trial math, `LicenseNotice`, the nudge, `AppState+License` —
+  and each target compiles exactly one `LicenseController`:
+  `Licensing/LemonSqueezy/` (key + checkout URL; direct target only) or
+  `Licensing/AppStore/` (StoreKit 2; store target only, excluded from the
+  direct target in `project.yml`). Same class name, same surface, so the
+  shared files carry no `#if` for it. `Licensing.isEnforced` is `true`
+  only under `APP_STORE`; the direct build's mechanic is still off and
+  flipping it is still Brandon's call. `scripts/verify-bundle.sh
+  --app-store` fails if the store binary lacks the product id literal or
+  contains "Enter License Key".
   `UpdateController` is the other shape — one file, Sparkle behind
   `#if !APP_STORE`, a stub in the `#else` — because six shared files read it.
   Gate direction is always `#if !APP_STORE` around the rich code: the
@@ -1168,8 +1180,10 @@ Sharing — and this app uses none. (**True for Developer ID only.** The Mac App
 Store requires all three — App ID, embedded profile, Apple Distribution cert —
 plus a mandatory App Sandbox. That route was declined twice, PLAN §2.1.8 and
 §2.1.10, then re-opened 2026-09-08 as a **second target beside this one**:
-`docs/app-store-plan.md` is the plan and PLAN §2.1.12 the decision. Everything
-in this section describes the direct build.) It is unsandboxed, so network
+`docs/app-store-plan.md` is the plan, PLAN §2.1.12 the decision, and
+`docs/app-store-release.md` the runbook for getting a build of it sold —
+free, 14-day trial, one in-app purchase. Everything in this section
+describes the direct build.) It is unsandboxed, so network
 access, the loopback listener and the Keychain all work without entitlements.
 
 Release ships **exactly one entitlement** — `com.apple.security.automation.apple-events`

@@ -313,7 +313,10 @@ else
   # are 3.1.1 / 2.4.5(vii) rejections if they are in the binary at all.
   # (Absence proves little in general — CLAUDE.md rule 1 — but presence
   # here is a real finding.)
-  for LITERAL in "lemonsqueezy.com" "brandonlucasgreen/inbox-and-chill/main/appcast.xml"; do
+  # "Enter License Key" is LicenseNotice's direct-build button: a store user
+  # must never read the words (2.4.5(vi)), and the button is behind an #if
+  # that nothing but this check would notice going wrong.
+  for LITERAL in "lemonsqueezy.com" "brandonlucasgreen/inbox-and-chill/main/appcast.xml" "Enter License Key"; do
     HITS=$(strings -a "$BINARY" | grep -c "$LITERAL" || true)
     if [ "$HITS" = "0" ]; then
       note "strings: no \"$LITERAL\""
@@ -321,6 +324,17 @@ else
       bad "strings: \"$LITERAL\" appears $HITS time(s) — a cut feature is compiled into the store build"
     fi
   done
+  # The strong direction. The StoreKit product id is a 31-byte ASCII literal
+  # (Licensing.appStoreProductID), so zero hits means the purchase path is
+  # not in this binary and the store build has no way to be bought. It must
+  # match the product created in App Store Connect by hand.
+  PRODUCT_ID="lol.bgreen.inboxandchill.unlock"
+  HITS=$(strings -a "$BINARY" | grep -c "$PRODUCT_ID" || true)
+  if [ "$HITS" = "0" ]; then
+    bad "strings: StoreKit product id \"$PRODUCT_ID\" absent — Licensing/AppStore is not compiled into the store build"
+  else
+    note "strings: StoreKit product id present ($HITS)"
+  fi
 fi
 
 # --- Signature integrity --------------------------------------------------

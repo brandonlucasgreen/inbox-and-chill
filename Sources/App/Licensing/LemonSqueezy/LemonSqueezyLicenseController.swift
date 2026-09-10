@@ -1,9 +1,11 @@
 import Foundation
 import OSLog
 
-/// Owns the trial clock and the Lemon Squeezy license: reads and writes the
-/// Keychain, talks to the License API, and publishes one `LicenseState` for
-/// the UI plus a callback for `AppState` to start or stop syncing on.
+/// The **direct build's** `LicenseController`: owns the trial clock and the
+/// Lemon Squeezy license — reads and writes the Keychain, talks to the
+/// License API, and publishes one `LicenseState` for the UI plus a callback
+/// for `AppState` to start or stop syncing on. The store build compiles
+/// `AppStore/StoreKitLicenseController.swift` under the same name instead.
 ///
 /// The math and the response parsing live in `Licensing`/`LemonSqueezy`
 /// (pure, tested); this class is the I/O around them.
@@ -27,6 +29,10 @@ final class LicenseController {
     /// Fired on every evaluation, changed or not — the trial nudges key off
     /// the day count, which changes without `allowsSync` flipping.
     var onStateEvaluated: ((LicenseState) -> Void)?
+
+    /// What a purchase costs, for the notice bar and the trial nudge. The
+    /// store build reads this off StoreKit; here it is the one constant.
+    var priceLabel: String? { Licensing.price }
 
     /// Last four characters of the stored key, for the Settings state line.
     var keySuffix: String? {
@@ -56,7 +62,7 @@ final class LicenseController {
     private static let log = AppLog.logger(.license)
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        forcedState = Self.forced(from: environment)
+        forcedState = Licensing.forcedState(from: environment)
         if let forcedState {
             state = forcedState
             return
@@ -279,24 +285,5 @@ final class LicenseController {
 
     private static func unreachable(_ error: Error) -> String {
         "Couldn't reach Lemon Squeezy — check your connection and try again. (\(error.localizedDescription))"
-    }
-
-    private static func forced(from environment: [String: String])
-        -> LicenseState?
-    {
-        #if DEBUG
-            switch environment["INCHILL_LICENSE_STATE"] {
-            case "licensed": return .licensed
-            case "expired": return .expired
-            case .some(let value) where value.hasPrefix("trialing"):
-                let days = value.split(separator: ":").last.flatMap {
-                    Int($0)
-                }
-                return .trialing(daysLeft: days ?? Licensing.trialDays)
-            default: return nil
-            }
-        #else
-            return nil
-        #endif
     }
 }

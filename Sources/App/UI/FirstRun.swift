@@ -66,6 +66,17 @@ enum FirstRun {
         "Connect a source and everything waiting for you lands here — one queue, emptied from the keyboard."
     static let addButton = "Add Your First Source"
 
+    /// Guideline 3.1.1 asks that, before a trial starts, the app states its
+    /// length, what stops when it ends, and what full use costs. Shown only
+    /// where the mechanic is on (`Licensing.isEnforced`), i.e. the store
+    /// build; the price is StoreKit's and may not have loaded yet, so the
+    /// sentence stands without it.
+    nonisolated static func trialDisclosure(price: String?) -> String {
+        let cost = price.map { "a one-time \($0) purchase" } ?? "a one-time purchase"
+        return
+            "Free for \(Licensing.trialDays) days. After that, syncing pauses until \(cost) — your queue and settings stay put."
+    }
+
     /// The services, named, so the welcome says how far the app reaches
     /// rather than pointing at two of them. Read from the catalog so a new
     /// connector joins the sentence without anyone remembering to add it;
@@ -116,6 +127,12 @@ struct WelcomeView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+            if Licensing.isEnforced {
+                Text(FirstRun.trialDisclosure(price: appState.license.priceLabel))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Button(FirstRun.addButton) { add() }
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
@@ -182,6 +199,13 @@ struct WelcomeWindowView: View {
                     .foregroundStyle(Brand.beigeFaint)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 8)
+                if Licensing.isEnforced {
+                    Text(FirstRun.trialDisclosure(price: appState.license.priceLabel))
+                        .font(Brand.text(11.5))
+                        .foregroundStyle(Brand.beigeFaint)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8)
+                }
                 Button(FirstRun.addButton) { add() }
                     .buttonStyle(BrandCapsuleButtonStyle())
                     .keyboardShortcut(.defaultAction)

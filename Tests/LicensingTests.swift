@@ -98,6 +98,107 @@ struct TrialMathTests {
     }
 }
 
+// MARK: - Trial anchor (App Store build)
+
+/// `Licensing.trialStart` chooses the clock the store build's trial runs
+/// on. Pinned here because the StoreKit controller that calls it is compiled
+/// only into the store target, which the tests never run against (rule 6).
+@Suite("Trial anchor")
+struct TrialAnchorTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    var day: TimeInterval { 86_400 }
+
+    /// The App Store knew about this account before this Mac did: the
+    /// trial started then, not at this launch.
+    @Test func earlierStoreDateWins() {
+        let decision = Licensing.trialStart(
+            stored: now - 2 * day, appStore: now - 10 * day,
+            appStoreIsProduction: true, now: now)
+        #expect(decision == .init(start: now - 10 * day, anchor: .appStore))
+    }
+
+    /// The earliest credible date wins, so a store date *later* than the
+    /// stamp cannot lengthen a trial.
+    @Test func laterStoreDateDoesNotExtendTheTrial() {
+        let decision = Licensing.trialStart(
+            stored: now - 10 * day, appStore: now - 2 * day,
+            appStoreIsProduction: true, now: now)
+        #expect(decision == .init(start: now - 10 * day, anchor: .local))
+    }
+
+    /// Apple documents the sandbox's original purchase date as a fixed
+    /// 2013-08-01. Trusted, it would expire every tester's trial at launch.
+    @Test func sandboxDateIsIgnored() {
+        let sandbox = Date(timeIntervalSince1970: 1_375_340_400)
+        let decision = Licensing.trialStart(
+            stored: now - day, appStore: sandbox,
+            appStoreIsProduction: false, now: now)
+        #expect(decision == .init(start: now - day, anchor: .local))
+    }
+
+    @Test func futureStoreDateIsIgnored() {
+        let decision = Licensing.trialStart(
+            stored: now - day, appStore: now + day,
+            appStoreIsProduction: true, now: now)
+        #expect(decision == .init(start: now - day, anchor: .local))
+    }
+
+    /// No stamp yet and nothing from the store: the trial starts now, on
+    /// this Mac — the first-launch case before the Keychain write lands.
+    @Test func nothingKnownStartsNow() {
+        let decision = Licensing.trialStart(
+            stored: nil, appStore: nil, appStoreIsProduction: true, now: now)
+        #expect(decision == .init(start: now, anchor: .local))
+    }
+
+    /// The store build's product id is a fixed string that must match App
+    /// Store Connect and `InboxAndChill.storekit` by hand; pinning it here
+    /// makes a rename a deliberate act.
+    @Test func productIDIsStable() {
+        #expect(Licensing.appStoreProductID == "lol.bgreen.inboxandchill.unlock")
+    }
+}
+
+/// The DEBUG override both controllers read. Tests build Debug, so the
+/// parser is live here.
+@Suite("Forced license state")
+struct ForcedLicenseStateTests {
+    @Test func parsesEachState() {
+        #expect(Licensing.forcedState(from: ["INCHILL_LICENSE_STATE": "licensed"]) == .licensed)
+        #expect(Licensing.forcedState(from: ["INCHILL_LICENSE_STATE": "expired"]) == .expired)
+        #expect(
+            Licensing.forcedState(from: ["INCHILL_LICENSE_STATE": "trialing"])
+                == .trialing(daysLeft: Licensing.trialDays))
+        #expect(
+            Licensing.forcedState(from: ["INCHILL_LICENSE_STATE": "trialing:3"])
+                == .trialing(daysLeft: 3))
+    }
+
+    @Test func anythingElseIsNoOverride() {
+        #expect(Licensing.forcedState(from: [:]) == nil)
+        #expect(Licensing.forcedState(from: ["INCHILL_LICENSE_STATE": "free"]) == nil)
+    }
+}
+
+/// Guideline 3.1.1: duration, what stops, and the cost, before the trial
+/// starts. The welcome window carries the sentence; this pins its parts.
+@Suite("Trial disclosure")
+struct TrialDisclosureTests {
+    @Test func namesDurationWhatStopsAndPrice() {
+        let text = FirstRun.trialDisclosure(price: "$14.99")
+        #expect(text.contains("\(Licensing.trialDays) days"))
+        #expect(text.contains("syncing pauses"))
+        #expect(text.contains("$14.99"))
+        #expect(text.contains("one-time"))
+    }
+
+    @Test func standsWithoutAPrice() {
+        let text = FirstRun.trialDisclosure(price: nil)
+        #expect(text.contains("one-time purchase"))
+        #expect(!text.contains("nil"))
+    }
+}
+
 // MARK: - Lemon Squeezy response parsing
 
 /// Fixtures **captured from the live API** on 2026-08-22, by activating,

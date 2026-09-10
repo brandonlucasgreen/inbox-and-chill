@@ -295,6 +295,13 @@ parts that amend earlier sections:
 - The blocker §2.1.10 named — onboarding under Guideline 2.1 — is unchanged
   and is now a review-notes problem (demo credentials) rather than a reason
   not to ship.
+- **Pricing for the store build, decided 2026-09-09:** free download, 14
+  days of full use, then a one-time in-app purchase (Brandon: $15) to keep
+  syncing — the same shape §2.1.9 chose for the direct build, with StoreKit
+  in place of Lemon Squeezy. Implemented as an implicit trial anchored on
+  the App Store's download date rather than guideline 3.1.1's $0 "14-day
+  Trial" product; the reasoning and the fallback if review objects are in
+  `docs/app-store-release.md` §1. The direct build's mechanic stays off.
 
 ## 4. Architecture
 
