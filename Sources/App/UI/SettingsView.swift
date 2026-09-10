@@ -10,6 +10,13 @@ import SwiftUI
 /// is why the Claude Code hooks now live in the local source's editor rather
 /// than in General — and Diagnostics is what broke, which belongs next to the
 /// sources whose failures it records rather than buried in About.
+///
+/// **Four tabs in the App Store build.** Without Updates, License and the
+/// journal, General and Notifications each held two small sections, and
+/// neither justified a page (Brandon, 2026-09-09); there the badge and banner
+/// sections live inside General and the Notifications tab is gone. The
+/// sections themselves are one view (`NotificationSections`) so the two
+/// builds cannot drift.
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var selection: SettingsTab = .general
@@ -20,9 +27,11 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
 
+            #if !APP_STORE
             NotificationsPane()
                 .tabItem { Label("Notifications", systemImage: "bell") }
                 .tag(SettingsTab.notifications)
+            #endif
 
             SourcesPane()
                 .tabItem { Label("Sources", systemImage: "tray.2") }
@@ -81,6 +90,10 @@ struct GeneralPane: View {
             if Licensing.isEnforced {
                 LicenseSection()
             }
+            #else
+            // The store build has no Notifications tab; its two sections
+            // sit here instead. See the shell's doc comment.
+            NotificationSections()
             #endif
         }
         .formStyle(.grouped)
@@ -93,8 +106,24 @@ struct NotificationsPane: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        @Bindable var state = appState
         Form {
+            NotificationSections()
+            #if !APP_STORE
+            JournalSettingsSection()
+            #endif
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// The badge and banner sections. One view, used by the Notifications tab in
+/// the direct build and by General in the App Store build.
+struct NotificationSections: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        @Bindable var state = appState
+        Group {
             Section("Menu Bar Badge") {
                 Toggle("Badge: total waiting", isOn: $state.badgeShowsTotal)
                 Toggle(
@@ -121,12 +150,7 @@ struct NotificationsPane: View {
                 .foregroundStyle(.secondary)
                 BannerPermissionNotice()
             }
-
-            #if !APP_STORE
-            JournalSettingsSection()
-            #endif
         }
-        .formStyle(.grouped)
     }
 }
 

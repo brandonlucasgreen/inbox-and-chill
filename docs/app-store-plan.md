@@ -292,6 +292,13 @@ direct build running beside it.
   the rule is that a store user must never read the name of something the
   build cannot do.
 
+- **Four Settings tabs, not five.** Without Updates, License and the
+  journal, General and Notifications each held two small sections; Brandon
+  asked for them merged (2026-09-09), so the store build's General carries
+  the hotkey, launch-at-login, badge and banner sections and has no
+  Notifications tab. The badge and banner sections are one view
+  (`NotificationSections`) shared with the direct build's Notifications tab.
+
 Not measured, and needing a person at the keyboard: whether the crash
 prompt's alert actually appears in front (no screen access from this
 session; the log shows it was reached and not yet answered), Reminders under
