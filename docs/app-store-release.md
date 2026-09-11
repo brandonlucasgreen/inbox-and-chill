@@ -69,10 +69,13 @@ Each step needs the one before it. Times are Apple's, not ours.
    - **App Privacy**: *Data Not Collected* is the truthful answer — the app
      sends nothing to us; every token goes from the user's Mac to the
      service the user configured. The privacy policy has to say the same.
-   - **Privacy Policy URL** and **Support URL** are mandatory. **Neither
-     page exists yet** (the pre-release audit of 2026-09-04 found no `site/`
-     and no privacy text anywhere in the repo). Two short pages on
-     bgreen.lol; the copy PLAN §2.1.9/§2.1.11 settled applies.
+   - **Privacy Policy URL** and **Support URL** are mandatory. Both exist:
+     `https://inboxandchill.app/privacy` and `https://inboxandchill.app/faq`
+     (the site lives in the `inbox-and-chill-dotapp` repo, not here). Audited
+     2026-09-11 for the two-build ecosystem — the App Store version's
+     feature cuts, user-started trial, in-app purchase, Apple-handled
+     refunds, Diagnostics — in that repo's PR #1. The App Privacy answer
+     below has to agree with that page, and does.
 5. **The two in-app purchases** — the app record › Monetization › In-App
    Purchases › + › **Non-Consumable**, twice. Both ids are in the binary
    (`Licensing.appStoreProductID`, `Licensing.trialProductID`) and in
