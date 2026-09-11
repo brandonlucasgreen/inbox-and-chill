@@ -45,7 +45,7 @@ Apple. The privacy page says the same. Publish the answers.
 | Product ID | `lol.bgreen.inboxandchill.unlock` |
 | Price | US$14.99 or US$15.00 (pick the one App Store Connect offers; let Apple derive other storefronts) |
 | Display name (en-US, 30) | `Unlock Inbox & Chill` |
-| Description (en-US, 45) | `Keeps syncing after the trial. Yours for good.` |
+| Description (en-US, 45) | `Keeps syncing after the trial, for good.` |
 | Review screenshot | Settings › General with the Purchase section visible |
 | Review notes | `One-time purchase that keeps syncing running after the 14-day trial. Bought from Settings › General or the bar at the top of the queue.` |
 
