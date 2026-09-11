@@ -298,10 +298,12 @@ parts that amend earlier sections:
 - **Pricing for the store build, decided 2026-09-09:** free download, 14
   days of full use, then a one-time in-app purchase (Brandon: $15) to keep
   syncing — the same shape §2.1.9 chose for the direct build, with StoreKit
-  in place of Lemon Squeezy. Implemented as an implicit trial anchored on
-  the App Store's download date rather than guideline 3.1.1's $0 "14-day
-  Trial" product; the reasoning and the fallback if review objects are in
-  `docs/app-store-release.md` §1. The direct build's mechanic stays off.
+  in place of Lemon Squeezy. **The trial starts on an explicit Start Free
+  Trial press on the welcome window, not on launch** (Brandon, 2026-09-10:
+  *"much more user-friendly and standard"*), and that press buys guideline
+  3.1.1's $0 "14-day Trial" product, with a local start as the fallback when
+  the store cannot be reached. `docs/app-store-release.md` §1 and §3. The
+  direct build's mechanic stays off.
 
 ## 4. Architecture
 

@@ -2,31 +2,36 @@ import Foundation
 import OSLog
 import StoreKit
 
-/// The **App Store build's** `LicenseController`: owns the trial clock and
-/// the one in-app purchase. Reads and writes the Keychain, talks to StoreKit
-/// 2, and publishes one `LicenseState` for the UI plus a callback for
-/// `AppState` to start or stop syncing on — the same surface the direct
-/// build's Lemon Squeezy controller has, so `AppState`, `LicenseNotice` and
+/// The **App Store build's** `LicenseController`: owns the trial and the one
+/// real purchase. Reads and writes the Keychain, talks to StoreKit 2, and
+/// publishes one `LicenseState` for the UI plus a callback for `AppState` to
+/// start or stop syncing on — the same surface the direct build's Lemon
+/// Squeezy controller has, so `AppState`, `LicenseNotice`, the welcome and
 /// the trial nudge compile unchanged against either.
 ///
 /// The math is in `Licensing` (pure, tested); this class is the I/O around
-/// it. Three rules shape it:
+/// it. Four rules shape it:
 ///
+/// - **The trial starts when the user says so** — Start Free Trial on the
+///   welcome window, the notice bar or Settings — never on launch (Brandon,
+///   2026-09-10). The button buys guideline 3.1.1's $0 "14-day Trial"
+///   product, whose `purchaseDate` becomes the server-signed anchor for the
+///   clock. **If that purchase cannot happen — offline, the sheet
+///   cancelled, a build that never met the store — the trial starts anyway
+///   from a Keychain stamp.** A person who pressed Start must never be left
+///   with a paused app because Apple's sheet did not cooperate.
+/// - **The trial clock is the earliest credible date** of the stamp and the
+///   $0 transaction (`Licensing.trialStart`). A trial started on another
+///   Mac with the same Apple Account arrives through the entitlements and
+///   shortens this one to match.
 /// - **Offline never demotes.** A purchase is remembered in the Keychain the
 ///   moment StoreKit verifies it, and only an explicit revocation (a refund,
 ///   arriving through `Transaction.updates`) takes it away. An entitlement
-///   list that comes back empty — signed out of the App Store, no network,
-///   a build that never met the store — is not a verdict.
-/// - **The trial clock is the earliest credible date.** Every launch stamps
-///   the Keychain if nothing is there; then `AppTransaction.shared` is asked
-///   for the App Store's own first-download date, which survives deleting
-///   the container, the Keychain item and the app. `Licensing.trialStart`
-///   decides between them and ignores the sandbox's fixed 2013 date.
-/// - **Nothing here prompts on its own.** `AppTransaction.shared` throws
-///   rather than asking anyone to sign in; `AppTransaction.refresh()` and
-///   `AppStore.sync()` do show a sign-in sheet, so they run only from a
-///   button the user just pressed (Restore Purchase). Same discipline as the
-///   Mail Automation prompt (CLAUDE.md rule 2).
+///   list that comes back empty is not a verdict.
+/// - **Nothing here prompts on its own.** `AppStore.sync()` shows a sign-in
+///   sheet and the purchase sheet is Apple's, so both run only from a button
+///   the user just pressed. Same discipline as the Mail Automation prompt
+///   (CLAUDE.md rule 2).
 @MainActor
 @Observable
 final class LicenseController {
@@ -41,22 +46,37 @@ final class LicenseController {
     /// Ask to Buy: a purchase that is waiting on a family organiser. Not an
     /// error, so not red.
     private(set) var pendingMessage: String?
+    /// True while a purchase, trial start or restore sheet is up.
     private(set) var isPurchasing = false
-    private(set) var product: Product?
+    private(set) var unlockProduct: Product?
+    private(set) var trialProduct: Product?
     /// Which clock the trial runs on (`Licensing.TrialAnchor`).
     private(set) var trialAnchor: Licensing.TrialAnchor = .local
-    /// Fired when `state.allowsSync` flips: a purchase mid-run, or the trial
-    /// running out under a live app (a menu bar app runs for weeks, so
-    /// launch-time checks alone would miss the transition by days).
+    /// Fired when `state.allowsSync` flips: a trial starting or a purchase
+    /// mid-run, or the trial running out under a live app (a menu bar app
+    /// runs for weeks, so launch-time checks alone would miss it by days).
     var onSyncPermissionChange: ((Bool) -> Void)?
     /// Fired on every evaluation, changed or not — the trial nudges key off
     /// the day count, which changes without `allowsSync` flipping.
     var onStateEvaluated: ((LicenseState) -> Void)?
 
-    /// What a purchase costs, localised by the App Store; nil until the
+    /// What the purchase costs, localised by the App Store; nil until the
     /// product has loaded. Never hard-coded: the price is set in App Store
     /// Connect and may differ per storefront.
-    var priceLabel: String? { product?.displayPrice }
+    var priceLabel: String? { unlockProduct?.displayPrice }
+
+    /// When the running trial ends, for the welcome's second screen and
+    /// Settings. Nil before the trial starts and after a purchase.
+    var trialEndsAt: Date? {
+        guard case .trialing = state,
+            let start = Licensing.decodeDate(Keychain.get(Licensing.trialStartKey))
+        else { return nil }
+        return Licensing.trialEnd(start: start)
+    }
+
+    /// The direct build's controller has this too; `PurchaseSection` and the
+    /// welcome use it to decide whether Start Free Trial is on offer.
+    var canStartTrial: Bool { state == .notStarted }
 
     private let forcedState: LicenseState?
     private var clockTask: Task<Void, Never>?
@@ -70,22 +90,8 @@ final class LicenseController {
             state = forcedState
             return
         }
-        // First launch starts the clock. `Licensing.isEnforced` is `true` in
-        // this build, so unlike the direct build there is no "do not stamp"
-        // case: a store download is a trial from its first second.
-        if Keychain.get(Licensing.trialStartKey) == nil {
-            if let failure = Keychain.set(
-                Licensing.encode(.now), for: Licensing.trialStartKey)
-            {
-                // The clock then restarts every launch — a free app, not a
-                // paused one, so rule 5's loud failure is a log line rather
-                // than a red bar. It would be the Keychain itself broken.
-                Self.log.error(
-                    "trial start not saved: \(failure, privacy: .public)")
-            } else {
-                Self.log.notice("trial started on this Mac")
-            }
-        }
+        // No stamp at launch, on purpose: `.notStarted` until Start Free
+        // Trial. The direct build stamps here; this one does not.
         state = Self.derive()
         Self.log.notice(
             "license state resolved: \(String(describing: self.state), privacy: .public)"
@@ -100,8 +106,7 @@ final class LicenseController {
             }
         }
         Task {
-            await anchorTrialToAppStore()
-            await loadProduct()
+            await loadProducts()
             await refreshEntitlements()
         }
     }
@@ -136,7 +141,7 @@ final class LicenseController {
     }
 
     /// Hourly recompute so the day the trial ends is noticed the day it
-    /// happens, not at the next relaunch. Also retries a product that failed
+    /// happens, not at the next relaunch. Also retries products that failed
     /// to load, so a launch with no network still shows a price later.
     private func startClock() {
         clockTask = Task { [weak self] in
@@ -144,73 +149,113 @@ final class LicenseController {
                 try? await Task.sleep(for: .seconds(3600))
                 guard let self else { return }
                 self.refreshState()
-                if self.product == nil { await self.loadProduct() }
-            }
-        }
-    }
-
-    // MARK: Trial anchor
-
-    /// Asks the App Store when this Apple Account first downloaded the app
-    /// and moves the trial start *earlier* if that date is credible. Never
-    /// later. `AppTransaction.shared` throws instead of prompting when the
-    /// app has no App Store receipt — Xcode without a StoreKit
-    /// configuration, or `dist/app-store/` — and the local stamp stands.
-    private func anchorTrialToAppStore() async {
-        guard forcedState == nil else { return }
-        do {
-            switch try await AppTransaction.shared {
-            case .verified(let transaction):
-                let stored = Licensing.decodeDate(
-                    Keychain.get(Licensing.trialStartKey))
-                let decision = Licensing.trialStart(
-                    stored: stored,
-                    appStore: transaction.originalPurchaseDate,
-                    appStoreIsProduction: transaction.environment == .production,
-                    now: .now)
-                trialAnchor = decision.anchor
-                if decision.start != stored {
-                    _ = Keychain.set(
-                        Licensing.encode(decision.start),
-                        for: Licensing.trialStartKey)
-                    refreshState()
+                if self.unlockProduct == nil || self.trialProduct == nil {
+                    await self.loadProducts()
                 }
-                Self.log.notice(
-                    "trial anchored to \(decision.anchor.rawValue, privacy: .public) (app transaction environment: \(transaction.environment.rawValue, privacy: .public))"
-                )
-            case .unverified(_, let error):
-                Self.log.notice(
-                    "app transaction failed verification, trial stays on this Mac's stamp: \(String(describing: error), privacy: .public)"
-                )
             }
-        } catch {
-            Self.log.notice(
-                "app transaction unavailable, trial stays on this Mac's stamp: \(String(describing: error), privacy: .public)"
-            )
         }
     }
 
-    // MARK: Product
+    // MARK: Trial
 
-    private func loadProduct() async {
+    /// Start Free Trial. Buys the $0 trial product when it can; stamps the
+    /// clock locally regardless, because the press is the decision and the
+    /// sheet is a formality Apple asks for. Idempotent: a second press while
+    /// a trial runs does nothing.
+    func startTrial() async {
+        guard forcedState == nil, state == .notStarted else { return }
+        isPurchasing = true
+        defer { isPurchasing = false }
+        var anchorFromStore: Date?
+        if let trialProduct {
+            do {
+                switch try await trialProduct.purchase() {
+                case .success(let result):
+                    switch result {
+                    case .verified(let transaction):
+                        await transaction.finish()
+                        anchorFromStore = transaction.purchaseDate
+                    case .unverified(_, let error):
+                        Self.log.notice(
+                            "trial transaction failed verification, starting locally: \(String(describing: error), privacy: .public)"
+                        )
+                    }
+                case .pending:
+                    // Ask to Buy on a free item still parks the transaction
+                    // with the organiser. The trial starts now regardless;
+                    // the transaction, if approved, only re-anchors it.
+                    Self.log.notice("trial purchase pending approval; starting locally")
+                case .userCancelled:
+                    Self.log.notice("trial sheet cancelled; starting locally")
+                @unknown default:
+                    break
+                }
+            } catch {
+                Self.log.notice(
+                    "trial purchase failed, starting locally: \(String(describing: error), privacy: .public)"
+                )
+            }
+        } else {
+            Self.log.notice("trial product not loaded; starting locally")
+        }
+        // A local start goes through the same decision as a store one; the
+        // anchor `record` reports is what the log line below says.
+        record(trialStart: anchorFromStore ?? .now, fromStore: anchorFromStore != nil)
+        Self.log.notice(
+            "trial started, anchored to \(self.trialAnchor.rawValue, privacy: .public)"
+        )
+    }
+
+    /// Writes the trial start the clock should run from — the earliest
+    /// credible of what is stored and what the store says — and re-derives.
+    private func record(trialStart candidate: Date, fromStore: Bool) {
+        let stored = Licensing.decodeDate(Keychain.get(Licensing.trialStartKey))
+        guard let decision = fromStore
+            ? Licensing.trialStart(stored: stored, trialTransaction: candidate, now: .now)
+            : Licensing.trialStart(stored: stored ?? candidate, trialTransaction: nil, now: .now)
+        else { return }
+        trialAnchor = decision.anchor
+        if decision.start != stored {
+            if let failure = Keychain.set(
+                Licensing.encode(decision.start), for: Licensing.trialStartKey)
+            {
+                // The clock would restart at every launch — a free app, not a
+                // paused one — but a Keychain that refuses writes is worth a
+                // red line, because tokens will fail to save the same way.
+                problem = failure
+                Self.log.error("trial start not saved: \(failure, privacy: .public)")
+                return
+            }
+        }
+        refreshState()
+    }
+
+    // MARK: Products
+
+    private func loadProducts() async {
         guard forcedState == nil else { return }
         do {
             let products = try await Product.products(
-                for: [Licensing.appStoreProductID])
-            if let first = products.first {
-                product = first
-                productProblem = nil
-            } else {
+                for: [Licensing.appStoreProductID, Licensing.trialProductID])
+            unlockProduct = products.first { $0.id == Licensing.appStoreProductID }
+            trialProduct = products.first { $0.id == Licensing.trialProductID }
+            if unlockProduct == nil {
                 // The id is in the binary and in App Store Connect; if they
                 // disagree this is the only symptom, so it names the id.
                 productProblem =
                     "The App Store has no product \"\(Licensing.appStoreProductID)\" for this app yet, so there is nothing to buy. If you're a customer seeing this, please email \(SupportContact.email)."
                 Self.log.error("store product not found: \(Licensing.appStoreProductID, privacy: .public)")
+            } else {
+                productProblem = nil
+            }
+            if trialProduct == nil {
+                // Not a user-facing problem: the trial starts locally.
+                Self.log.error("trial product not found: \(Licensing.trialProductID, privacy: .public)")
             }
         } catch {
             productProblem = Self.unreachable(error)
             Self.log.notice(
-                "store product not loaded: \(String(describing: error), privacy: .public)"
+                "store products not loaded: \(String(describing: error), privacy: .public)"
             )
         }
     }
@@ -219,14 +264,14 @@ final class LicenseController {
 
     func purchase() async {
         guard forcedState == nil else { return }
-        guard let product else {
+        guard let unlockProduct else {
             problem = productProblem ?? Self.storeUnavailable
             return
         }
         isPurchasing = true
         defer { isPurchasing = false }
         do {
-            switch try await product.purchase() {
+            switch try await unlockProduct.purchase() {
             case .success(let result):
                 switch result {
                 case .verified(let transaction):
@@ -254,8 +299,9 @@ final class LicenseController {
     }
 
     /// Restore: asks the App Store to sync this Apple Account's purchases to
-    /// this Mac, then re-reads the entitlements. **Shows a sign-in sheet**,
-    /// so only ever called from the Restore Purchase button.
+    /// this Mac, then re-reads the entitlements — the unlock *and* a trial
+    /// started on another Mac. **Shows a sign-in sheet**, so only ever
+    /// called from the Restore Purchase button.
     func restore() async {
         guard forcedState == nil else { return }
         isPurchasing = true
@@ -275,21 +321,23 @@ final class LicenseController {
 
     // MARK: Entitlements
 
-    /// Reads what StoreKit knows on this device. Only ever *grants*: an empty
-    /// answer leaves a stored unlock alone (offline never demotes) and is
-    /// logged so the Diagnostics pane can say why a purchase looked missing.
+    /// Reads what StoreKit knows on this device. Only ever *grants* or
+    /// *shortens*: an empty answer leaves a stored unlock alone (offline
+    /// never demotes) and is logged so Diagnostics can say why a purchase
+    /// looked missing; a trial transaction moves the clock earlier, never
+    /// later.
     func refreshEntitlements() async {
         guard forcedState == nil else { return }
-        var sawOurs = false
+        var sawUnlock = false
         for await result in Transaction.currentEntitlements {
             if case .verified(let transaction) = result,
                 transaction.productID == Licensing.appStoreProductID
             {
-                sawOurs = true
+                sawUnlock = true
             }
             apply(result, from: "entitlements")
         }
-        if !sawOurs, Keychain.get(Self.unlockedKey) == "true" {
+        if !sawUnlock, Keychain.get(Self.unlockedKey) == "true" {
             Self.log.notice(
                 "no entitlement on this device; keeping the stored purchase (offline never demotes)"
             )
@@ -299,7 +347,6 @@ final class LicenseController {
     private func apply(_ result: VerificationResult<Transaction>, from source: String) {
         switch result {
         case .verified(let transaction):
-            guard transaction.productID == Licensing.appStoreProductID else { return }
             apply(transaction: transaction)
         case .unverified(let transaction, let error):
             Self.log.notice(
@@ -308,24 +355,33 @@ final class LicenseController {
         }
     }
 
-    /// A verified transaction for our product: unlock, unless it has been
-    /// revoked (refunded), which is the one path that locks again.
+    /// A verified transaction for one of our products. The unlock grants
+    /// unless revoked (refunded), which is the one path that locks again;
+    /// the $0 trial re-anchors the clock to its purchase date.
     private func apply(transaction: Transaction) {
-        if let revoked = transaction.revocationDate {
-            Keychain.delete(Self.unlockedKey)
-            Self.log.error(
-                "purchase revoked on \(revoked.formatted(.iso8601), privacy: .public); trial state applies again"
-            )
-        } else if Keychain.get(Self.unlockedKey) != "true" {
-            if let failure = Keychain.set("true", for: Self.unlockedKey) {
-                // The purchase is real and StoreKit remembers it; only our
-                // memo failed. Unlock in memory for this run and say so.
-                problem = failure
-            } else {
-                Self.log.notice("purchase verified and remembered")
+        switch transaction.productID {
+        case Licensing.appStoreProductID:
+            if let revoked = transaction.revocationDate {
+                Keychain.delete(Self.unlockedKey)
+                Self.log.error(
+                    "purchase revoked on \(revoked.formatted(.iso8601), privacy: .public); trial state applies again"
+                )
+            } else if Keychain.get(Self.unlockedKey) != "true" {
+                if let failure = Keychain.set("true", for: Self.unlockedKey) {
+                    // The purchase is real and StoreKit remembers it; only
+                    // our memo failed. Say so.
+                    problem = failure
+                } else {
+                    Self.log.notice("purchase verified and remembered")
+                }
             }
+            refreshState()
+        case Licensing.trialProductID:
+            guard transaction.revocationDate == nil else { return }
+            record(trialStart: transaction.purchaseDate, fromStore: true)
+        default:
+            return
         }
-        refreshState()
     }
 
     // MARK: Copy

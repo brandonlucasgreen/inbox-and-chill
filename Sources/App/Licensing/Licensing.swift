@@ -6,6 +6,9 @@ import Foundation
 /// direct build, an App Store entitlement in the store build), and
 /// `Licensing.state` recomputes this from them whenever anything changes.
 enum LicenseState: Equatable {
+    /// The store build before the user presses Start Free Trial. The direct
+    /// build never produces it: its trial starts on first launch.
+    case notStarted
     case trialing(daysLeft: Int)
     case expired
     case licensed
@@ -13,7 +16,8 @@ enum LicenseState: Equatable {
     /// Whether connectors may run. The queue itself is never gated: an
     /// expired trial pauses *syncing*, loudly, and touches nothing else —
     /// this app exists to stop things being dropped, so the one thing expiry
-    /// must never do is silently stop collecting while looking alive.
+    /// must never do is silently stop collecting while looking alive. A trial
+    /// that has not been started is paused the same way, and says so.
     ///
     /// Always `true` while `Licensing.isEnforced` is off.
     var allowsSync: Bool {
@@ -56,13 +60,22 @@ enum Licensing {
 
     static let trialDays = 14
 
-    /// The store build's one product: a non-consumable that turns the trial
-    /// into a purchase. The same id is declared in `InboxAndChill.storekit`
-    /// (local testing) and must be created by hand in App Store Connect with
-    /// exactly this id — a mismatch loads no product and the Buy button never
-    /// enables. `scripts/verify-bundle.sh --app-store` checks the literal is
-    /// in the store binary.
+    /// The store build's two products, both non-consumable. Both ids are
+    /// declared in `InboxAndChill.storekit` (local testing) and must be
+    /// created by hand in App Store Connect with exactly these ids — a
+    /// mismatch loads no product and the button never enables.
+    /// `scripts/verify-bundle.sh --app-store` checks both literals are in
+    /// the store binary.
+    ///
+    /// - `unlock`: the one-time purchase that turns the trial into forever.
+    /// - `trial`: **Price Tier 0, named "14-day Trial"** — the mechanism
+    ///   guideline 3.1.1 prescribes for a free trial in a non-subscription
+    ///   app. Start Free Trial buys it; its `purchaseDate` is the trial
+    ///   clock's server-signed anchor, which survives reinstalls on any Mac
+    ///   signed into the same Apple Account. Brandon's call (2026-09-10):
+    ///   an explicit start, *"much more user-friendly and standard"*.
     static let appStoreProductID = "lol.bgreen.inboxandchill.unlock"
+    static let trialProductID = "lol.bgreen.inboxandchill.trial"
 
     /// Whether syncing is allowed, given a state and whether the mechanic is
     /// switched on at all.
@@ -75,7 +88,7 @@ enum Licensing {
         _ state: LicenseState, enforced: Bool
     ) -> Bool {
         guard enforced else { return true }
-        return state != .expired
+        return state != .expired && state != .notStarted
     }
 
     // Keychain account (service lol.bgreen.inboxandchill, like everything
@@ -89,13 +102,22 @@ enum Licensing {
     /// The one derivation. What counts as a valid purchase is the caller's
     /// business — a stored key the last validation did not reject, or an
     /// App Store entitlement — and either way an offline check that could not
-    /// complete never demotes.
+    /// complete never demotes. **No start date means no trial yet**: the
+    /// direct build's controller stamps one before it ever derives, so only
+    /// the store build reaches `.notStarted`.
     nonisolated static func state(
         trialStartedAt: Date?, hasValidLicense: Bool, now: Date
     ) -> LicenseState {
         if hasValidLicense { return .licensed }
+        guard let trialStartedAt else { return .notStarted }
         let days = daysLeft(trialStartedAt: trialStartedAt, now: now)
         return days > 0 ? .trialing(daysLeft: days) : .expired
+    }
+
+    /// When a trial that started at `start` ends. What the welcome's second
+    /// screen and Settings print.
+    nonisolated static func trialEnd(start: Date) -> Date {
+        min(start, .distantFuture).addingTimeInterval(TimeInterval(trialDays) * 86_400)
     }
 
     /// Whole days of trial remaining, counting a started day as a full one
@@ -115,13 +137,13 @@ enum Licensing {
 
     /// What the store build's trial clock is anchored to.
     enum TrialAnchor: String, Equatable {
-        /// `AppTransaction.originalPurchaseDate`: the day this Apple Account
-        /// first downloaded the app, signed by the App Store. Survives
-        /// deleting the container, the Keychain item and the app itself.
+        /// The `purchaseDate` of the $0 "14-day Trial" transaction, signed
+        /// by the App Store. Survives deleting the container, the Keychain
+        /// item and the app, and follows the Apple Account to another Mac.
         case appStore = "App Store"
-        /// The Keychain stamp this Mac wrote on first launch. What every
-        /// launch starts from, and all a build that never met the App Store
-        /// (Xcode, `dist/app-store/`) ever has.
+        /// The Keychain stamp this Mac wrote when Start Free Trial was
+        /// pressed — the fallback when the $0 purchase could not happen
+        /// (offline, cancelled sheet, or a build that never met the store).
         case local = "this Mac"
     }
 
@@ -131,27 +153,29 @@ enum Licensing {
     }
 
     /// Picks the trial start from the two facts the store build can have:
-    /// the Keychain stamp and the App Store's own first-download date. The
-    /// **earliest credible evidence wins** — a trial can only ever get
-    /// shorter from what the App Store knows, never longer — with two
-    /// exclusions measured against Apple's documentation (2026-09-09):
+    /// the Keychain stamp and the $0 trial transaction's purchase date. The
+    /// **earliest credible evidence wins** — a trial can only get shorter
+    /// from what the App Store knows, never longer — and a date ahead of the
+    /// clock is clock weirdness, not owed time (same rule as `daysLeft`).
+    /// Nil when neither exists: the trial has not been started.
     ///
-    /// - **Not in production, not used.** In the sandbox and TestFlight the
-    ///   original purchase date is a fixed `2013-08-01`, which would expire
-    ///   every tester's trial on first launch. Only a `.production`
-    ///   transaction is trusted.
-    /// - **Not in the future, not used.** Same rule as `daysLeft`: a date
-    ///   ahead of the clock is clock weirdness, not owed time.
+    /// Unlike `AppTransaction.originalPurchaseDate`, a transaction's
+    /// `purchaseDate` is real in the sandbox too, so there is no environment
+    /// exclusion here.
     nonisolated static func trialStart(
-        stored: Date?, appStore: Date?, appStoreIsProduction: Bool, now: Date
-    ) -> TrialStart {
-        let local = min(stored ?? now, now)
-        guard appStoreIsProduction, let appStore, appStore <= now,
-            appStore < local
-        else {
-            return TrialStart(start: local, anchor: .local)
+        stored: Date?, trialTransaction: Date?, now: Date
+    ) -> TrialStart? {
+        let local = stored.map { min($0, now) }
+        let store = trialTransaction.flatMap { $0 <= now ? $0 : nil }
+        switch (local, store) {
+        case (nil, nil): return nil
+        case (let l?, nil): return TrialStart(start: l, anchor: .local)
+        case (nil, let t?): return TrialStart(start: t, anchor: .appStore)
+        case (let l?, let t?):
+            return t < l
+                ? TrialStart(start: t, anchor: .appStore)
+                : TrialStart(start: l, anchor: .local)
         }
-        return TrialStart(start: appStore, anchor: .appStore)
     }
 
     // MARK: Encoding

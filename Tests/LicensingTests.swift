@@ -45,6 +45,22 @@ struct TrialMathTests {
         #expect(Licensing.daysLeft(trialStartedAt: nil, now: start) == 14)
     }
 
+    /// …but as a *state*, no start date is no trial: the store build's
+    /// `.notStarted`, which pauses syncing until Start Free Trial. The
+    /// direct build stamps before deriving, so it never sees this.
+    @Test func missingStartDateIsNotStarted() {
+        #expect(
+            Licensing.state(trialStartedAt: nil, hasValidLicense: false, now: start)
+                == .notStarted)
+        #expect(
+            Licensing.state(trialStartedAt: nil, hasValidLicense: true, now: start)
+                == .licensed)
+    }
+
+    @Test func trialEndIsFourteenDaysOut() {
+        #expect(Licensing.trialEnd(start: start) == start.addingTimeInterval(14 * 86_400))
+    }
+
     @Test func stateDerivation() {
         let over = start.addingTimeInterval(20 * 86_400)
         #expect(
@@ -69,6 +85,9 @@ struct TrialMathTests {
         #expect(Licensing.allowsSync(.trialing(daysLeft: 1), enforced: true))
         #expect(Licensing.allowsSync(.licensed, enforced: true))
         #expect(!Licensing.allowsSync(.expired, enforced: true))
+        // A trial nobody has started is paused too — the store build's
+        // welcome, notice bar and Settings all say so and offer the button.
+        #expect(!Licensing.allowsSync(.notStarted, enforced: true))
     }
 
     /// The mechanic is switched off for the alpha. Nothing may pause syncing
@@ -76,7 +95,7 @@ struct TrialMathTests {
     /// user would land in if a start date ever got stamped by mistake.
     @Test func nothingPausesSync_whenNotEnforced() {
         for state: LicenseState in [
-            .trialing(daysLeft: 1), .licensed, .expired,
+            .trialing(daysLeft: 1), .licensed, .expired, .notStarted,
         ] {
             #expect(Licensing.allowsSync(state, enforced: false))
         }
@@ -108,54 +127,54 @@ struct TrialAnchorTests {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     var day: TimeInterval { 86_400 }
 
-    /// The App Store knew about this account before this Mac did: the
-    /// trial started then, not at this launch.
-    @Test func earlierStoreDateWins() {
-        let decision = Licensing.trialStart(
-            stored: now - 2 * day, appStore: now - 10 * day,
-            appStoreIsProduction: true, now: now)
-        #expect(decision == .init(start: now - 10 * day, anchor: .appStore))
+    /// Nothing stored, nothing from the store: no trial yet. This is the
+    /// store build's launch state, and why launch stamps nothing.
+    @Test func nothingKnownIsNotStarted() {
+        #expect(Licensing.trialStart(stored: nil, trialTransaction: nil, now: now) == nil)
     }
 
-    /// The earliest credible date wins, so a store date *later* than the
-    /// stamp cannot lengthen a trial.
-    @Test func laterStoreDateDoesNotExtendTheTrial() {
-        let decision = Licensing.trialStart(
-            stored: now - 10 * day, appStore: now - 2 * day,
-            appStoreIsProduction: true, now: now)
-        #expect(decision == .init(start: now - 10 * day, anchor: .local))
-    }
-
-    /// Apple documents the sandbox's original purchase date as a fixed
-    /// 2013-08-01. Trusted, it would expire every tester's trial at launch.
-    @Test func sandboxDateIsIgnored() {
-        let sandbox = Date(timeIntervalSince1970: 1_375_340_400)
-        let decision = Licensing.trialStart(
-            stored: now - day, appStore: sandbox,
-            appStoreIsProduction: false, now: now)
-        #expect(decision == .init(start: now - day, anchor: .local))
-    }
-
-    @Test func futureStoreDateIsIgnored() {
-        let decision = Licensing.trialStart(
-            stored: now - day, appStore: now + day,
-            appStoreIsProduction: true, now: now)
-        #expect(decision == .init(start: now - day, anchor: .local))
-    }
-
-    /// No stamp yet and nothing from the store: the trial starts now, on
-    /// this Mac — the first-launch case before the Keychain write lands.
-    @Test func nothingKnownStartsNow() {
-        let decision = Licensing.trialStart(
-            stored: nil, appStore: nil, appStoreIsProduction: true, now: now)
+    /// Start Free Trial with the store unreachable: the press is the start.
+    @Test func localStampAloneStarts() {
+        let decision = Licensing.trialStart(stored: now, trialTransaction: nil, now: now)
         #expect(decision == .init(start: now, anchor: .local))
     }
 
-    /// The store build's product id is a fixed string that must match App
-    /// Store Connect and `InboxAndChill.storekit` by hand; pinning it here
+    /// The $0 trial transaction arriving on a Mac with no stamp — a
+    /// reinstall, or a second Mac on the same Apple Account — starts the
+    /// clock where the App Store says it started.
+    @Test func storeTransactionAloneStarts() {
+        let decision = Licensing.trialStart(
+            stored: nil, trialTransaction: now - 5 * day, now: now)
+        #expect(decision == .init(start: now - 5 * day, anchor: .appStore))
+    }
+
+    /// Both known: the earliest credible date wins, either way round.
+    @Test func earliestWins() {
+        #expect(
+            Licensing.trialStart(stored: now - 2 * day, trialTransaction: now - 10 * day, now: now)
+                == .init(start: now - 10 * day, anchor: .appStore))
+        #expect(
+            Licensing.trialStart(stored: now - 10 * day, trialTransaction: now - 2 * day, now: now)
+                == .init(start: now - 10 * day, anchor: .local))
+    }
+
+    /// A date ahead of the clock is clock weirdness, not owed time — a
+    /// future transaction is ignored, a future stamp is clamped to now.
+    @Test func futureDatesAreNotTrusted() {
+        #expect(
+            Licensing.trialStart(stored: now - day, trialTransaction: now + day, now: now)
+                == .init(start: now - day, anchor: .local))
+        #expect(
+            Licensing.trialStart(stored: now + day, trialTransaction: nil, now: now)
+                == .init(start: now, anchor: .local))
+    }
+
+    /// The store build's product ids are fixed strings that must match App
+    /// Store Connect and `InboxAndChill.storekit` by hand; pinning them here
     /// makes a rename a deliberate act.
-    @Test func productIDIsStable() {
+    @Test func productIDsAreStable() {
         #expect(Licensing.appStoreProductID == "lol.bgreen.inboxandchill.unlock")
+        #expect(Licensing.trialProductID == "lol.bgreen.inboxandchill.trial")
     }
 }
 
@@ -196,6 +215,16 @@ struct TrialDisclosureTests {
         let text = FirstRun.trialDisclosure(price: nil)
         #expect(text.contains("one-time purchase"))
         #expect(!text.contains("nil"))
+    }
+
+    /// Screen two of the welcome: names the end day when it has one, and
+    /// still reads as a sentence for the frame before the Keychain answers.
+    @Test func startedMessageNamesTheEndDay() {
+        let ends = Date(timeIntervalSince1970: 1_800_000_000)
+        let text = FirstRun.trialStartedMessage(endsAt: ends)
+        #expect(text.hasPrefix("Everything is on until "))
+        #expect(text.hasSuffix("Now connect a source."))
+        #expect(FirstRun.trialStartedMessage(endsAt: nil).contains("\(Licensing.trialDays) days"))
     }
 }
 

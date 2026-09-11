@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// Purchase state, the Buy button and Restore — the store build's answer to
-/// the direct build's `LicenseSection`. The trial itself needs no controls;
-/// this is where its state is always readable and where the one purchase
-/// happens. Restore is required by guideline 3.1.1 and is the only control
+/// Purchase state, Start Free Trial, the Buy button and Restore — the store
+/// build's answer to the direct build's `LicenseSection`. This is where the
+/// trial's state is always readable and where the one purchase happens. Restore is required by guideline 3.1.1 and is the only control
 /// here that shows a sign-in sheet.
 struct PurchaseSection: View {
     @Environment(AppState.self) private var appState
@@ -14,12 +13,20 @@ struct PurchaseSection: View {
         Section("Purchase") {
             stateLine
 
+            if license.canStartTrial {
+                LabeledContent("Free trial") {
+                    Button(FirstRun.startTrialButton) {
+                        Task { await license.startTrial() }
+                    }
+                    .disabled(license.isPurchasing)
+                }
+            }
             if license.state != .licensed {
                 LabeledContent("One-time purchase") {
                     Button(buyLabel) {
                         Task { await license.purchase() }
                     }
-                    .disabled(license.product == nil || license.isPurchasing)
+                    .disabled(license.unlockProduct == nil || license.isPurchasing)
                 }
                 LabeledContent("Bought it already?") {
                     Button("Restore Purchase") {
@@ -71,6 +78,14 @@ struct PurchaseSection: View {
             LabeledContent("Status") {
                 Text("Purchased — thank you")
             }
+        case .notStarted:
+            LabeledContent("Status") {
+                Text("Free trial not started — syncing is paused")
+                    .foregroundStyle(.orange)
+            }
+            Text(FirstRun.trialDisclosure(price: license.priceLabel))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         case .trialing(let daysLeft):
             LabeledContent("Status") {
                 Text("Free trial — ^[\(daysLeft) day](inflect: true) left")

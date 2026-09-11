@@ -29,6 +29,15 @@ struct LicenseNotice: View {
 
     @ViewBuilder private var notice: some View {
         switch appState.license.state {
+        case .notStarted:
+            // Store build only: the user closed the welcome without pressing
+            // Start. Nothing syncs until they do, and this is where it says so.
+            bar(background: .orange.opacity(0.08), showsPurchase: false) {
+                Text("Your free trial hasn't started yet, so nothing is syncing. Start it whenever you're ready — \(Licensing.trialDays) days, then a one-time purchase.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         case .expired:
             bar(background: .red.opacity(0.08)) {
                 Text(
@@ -50,12 +59,31 @@ struct LicenseNotice: View {
     }
 
     private func bar(
-        background: Color, @ViewBuilder message: () -> some View
+        background: Color, showsPurchase: Bool = true,
+        @ViewBuilder message: () -> some View
     ) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
                 message()
                 Spacer(minLength: 0)
+                if !showsPurchase {
+                    Button(FirstRun.startTrialButton) {
+                        Task { await appState.license.startTrial() }
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .disabled(appState.license.isPurchasing)
+                } else {
+                    purchaseButtons
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(background)
+            Divider()
+        }
+    }
+
+    @ViewBuilder private var purchaseButtons: some View {
                 #if !APP_STORE
                     if let url = Licensing.purchaseURL {
                         Link("Buy — \(Licensing.price)", destination: url)
@@ -89,11 +117,5 @@ struct LicenseNotice: View {
                     .font(.system(size: 11))
                     .disabled(appState.license.isPurchasing)
                 #endif
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(background)
-            Divider()
-        }
     }
 }

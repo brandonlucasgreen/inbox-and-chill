@@ -365,7 +365,11 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   direct target in `project.yml`). Same class name, same surface, so the
   shared files carry no `#if` for it. `Licensing.isEnforced` is `true`
   only under `APP_STORE`; the direct build's mechanic is still off and
-  flipping it is still Brandon's call. `scripts/verify-bundle.sh
+  flipping it is still Brandon's call. **The store trial starts on a
+  press, not on launch** — `LicenseState.notStarted` pauses syncing and
+  the welcome's first screen, the notice bar and Settings all carry Start
+  Free Trial, which buys the $0 "14-day Trial" product and falls back to a
+  local Keychain stamp when it cannot (Brandon, 2026-09-10). `scripts/verify-bundle.sh
   --app-store` fails if the store binary lacks the product id literal or
   contains "Enter License Key".
   `UpdateController` is the other shape — one file, Sparkle behind

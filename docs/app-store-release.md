@@ -16,18 +16,23 @@ holds the decision.
   one-time purchase.** Brandon's pick (2026-09-09): $15. Apple's USD price
   points include both $14.99 and $15.00 — pick in App Store Connect; the app
   never hard-codes a price, it shows StoreKit's `displayPrice`.
-- **The trial is implicit — it starts on first launch, with no "start
-  trial" step.** Guideline 3.1.1 describes a different mechanism: a $0
-  non-consumable named "14-day Trial" the user "buys" to begin. That puts a
-  purchase sheet and an Apple Account prompt in front of a menu bar app's
-  first minute, which is the moment `FirstRun` exists to protect. Implicit
-  trials anchored on the App Store's own download date are common and
-  usually pass; **a strict reviewer may still ask for the $0 product**, and
-  if one does the change is small: create the product, add a "Start Trial"
-  button that purchases it, and stamp the clock from that transaction
-  instead of from launch. The disclosure 3.1.1 *does* require before any
-  trial — duration, what stops, what it costs — is on the welcome window
-  and the in-queue welcome (`FirstRun.trialDisclosure`).
+- **The trial starts when the user presses Start Free Trial — on the
+  welcome window's first screen, never on launch.** Brandon's call
+  (2026-09-10): *"we should not automatically start the trial on first
+  open, but rather include an explicit 'start trial' CTA on the welcome
+  popup, and shift the 'add your first source' CTA to a second screen which
+  confirms the trial has started. This feels much more user-friendly and
+  standard."* It is also exactly the mechanism guideline 3.1.1 prescribes:
+  the button buys a **$0 non-consumable named "14-day Trial"**, whose
+  purchase date becomes the trial clock's server-signed anchor. **The
+  press always starts the trial**, though: if the $0 purchase cannot happen
+  — offline, the sheet cancelled, a build that never met the store — the
+  clock starts from a local Keychain stamp instead, because a person who
+  pressed Start must never be left with a paused app. Until the press the
+  app is `.notStarted`: nothing syncs, and the notice bar, the in-queue
+  welcome and Settings › General all say so and carry the same button. The
+  3.1.1 disclosure — duration, what stops, what it costs — sits directly
+  above the button (`FirstRun.trialDisclosure`).
 - **What "expired" means is unchanged from the direct build**: syncing
   pauses, loudly (`LicenseNotice` in the panel and main window, red); the
   queue, archive, triage and settings all keep working. Nothing is deleted.
@@ -68,22 +73,27 @@ Each step needs the one before it. Times are Apple's, not ours.
      page exists yet** (the pre-release audit of 2026-09-04 found no `site/`
      and no privacy text anywhere in the repo). Two short pages on
      bgreen.lol; the copy PLAN §2.1.9/§2.1.11 settled applies.
-5. **The in-app purchase** — the app record › Monetization › In-App
-   Purchases › + › **Non-Consumable**.
-   - Reference name: `Full unlock` (internal only).
-   - **Product ID: `lol.bgreen.inboxandchill.unlock`, exactly.** It is
-     `Licensing.appStoreProductID` in the binary and `productID` in
-     `InboxAndChill.storekit`; a mismatch loads no product, the Buy button
-     stays disabled, and Settings › General says which id it asked for.
-   - Price: the $14.99 or $15.00 USD point; let Apple derive the others.
-   - Localization (en-US): display name `Unlock Inbox & Chill`; description
-     `Keeps syncing after the 14-day trial. One purchase, yours for good.`
-   - **Review screenshot**: a picture of Settings › General with the
-     Purchase section showing. Required before the product can be
+5. **The two in-app purchases** — the app record › Monetization › In-App
+   Purchases › + › **Non-Consumable**, twice. Both ids are in the binary
+   (`Licensing.appStoreProductID`, `Licensing.trialProductID`) and in
+   `InboxAndChill.storekit`; a mismatch loads no product and Settings ›
+   General names the id it asked for.
+   - **The unlock.** Reference name `Full unlock`; **Product ID
+     `lol.bgreen.inboxandchill.unlock`, exactly**; price the $14.99 or
+     $15.00 USD point, let Apple derive the others; en-US display name
+     `Unlock Inbox & Chill`, description `Keeps syncing after the 14-day
+     trial. One purchase, yours for good.`
+   - **The trial.** Reference name `14-day Trial`; **Product ID
+     `lol.bgreen.inboxandchill.trial`, exactly**; **price: the free tier
+     (Price Tier 0 / $0.00)**; en-US display name **`14-day Trial`** — the
+     naming convention 3.1.1 spells out — description `Try everything free
+     for 14 days. Nothing is charged.`
+   - **Review screenshots**, one per product: Settings › General with the
+     Purchase section showing serves both. Required before a product can be
      submitted; the reviewer sees it, customers do not.
-   - Leave it in *Ready to Submit* and tick it on the version page (step 7,
-     "In-App Purchases and Subscriptions") so it reviews with the app.
-     A product cannot be approved on its own before the first app version.
+   - Leave both in *Ready to Submit* and tick both on the version page
+     (step 7, "In-App Purchases and Subscriptions") so they review with the
+     app. A product cannot be approved on its own before the first version.
 6. **Archive and upload** — bump `MARKETING_VERSION` (the pending 1.0.0
    bump is the natural moment) and `CURRENT_PROJECT_VERSION` on `main`, then
    in Xcode: scheme **InboxAndChill-AppStore**, Product › Archive, Window ›
@@ -135,17 +145,18 @@ and the nudge compile once against whichever is present. The logic that
 decides anything is in `Licensing` and tested from the direct target, because
 the tests never run against the store target (CLAUDE.md rule 6).
 
-- **The trial clock.** First launch stamps `license.trialStartedAt` in the
-  Keychain (survives deleting the app). Then `AppTransaction.shared` is
-  asked for the App Store's `originalPurchaseDate` — the day this Apple
-  Account first downloaded the app, signed by Apple, surviving even a wiped
-  Keychain. `Licensing.trialStart` takes the **earliest credible** of the
-  two: never later, never a date in the future, and **never a
-  non-production date**, because Apple documents the sandbox's original
-  purchase date as a fixed 2013-08-01 (so TestFlight and Xcode runs trial
-  from the local stamp). `AppTransaction.shared` throws rather than
-  prompting when the app has no receipt; `refresh()` would prompt and is
-  never called.
+- **The trial clock.** Launch stamps nothing: with no start date the
+  state is `.notStarted` and syncing is paused. **Start Free Trial** buys
+  the $0 trial product and writes `license.trialStartedAt` to the Keychain
+  (survives deleting the app) from the transaction's `purchaseDate`, or
+  from `now` when the purchase could not happen. `Licensing.trialStart`
+  takes the **earliest credible** of the stamp and any trial transaction
+  StoreKit reports — never later, never a date in the future — so a trial
+  begun on another Mac with the same Apple Account shortens this one to
+  match when Restore or the entitlements bring the transaction in.
+  A transaction's `purchaseDate` is real in the sandbox (unlike
+  `AppTransaction.originalPurchaseDate`, a fixed 2013-08-01 there, which is
+  why that API is no longer used).
 - **The purchase.** `Product.products(for:)` loads the one product;
   `product.purchase()` shows StoreKit's sheet; a verified transaction is
   finished and remembered as `license.appStoreUnlocked` in the Keychain.
@@ -174,18 +185,18 @@ the tests never run against the store target (CLAUDE.md rule 6).
   Xcode**; if Xcode rejects it, recreate it via File › New › StoreKit
   Configuration File with the same product id.
 - **Outside Xcode** (`scripts/build-app-store.sh --launch`): there is no
-  store to talk to. Measured 2026-09-09 on a fresh launch of the Release
-  store build from `build/AppStore`, Developer ID signed, sandboxed:
-  `trial started on this Mac` (the Keychain write succeeded under the
-  sandbox) → `license state resolved: trialing(daysLeft: 14)` →
-  `app transaction unavailable, trial stays on this Mac's stamp: unknown`
-  (`StoreKitError.unknown`, 0.6 s after launch, no prompt) → `store product
-  not found` 3 s later: **`Product.products(for:)` returns an empty list
-  here rather than throwing**, so Settings shows the "has no product … for
-  this app yet" line naming the id, not the unreachable one, and the Buy
-  button in the notice bar leads to Settings. That wording is aimed at a
-  customer whose App Store Connect product is missing; on a local build it
-  is simply the expected state.
+  store to talk to. Measured 2026-09-09 on the first build of this (the
+  launch-stamping version): a sandboxed Keychain write succeeded (`trial
+  started on this Mac`), and **`Product.products(for:)` returned an empty
+  list rather than throwing**, so Settings shows the "has no product … for
+  this app yet" line naming the id and the Buy button in the notice bar
+  leads to Settings. That wording is aimed at a customer whose App Store
+  Connect product is missing; on a local build it is the expected state.
+  With the explicit start, expect the launch to log `license state
+  resolved: notStarted`, and a press of Start Free Trial to log `trial
+  product not loaded; starting locally` then `trial started, anchored to
+  this Mac` — the fallback path, which is the only one a build outside
+  Xcode can take.
 - **Resetting the trial on this Mac** (both builds share the Keychain
   service, but only the store build writes these):
 
@@ -206,12 +217,13 @@ the tests never run against the store target (CLAUDE.md rule 6).
 - **The purchase against Apple's servers.** Needs steps 1–7. Nothing here
   has met StoreKit's real sheet; the code follows the StoreKit 2 API
   contract and Apple's documentation, no more.
-- **`AppTransaction.shared` on a store-installed build** returning the
-  download date, and not prompting. Documentation says it throws when
-  unavailable and that `refresh()` is the one that prompts; the first
-  TestFlight install is the test — the log's `trial anchored to …` line
-  says which clock won.
+- **The $0 trial purchase against Apple's servers**, and its
+  `purchaseDate` arriving through `Transaction.currentEntitlements` on a
+  second Mac. The first TestFlight install is the test — the log's `trial
+  started, anchored to …` line says which clock won.
+- **The welcome window resizing between its two screens.** They differ by
+  a line or two; `NSHostingController` should track the preferred size, but
+  nothing here has rendered it.
 - **The `.storekit` file opening cleanly in Xcode** (hand-written JSON).
-- **Review's reading of the implicit trial** (§1).
 - **App name availability**, and whether Apple's USD price list offers
   $15.00 or only $14.99.

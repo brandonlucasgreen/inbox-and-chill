@@ -324,17 +324,19 @@ else
       bad "strings: \"$LITERAL\" appears $HITS time(s) — a cut feature is compiled into the store build"
     fi
   done
-  # The strong direction. The StoreKit product id is a 31-byte ASCII literal
-  # (Licensing.appStoreProductID), so zero hits means the purchase path is
-  # not in this binary and the store build has no way to be bought. It must
-  # match the product created in App Store Connect by hand.
-  PRODUCT_ID="lol.bgreen.inboxandchill.unlock"
-  HITS=$(strings -a "$BINARY" | grep -c "$PRODUCT_ID" || true)
-  if [ "$HITS" = "0" ]; then
-    bad "strings: StoreKit product id \"$PRODUCT_ID\" absent — Licensing/AppStore is not compiled into the store build"
-  else
-    note "strings: StoreKit product id present ($HITS)"
-  fi
+  # The strong direction. The two StoreKit product ids are >15-byte ASCII
+  # literals (Licensing.appStoreProductID / trialProductID), so zero hits
+  # means the purchase path is not in this binary and the store build has no
+  # way to be bought. Each must match a product created in App Store Connect
+  # by hand.
+  for PRODUCT_ID in "lol.bgreen.inboxandchill.unlock" "lol.bgreen.inboxandchill.trial"; do
+    HITS=$(strings -a "$BINARY" | grep -c "$PRODUCT_ID" || true)
+    if [ "$HITS" = "0" ]; then
+      bad "strings: StoreKit product id \"$PRODUCT_ID\" absent — Licensing/AppStore is not compiled into the store build"
+    else
+      note "strings: StoreKit product id \"$PRODUCT_ID\" present ($HITS)"
+    fi
+  done
 fi
 
 # --- Signature integrity --------------------------------------------------
