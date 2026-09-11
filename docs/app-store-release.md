@@ -41,6 +41,11 @@ holds the decision.
 
 ## 2. Paperwork, in dependency order (Brandon, on the Mac)
 
+**Done 2026-09-11:** Paid Apps agreement active; App ID registered; the
+App Store Connect record exists — **Apple ID 6811077932**, store URL
+`https://apps.apple.com/app/id6811077932` (404 until the version is
+released). The website's launch PR carries that link.
+
 Each step needs the one before it. Times are Apple's, not ours.
 
 1. **Agreements, Tax, and Banking** — App Store Connect › Business. Sign the
