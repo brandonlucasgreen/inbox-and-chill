@@ -2,18 +2,14 @@ import Foundation
 import OSLog
 import UserNotifications
 
-#if !APP_STORE
-
 /// `AppState`'s side of licensing: how the trial gates syncing, and the two
 /// system banners the trial sends on its way out.
 ///
-/// Lives in `Licensing/` rather than in `AppState.swift` so the rest of the
-/// folder can be left out of the App Store build, where a license key is a
-/// rejection (guideline 2.4.5(vi); see `docs/app-store-plan.md`). This one
-/// file is compiled into **both** targets: the `#else` branch below is the
-/// store build's version of the three things `AppState` calls, so those call
-/// sites compile unchanged. `AppState` keeps only the stored `license`
-/// property, which an extension cannot hold, and that one is flagged.
+/// Compiled into **both** targets against whichever `LicenseController` the
+/// target has — `LemonSqueezy/` in the direct build, `AppStore/` in the
+/// store build (`docs/app-store-release.md`). Both expose the same `state`,
+/// `priceLabel` and callbacks, which is all this file reads. `AppState`
+/// keeps only the stored `license` property, which an extension cannot hold.
 extension AppState {
     /// Wires the controller's callbacks. Called once from `AppState.init`,
     /// after `engine` exists.
@@ -71,7 +67,7 @@ extension AppState {
         guard await resolveBannerAuthorization(prompting: false) else { return }
         let content = UNMutableNotificationContent()
         content.title = TrialNudge.title(daysLeft: daysLeft)
-        content.body = TrialNudge.body
+        content.body = TrialNudge.body(price: license.priceLabel)
         content.userInfo = ["panel": true]
         do {
             try await UNUserNotificationCenter.current().add(
@@ -87,16 +83,49 @@ extension AppState {
     private static let licenseLog = AppLog.logger(.license)
 }
 
-#else
+/// The two banners the trial sends on its way out, once each.
+///
+/// `LicenseNotice` already shows a countdown bar in the panel for the last
+/// three days, but only to someone who opens the panel. A banner reaches the
+/// person who has not — which, near the end of a trial, is the person about
+/// to be surprised by paused syncing. Pure, so the thresholds and the
+/// once-only rule are tested without a notification center.
+enum TrialNudge {
+    /// Days-left values at which a banner is due.
+    static let thresholds = [3, 1]
+    static let sentKey = "license.nudgesSent"
 
-/// The App Store build has no trial and no license key — the store is the
-/// checkout (guideline 3.1.1), and a key of our own is a 2.4.5(vi) rejection.
-/// Syncing is always allowed, and the two calls `AppState.init` makes are
-/// no-ops with the same names.
-extension AppState {
-    func configureLicensing() {}
-    var syncAllowedByLicense: Bool { true }
-    func replayLicenseEvaluation() async {}
+    /// The banner to send now, or nil. The *smallest* matching threshold, so
+    /// a trial first noticed at one day left sends one banner, not two.
+    nonisolated static func due(daysLeft: Int, sent: Set<Int>) -> Int? {
+        thresholds.filter { daysLeft <= $0 && !sent.contains($0) }.min()
+    }
+
+    /// Everything at or above today's mark counts as sent, so the three-day
+    /// banner is not delivered the day after the one-day banner.
+    nonisolated static func markSent(daysLeft: Int, sent: Set<Int>) -> Set<Int> {
+        sent.union(thresholds.filter { daysLeft <= $0 })
+    }
+
+    nonisolated static func title(daysLeft: Int) -> String {
+        switch daysLeft {
+        case ...0: return "Inbox & Chill trial ends today"
+        case 1: return "Inbox & Chill trial — 1 day left"
+        default: return "Inbox & Chill trial — \(daysLeft) days left"
+        }
+    }
+
+    /// The price comes from the controller (StoreKit's localised
+    /// `displayPrice` in the store build, the one constant in the direct
+    /// build) and may not have loaded yet, so the sentence works without it.
+    nonisolated static func body(price: String?) -> String {
+        let cost = price.map { "buy the app (\($0))" } ?? "buy the app"
+        #if !APP_STORE
+            return
+                "After that, syncing pauses until you \(cost) or enter a key. Your queue and settings stay put."
+        #else
+            return
+                "After that, syncing pauses until you \(cost). Your queue and settings stay put."
+        #endif
+    }
 }
-
-#endif

@@ -55,7 +55,11 @@ targets:
         # The fonts go in as a *folder reference* below, so ATSApplicationFontsPath
         # can name the directory; left in the group they would be copied flat
         # into Resources/ and the plist key would point at nothing.
-        excludes: ["Resources/Fonts"]
+        #
+        # Licensing/AppStore is the store build's StoreKit checkout; it
+        # defines a LicenseController like Licensing/LemonSqueezy does, so a
+        # target compiles exactly one of the two folders.
+        excludes: ["Resources/Fonts", "Licensing/AppStore"]
       - path: Sources/App/Resources/Fonts
         type: folder
     dependencies:
@@ -297,17 +301,18 @@ targets:
       - path: Sources/App
         excludes:
           - "Resources/Fonts"
-          # The four features the sandbox cannot have. Each folder is
-          # excluded whole so a file added to it later is left out
-          # automatically; the two AppState extension files are added back
-          # below because they carry the `#else` no-op stubs AppState's
-          # call sites compile against.
+          # The features the sandbox cannot have. Each folder is excluded
+          # whole so a file added to it later is left out automatically; the
+          # journal's AppState extension file is added back below because
+          # it carries the `#else` no-op stubs AppState's call sites compile
+          # against. Licensing is NOT cut: the shared trial code compiles
+          # here too, and Licensing/AppStore supplies the StoreKit
+          # LicenseController where the direct build has Lemon Squeezy's.
           - "Connectors/Local"      # inchill listener, agent hooks, session jump
           - "Connectors/Mail"       # AppleScript into Mail: compose-only under the sandbox
           - "Journal"               # user-typed vault path; iCloud needs Full Disk Access
-          - "Licensing"             # license keys are a 2.4.5(vi) rejection
+          - "Licensing/LemonSqueezy" # license keys are a 2.4.5(vi) rejection; the store is the checkout
       - path: Sources/App/Journal/AppState+Journal.swift
-      - path: Sources/App/Licensing/AppState+License.swift
       - path: Sources/App/Resources/Fonts
         type: folder
     dependencies:
@@ -387,3 +392,11 @@ schemes:
     build:
       targets:
         InboxAndChill-AppStore: all
+    run:
+      # Running the store scheme from Xcode uses this local StoreKit
+      # configuration, so the trial and the purchase can be exercised with
+      # no App Store Connect record: the product loads, Buy shows Xcode's
+      # sheet, Debug › StoreKit lets you refund it. Outside Xcode
+      # (scripts/build-app-store.sh) there is no store to talk to and the
+      # product never loads — Settings says so. docs/app-store-release.md.
+      storeKitConfiguration: InboxAndChill.storekit

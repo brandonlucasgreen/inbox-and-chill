@@ -12,12 +12,11 @@ import UserNotifications
 final class AppState {
     let container: ModelContainer
     let store: Store
-    #if !APP_STORE
     /// Stored here because a stored property cannot live in an extension;
     /// everything else about licensing is in `Licensing/AppState+License.swift`.
-    /// Absent from the App Store build, where the store is the checkout.
+    /// One class of this name per build: Lemon Squeezy in the direct build,
+    /// StoreKit in the App Store build (`Licensing/LemonSqueezy`, `Licensing/AppStore`).
     let license: LicenseController
-    #endif
     private(set) var engine: SyncEngine!
 
     /// Bumped whenever the queue changes so views can re-query.
@@ -170,9 +169,7 @@ final class AppState {
             fatalError("Cannot open store: \(error)")
         }
         store = Store(modelContainer: container)
-        #if !APP_STORE
         license = LicenseController()
-        #endif
         wantsWelcomeWindow = Self.decideWelcomeWindow(container: container)
         engine = SyncEngine(store: store) { [weak self] change in
             Task { @MainActor in self?.handle(change) }
@@ -307,7 +304,7 @@ final class AppState {
         // An ended trial pauses syncing — loudly, in the panel and Settings
         // (`LicenseNotice`) — and gates nothing else: the queue, the archive
         // and every triage action keep working on what's already here.
-        // Always true in the App Store build.
+        // Always true while `Licensing.isEnforced` is off (the direct build).
         guard syncAllowedByLicense else { return }
         let configs =
             (try? container.mainContext.fetch(FetchDescriptor<SourceConfig>()))

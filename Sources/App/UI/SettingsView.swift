@@ -11,7 +11,7 @@ import SwiftUI
 /// than in General — and Diagnostics is what broke, which belongs next to the
 /// sources whose failures it records rather than buried in About.
 ///
-/// **Four tabs in the App Store build.** Without Updates, License and the
+/// **Four tabs in the App Store build.** Without Updates and the
 /// journal, General and Notifications each held two small sections, and
 /// neither justified a page (Brandon, 2026-09-09); there the badge and banner
 /// sections live inside General and the Notifications tab is gone. The
@@ -91,6 +91,11 @@ struct GeneralPane: View {
                 LicenseSection()
             }
             #else
+            // The store is the checkout: trial state, Buy and Restore. Always
+            // shown, since `Licensing.isEnforced` is always on in this build.
+            if Licensing.isEnforced {
+                PurchaseSection()
+            }
             // The store build has no Notifications tab; its two sections
             // sit here instead. See the shell's doc comment.
             NotificationSections()

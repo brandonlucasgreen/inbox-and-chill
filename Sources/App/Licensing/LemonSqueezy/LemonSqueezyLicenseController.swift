@@ -1,9 +1,11 @@
 import Foundation
 import OSLog
 
-/// Owns the trial clock and the Lemon Squeezy license: reads and writes the
-/// Keychain, talks to the License API, and publishes one `LicenseState` for
-/// the UI plus a callback for `AppState` to start or stop syncing on.
+/// The **direct build's** `LicenseController`: owns the trial clock and the
+/// Lemon Squeezy license — reads and writes the Keychain, talks to the
+/// License API, and publishes one `LicenseState` for the UI plus a callback
+/// for `AppState` to start or stop syncing on. The store build compiles
+/// `AppStore/StoreKitLicenseController.swift` under the same name instead.
 ///
 /// The math and the response parsing live in `Licensing`/`LemonSqueezy`
 /// (pure, tested); this class is the I/O around them.
@@ -20,6 +22,9 @@ final class LicenseController {
     /// Red text for Settings — activation and validation problems, in words.
     private(set) var problem: String?
     private(set) var isActivating = false
+    /// The store controller's name for the same busy state; the shared
+    /// notice bar disables its buttons on it.
+    var isPurchasing: Bool { isActivating }
     /// Fired when `state.allowsSync` flips: activation mid-run, or the trial
     /// running out under a live app (a menu bar app runs for weeks, so
     /// launch-time checks alone would miss the transition by days).
@@ -27,6 +32,24 @@ final class LicenseController {
     /// Fired on every evaluation, changed or not — the trial nudges key off
     /// the day count, which changes without `allowsSync` flipping.
     var onStateEvaluated: ((LicenseState) -> Void)?
+
+    /// What a purchase costs, for the notice bar and the trial nudge. The
+    /// store build reads this off StoreKit; here it is the one constant.
+    var priceLabel: String? { Licensing.price }
+
+    /// The store build's explicit start. Here the trial starts on first
+    /// launch (see `init`), so there is never anything to start and the
+    /// shared welcome and notice bar never reach the button.
+    var canStartTrial: Bool { false }
+    func startTrial() async {}
+
+    /// When the running trial ends; nil outside a trial.
+    var trialEndsAt: Date? {
+        guard case .trialing = state,
+            let start = Licensing.decodeDate(Keychain.get(Licensing.trialStartKey))
+        else { return nil }
+        return Licensing.trialEnd(start: start)
+    }
 
     /// Last four characters of the stored key, for the Settings state line.
     var keySuffix: String? {
@@ -56,7 +79,7 @@ final class LicenseController {
     private static let log = AppLog.logger(.license)
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        forcedState = Self.forced(from: environment)
+        forcedState = Licensing.forcedState(from: environment)
         if let forcedState {
             state = forcedState
             return
@@ -279,24 +302,5 @@ final class LicenseController {
 
     private static func unreachable(_ error: Error) -> String {
         "Couldn't reach Lemon Squeezy — check your connection and try again. (\(error.localizedDescription))"
-    }
-
-    private static func forced(from environment: [String: String])
-        -> LicenseState?
-    {
-        #if DEBUG
-            switch environment["INCHILL_LICENSE_STATE"] {
-            case "licensed": return .licensed
-            case "expired": return .expired
-            case .some(let value) where value.hasPrefix("trialing"):
-                let days = value.split(separator: ":").last.flatMap {
-                    Int($0)
-                }
-                return .trialing(daysLeft: days ?? Licensing.trialDays)
-            default: return nil
-            }
-        #else
-            return nil
-        #endif
     }
 }

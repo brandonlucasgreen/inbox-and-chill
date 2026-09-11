@@ -153,4 +153,7 @@ defaults delete lol.bgreen.inboxandchill 2>/dev/null
 ```
 
 Keychain items live under service `lol.bgreen.inboxandchill` in Keychain
-Access if you want to purge tokens too.
+Access if you want to purge tokens too. The **store build's** trial clock and
+purchase memo are two of them (`license.trialStartedAt`,
+`license.appStoreUnlocked`); `docs/app-store-release.md` has the two
+`security delete-generic-password` lines that reset just those.

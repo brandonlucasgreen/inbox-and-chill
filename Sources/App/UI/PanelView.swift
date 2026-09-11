@@ -82,9 +82,7 @@ struct PanelView: View {
                 queueList(queue)
             }
             Divider()
-            #if !APP_STORE
             LicenseNotice()
-            #endif
             if KeyboardHints.shouldShow(
                 opensSoFar: keyHintOpens, dismissed: keyHintsDismissed,
                 queueIsEmpty: queue.visibleUIDs.isEmpty)

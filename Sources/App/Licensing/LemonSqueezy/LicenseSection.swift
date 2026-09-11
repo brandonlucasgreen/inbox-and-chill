@@ -88,6 +88,12 @@ struct LicenseSection: View {
             LabeledContent("Status") {
                 Text("Free trial — ^[\(daysLeft) day](inflect: true) left")
             }
+        case .notStarted:
+            // Only the store build's controller produces this; here the
+            // trial starts on first launch, so this reads as a fresh one.
+            LabeledContent("Status") {
+                Text("Free trial — \(Licensing.trialDays) days")
+            }
         case .expired:
             LabeledContent("Status") {
                 Text("Trial ended — syncing is paused")

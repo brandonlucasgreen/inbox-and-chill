@@ -1,0 +1,50 @@
+{
+  "identifier": "9D0C3E1A-5F0B-4C7E-9A2B-1E6D8B4F2A10",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "14.99",
+      "familyShareable": false,
+      "internalID": "9D0C3E1A-5F0B-4C7E-9A2B-1E6D8B4F2A11",
+      "localizations": [
+        {
+          "description": "Keeps syncing after the 14-day trial. One purchase, yours for good.",
+          "displayName": "Unlock Inbox & Chill",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "lol.bgreen.inboxandchill.unlock",
+      "referenceName": "Full unlock",
+      "type": "NonConsumable"
+    },
+    {
+      "displayPrice": "0.00",
+      "familyShareable": false,
+      "internalID": "9D0C3E1A-5F0B-4C7E-9A2B-1E6D8B4F2A12",
+      "localizations": [
+        {
+          "description": "Try everything free for 14 days. Nothing is charged.",
+          "displayName": "14-day Trial",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "lol.bgreen.inboxandchill.trial",
+      "referenceName": "14-day Trial",
+      "type": "NonConsumable"
+    }
+  ],
+  "settings": {
+    "_applicationInternalID": "",
+    "_developerTeamID": "CV926C8KS8",
+    "_failTransactionsEnabled": false,
+    "_lastSynchronizedDate": 0,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
+  },
+  "subscriptionGroups": [],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

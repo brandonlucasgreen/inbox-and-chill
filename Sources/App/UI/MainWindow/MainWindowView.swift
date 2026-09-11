@@ -101,9 +101,7 @@ struct MainWindowView: View {
             .toolbar(id: "mainWindow") { toolbarContent }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    #if !APP_STORE
                     LicenseNotice()
-                    #endif
                     statusBar
                 }
             }
