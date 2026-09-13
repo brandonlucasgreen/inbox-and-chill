@@ -46,10 +46,13 @@ Check Now on 2026-08-26. `UpdateController.checkInterval` is still 86,400 —
 once a day — so "no update came through" usually means the check has not run
 yet, not that the release is broken.
 
-**Still free.** `Licensing.isEnforced` is `false`, so a shipped build has no
-trial countdown, no expiry, and writes no trial start date. That is deliberate
-while the app is pre-release — flipping it is its own decision, not part of
-cutting a release. Do not flip it here.
+**The trial is live (since 2026-09-13).** `Licensing.isEnforced` is `true`, so
+a shipped build starts a 14-day trial on its first launch, shows the License
+section in Settings, and pauses syncing when the trial ends until a Lemon
+Squeezy key is activated. Every install that ran a build from before the flip
+has no trial start date in its Keychain yet, so the first enforced build it
+runs starts its 14 days then — nobody upgrades into an expired trial. Turning
+it off again is its own decision, not part of cutting a release.
 
 ---
 
