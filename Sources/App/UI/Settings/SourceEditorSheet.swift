@@ -139,18 +139,29 @@ struct SourceEditorSheet: View {
                     RemindersAccessSection()
                 }
 
-                if !descriptor.fields.isEmpty {
+                let unsectioned = descriptor.fields.filter { $0.section == nil }
+                if !unsectioned.isEmpty {
                     Section {
-                        ForEach(descriptor.fields) { field in
+                        ForEach(unsectioned) { field in
                             fieldRow(for: field)
                         }
                     } footer: {
                         // One home for this claim. Nine of the thirteen kinds
                         // used to end their note with their own wording of it.
+                        // It stays with the credentials: a field that opts
+                        // into its own section below is not what it describes.
                         if descriptor.fields.contains(where: \.isSecret) {
                             Text("Stored in your Keychain. Nothing leaves this Mac.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                ForEach(sectionedFieldGroups, id: \.title) { group in
+                    Section(group.title) {
+                        ForEach(group.fields) { field in
+                            fieldRow(for: field)
                         }
                     }
                 }
@@ -275,6 +286,25 @@ struct SourceEditorSheet: View {
     }
 
     // MARK: Generic fields
+
+    private struct FieldGroup {
+        var title: String
+        var fields: [ConnectorKindDescriptor.Field]
+    }
+
+    /// Fields that asked for a section of their own, grouped by title in the
+    /// order the titles first appear — `Dictionary(grouping:)` would order
+    /// them by hash, so the sections would shuffle between launches.
+    private var sectionedFieldGroups: [FieldGroup] {
+        var order: [String] = []
+        var byTitle: [String: [ConnectorKindDescriptor.Field]] = [:]
+        for field in descriptor.fields {
+            guard let title = field.section else { continue }
+            if byTitle[title] == nil { order.append(title) }
+            byTitle[title, default: []].append(field)
+        }
+        return order.map { FieldGroup(title: $0, fields: byTitle[$0] ?? []) }
+    }
 
     @ViewBuilder
     private func fieldRow(for field: ConnectorKindDescriptor.Field) -> some View {

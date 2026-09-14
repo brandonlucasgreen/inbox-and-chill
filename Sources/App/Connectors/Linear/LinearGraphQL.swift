@@ -111,6 +111,16 @@ struct LinearNotificationNode: Decodable, Sendable {
 
     var id: String = ""
     var type: String = ""
+    /// Linear's own `NotificationCategory` — `mentions`, `subscriptions`,
+    /// `feed` and so on. Drives the per-category checkboxes on the source.
+    ///
+    /// **Decoded as a `String`, never as a Swift enum, on purpose.** The
+    /// server type is non-null, but Linear adds values (the Priority Inbox
+    /// landed two weeks before this field was read); an enum would fail to
+    /// decode the first new one and take the whole poll — and so the whole
+    /// Linear queue — down with it. Optional for the same reason a missing
+    /// value must mean "keep": see `LinearConnector.keep(category:excluding:)`.
+    var category: String?
     var readAt: String?
     var snoozedUntilAt: String?
     var archivedAt: String?

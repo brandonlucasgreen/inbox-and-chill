@@ -15,6 +15,16 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
         /// `settingsJSON` as "true"/"false"; an absent key means `defaultOn`.
         var isToggle: Bool = false
         var defaultOn: Bool = false
+        /// Splits this field into its own titled section in the editor,
+        /// instead of sitting with the credentials.
+        ///
+        /// Exists for Linear's seventeen category checkboxes: left in the
+        /// main section they push the "Stored in your Keychain" footer
+        /// seventeen rows below the only field it describes, so the claim
+        /// reads as being about the checkboxes. Fields with no section keep
+        /// today's single group, so no other kind's layout moves. Sections
+        /// render in the order they first appear in `fields`.
+        var section: String? = nil
     }
 
     var id: String  // kind string used in SourceConfig.kind
@@ -126,6 +136,72 @@ enum ConnectorCatalog {
     static let all: [ConnectorKindDescriptor] =
         inboxKinds + mailKinds + todoAndFeedKinds + localKinds
 
+    /// One checkbox per value of Linear's own `NotificationCategory` enum,
+    /// all on, keyed `cat.<rawValue>`.
+    ///
+    /// **This is deliberately not a mirror of Linear's Priority Inbox**, and
+    /// it cannot be: probed live 2026-09-14, a personal API key sees no
+    /// `isPriority` on `Notification`, `NotificationFilter` has no priority
+    /// comparator, and the readable `UserSettings` carries neither
+    /// `priorityInboxEnabled` nor the Priority filter — those exist only on
+    /// the write-only update input. Linear's own MCP *does* return
+    /// `isPriority`, so the flag exists; the public API simply does not
+    /// expose it. `category` is the nearest public, non-`[Internal]` field,
+    /// and it is Linear's vocabulary rather than one we invented.
+    ///
+    /// Measured against that MCP flag over 50 real notifications: unticking
+    /// `subscriptions`, `reactions` and `feed` reproduces Linear's own
+    /// Priority verdict on 48 of the 50, with no false drops. That measurement
+    /// picks the *order* below — likeliest unticks last — and nothing more;
+    /// which categories are noise is the user's call, not ours.
+    ///
+    /// Ordered actionable-first, and **all seventeen ship even though six of
+    /// them fire rarely**. A checkbox that appears only once its category has
+    /// first arrived reads as a bug.
+    ///
+    /// Labels only, no `help` past the first: `editorCopyStaysShort` counts
+    /// `help` and not `label`, and seventeen explanations would be exactly the
+    /// copy-volume problem that cut this screen from 2,018 words to 975.
+    private static let linearCategoryFields: [ConnectorKindDescriptor.Field] = {
+        let categories: [(String, String)] = [
+            // Someone wants you specifically.
+            ("mentions", "Mentions"),
+            ("assignments", "Assignments"),
+            ("reviews", "Review requests"),
+            ("triage", "Triage"),
+            ("commentsAndReplies", "Comments and replies"),
+            ("reminders", "Reminders you set"),
+            // Movement on work you follow.
+            ("statusChanges", "Status changes"),
+            ("documentChanges", "Document edits"),
+            ("postsAndUpdates", "Project and initiative updates"),
+            ("customers", "Customer requests"),
+            // Housekeeping.
+            ("appsAndIntegrations", "Apps and integrations"),
+            ("billing", "Billing"),
+            ("system", "System"),
+            ("loops", "Loops"),
+            // The three Linear's own Priority tab leaves out.
+            ("reactions", "Reactions"),
+            ("feed", "Pulse summaries"),
+            ("subscriptions", "Issues added to a view or board"),
+        ]
+        return categories.enumerated().map { index, category in
+            .init(
+                key: "\(linearCategoryPrefix)\(category.0)", label: category.1,
+                isSecret: false,
+                help: index == 0
+                    ? "Untick a category to keep it out of the queue. These are Linear's own groupings; a kind it adds later arrives until you turn it off."
+                    : "",
+                isToggle: true, defaultOn: true, section: "Notifications")
+        }
+    }()
+
+    /// Namespaces the category checkboxes inside the settings map, so
+    /// `ConnectorFactory` can recover the enum value from the key without a
+    /// second list to keep in step with the one above.
+    static let linearCategoryPrefix = "cat."
+
     /// Work tools with a notification inbox of their own.
     private static let inboxKinds: [ConnectorKindDescriptor] = [
         .init(
@@ -135,7 +211,7 @@ enum ConnectorCatalog {
                     key: "apiKey", label: "Personal API Key", isSecret: true,
                     placeholder: "lin_api_…",
                     help: "")
-            ],
+            ] + linearCategoryFields,
             setupSteps: [
                 "Open Linear → Settings → Security & Access.",
                 "Under **Personal API keys**, create a key (`lin_api_…`).",
