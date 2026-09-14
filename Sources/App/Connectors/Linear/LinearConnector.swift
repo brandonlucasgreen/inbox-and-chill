@@ -14,8 +14,14 @@ actor LinearConnector: Connector {
 
     private static let endpoint = URL(string: "https://api.linear.app/graphql")!
 
-    init(sourceID: String) {
+    /// Categories the user has unticked in the source editor, as Linear's own
+    /// `NotificationCategory` raw values. Empty means everything comes through,
+    /// which is what a source configured before this existed resolves to.
+    private let excludedCategories: Set<String>
+
+    init(sourceID: String, excludedCategories: Set<String> = []) {
         self.sourceID = sourceID
+        self.excludedCategories = excludedCategories
     }
 
     enum LinearConnectorError: Error, LocalizedError, CustomStringConvertible, Sendable {
@@ -127,6 +133,7 @@ actor LinearConnector: Connector {
                 nodes {
                   id
                   type
+                  category
                   readAt
                   snoozedUntilAt
                   archivedAt
@@ -174,6 +181,7 @@ actor LinearConnector: Connector {
         let payload: LinearNotificationsPayload = try await execute(query)
         var nodes = payload.notifications.nodes
             .filter { $0.readAt == nil && $0.snoozedUntilAt == nil && $0.archivedAt == nil }
+            .filter { Self.keep(category: $0.category, excluding: excludedCategories) }
 
         let documents = await resolveDocuments(for: nodes)
         for index in nodes.indices {
@@ -631,6 +639,30 @@ actor LinearConnector: Connector {
         // Time-critical, on work that is already yours.
         "issueDue", "issueSlaBreached",
     ]
+
+    /// Whether a notification in `category` survives the source's per-category
+    /// checkboxes.
+    ///
+    /// **A drop-list, never an allow-list**, and the distinction is the whole
+    /// safety of the feature. A category we have no checkbox for — one Linear
+    /// ships next month — is *kept*, so the worst case is a row the user did
+    /// not expect rather than a silently emptier queue with nothing on screen
+    /// to explain it. Same reason a nil or blank `category` keeps the row.
+    ///
+    /// Deliberately **not** built on `isHighSignal`: measured over 50 real
+    /// notifications, that set agrees with Linear's own priority flag on 23 of
+    /// them and would hide 27 Linear calls priority — it is a stricter
+    /// "someone named me or handed me work" rule, and it stays the badge and
+    /// banner signal rather than becoming a filter.
+    ///
+    /// Unticking a category is safely reversible and costs no bookkeeping:
+    /// Linear declares `.remoteTruth`, so the excluded rows leave the snapshot
+    /// and archive with `doneReason == "remote"`, and re-ticking brings them
+    /// back through `Store.resurrectIfNeeded`.
+    nonisolated static func keep(category: String?, excluding excluded: Set<String>) -> Bool {
+        guard let category, !category.isEmpty else { return true }
+        return !excluded.contains(category)
+    }
 
     nonisolated static func isHighSignal(_ type: String) -> Bool {
         if highSignalTypes.contains(type) { return true }

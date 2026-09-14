@@ -3,6 +3,127 @@ import Testing
 
 @testable import InboxAndChill
 
+// MARK: - Per-category filtering (the Linear source's seventeen checkboxes)
+
+/// Linear's Priority Inbox is not reachable from a personal API key — probed
+/// live 2026-09-14 — so the source filters on `category`, Linear's own public
+/// enum, one checkbox per value. These pin the two rules that keep that safe.
+struct LinearCategoryFilterTests {
+    /// Linear's `NotificationCategory`, as published in its SDK schema on
+    /// 2026-09-09. Written out rather than derived from the catalog, so that
+    /// a checkbox quietly disappearing fails here instead of silently
+    /// becoming a category nobody can turn off.
+    private static let published: Set<String> = [
+        "appsAndIntegrations", "assignments", "billing", "commentsAndReplies",
+        "customers", "documentChanges", "feed", "loops", "mentions",
+        "postsAndUpdates", "reactions", "reminders", "reviews",
+        "statusChanges", "subscriptions", "system", "triage",
+    ]
+
+    private var categoryFields: [ConnectorKindDescriptor.Field] {
+        (ConnectorCatalog.descriptor(for: "linear")?.fields ?? [])
+            .filter { $0.key.hasPrefix(ConnectorCatalog.linearCategoryPrefix) }
+    }
+
+    // MARK: The filter itself
+
+    @Test func anUntickedCategoryIsDropped() {
+        #expect(!LinearConnector.keep(category: "subscriptions", excluding: ["subscriptions"]))
+        #expect(LinearConnector.keep(category: "mentions", excluding: ["subscriptions"]))
+    }
+
+    @Test func everythingSurvivesWhenNothingIsUnticked() {
+        for category in Self.published {
+            #expect(LinearConnector.keep(category: category, excluding: []))
+        }
+    }
+
+    /// The load-bearing one. A drop-list keeps what it does not recognise; an
+    /// allow-list would make a category Linear ships next month vanish from
+    /// the queue with nothing on screen to say so.
+    @Test func aCategoryWeHaveNoCheckboxForIsKept() {
+        #expect(LinearConnector.keep(category: "somethingLinearShipsNextMonth", excluding: []))
+        #expect(
+            LinearConnector.keep(
+                category: "somethingLinearShipsNextMonth", excluding: Self.published))
+    }
+
+    @Test func aMissingOrBlankCategoryIsKept() {
+        #expect(LinearConnector.keep(category: nil, excluding: Self.published))
+        #expect(LinearConnector.keep(category: "", excluding: Self.published))
+    }
+
+    // MARK: The checkboxes
+
+    @Test func everyPublishedCategoryShipsACheckbox() {
+        let keys = Set(
+            categoryFields.map {
+                String($0.key.dropFirst(ConnectorCatalog.linearCategoryPrefix.count))
+            })
+        #expect(keys == Self.published)
+        #expect(categoryFields.count == 17)
+    }
+
+    /// All on: installing this build must not quietly stop delivering
+    /// anything the user was already getting.
+    @Test func everyCheckboxDefaultsOn() {
+        for field in categoryFields {
+            #expect(field.isToggle)
+            #expect(field.defaultOn)
+            #expect(!field.isSecret)
+            #expect(!field.label.isEmpty)
+        }
+    }
+
+    /// Seventeen explanations would be the copy-volume problem that took this
+    /// screen from 2,018 words to 975 — and the one line there *is* belongs to
+    /// the section, not to a checkbox.
+    ///
+    /// Regression guard for a real one: the note shipped as the first field's
+    /// `help` and rendered underneath "Mentions", reading as though it
+    /// described that single category (reported with a screenshot,
+    /// 2026-09-14).
+    @Test func theGroupExplainsItselfAndNoCheckboxDoes() {
+        #expect(categoryFields.allSatisfy { $0.help.isEmpty })
+        let sections = Set(categoryFields.compactMap(\.section))
+        #expect(sections.count == 1)
+        #expect(sections.first?.title == "Notifications")
+        #expect(sections.first?.note.isEmpty == false)
+    }
+
+    // MARK: Settings → excluded set
+
+    @Test func untickedBoxesBecomeTheExcludedCategories() {
+        let excluded = ConnectorFactory.linearExcludedCategories(settings: [
+            "cat.subscriptions": "false",
+            "cat.reactions": "false",
+            "cat.feed": "false",
+            "cat.mentions": "true",
+        ])
+        #expect(excluded == ["subscriptions", "reactions", "feed"])
+    }
+
+    /// A source saved before these checkboxes existed has none of the keys,
+    /// and `boolValue(in:)` resolves an absent *or* empty key to `defaultOn`.
+    @Test func aSourceSavedBeforeTheCheckboxesExcludesNothing() {
+        #expect(ConnectorFactory.linearExcludedCategories(settings: [:]).isEmpty)
+        #expect(
+            ConnectorFactory.linearExcludedCategories(settings: ["cat.feed": ""]).isEmpty)
+        #expect(
+            ConnectorFactory.linearExcludedCategories(settings: ["apiKey": "lin_api_x"])
+                .isEmpty)
+    }
+
+    /// The prefix is how the factory recovers the enum value, so it must not
+    /// collide with the credential field beside it.
+    @Test func theCategoryPrefixClaimsNoOtherField() {
+        let all = ConnectorCatalog.descriptor(for: "linear")?.fields ?? []
+        let prefixed = all.filter { $0.key.hasPrefix(ConnectorCatalog.linearCategoryPrefix) }
+        #expect(all.count == prefixed.count + 1)
+        #expect(all.first { $0.isSecret }?.key == "apiKey")
+    }
+}
+
 // MARK: - Linear row text (Sources/App/Connectors/Linear/LinearConnector.swift)
 
 /// The ten `type` values below are the ones actually present in Brandon's

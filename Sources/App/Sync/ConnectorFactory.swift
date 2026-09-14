@@ -2,13 +2,32 @@ import Foundation
 
 /// Builds a connector from a stored config.
 enum ConnectorFactory {
+    /// The Linear categories the user has unticked, as Linear's own
+    /// `NotificationCategory` raw values.
+    ///
+    /// Reads the checkboxes the catalog declares rather than a second list of
+    /// category names, so the two cannot drift; `boolValue(in:)` resolves an
+    /// absent or empty key to `defaultOn`, which is how a source configured
+    /// before these existed comes out with nothing excluded.
+    static func linearExcludedCategories(settings: [String: String]) -> Set<String> {
+        let fields = ConnectorCatalog.descriptor(for: "linear")?.fields ?? []
+        let prefix = ConnectorCatalog.linearCategoryPrefix
+        return Set(
+            fields.lazy
+                .filter { $0.isToggle && $0.key.hasPrefix(prefix) }
+                .filter { !$0.boolValue(in: settings) }
+                .map { String($0.key.dropFirst(prefix.count)) })
+    }
+
     static func make(config: SourceConfig) -> (any Connector)? {
         let settings = config.settings
         switch config.kind {
         case "fake":
             return FakeConnector(sourceID: config.id)
         case "linear":
-            return LinearConnector(sourceID: config.id)
+            return LinearConnector(
+                sourceID: config.id,
+                excludedCategories: linearExcludedCategories(settings: settings))
         case "github":
             let field = ConnectorCatalog.descriptor(for: "github")?
                 .fields.first { $0.key == "participating" }

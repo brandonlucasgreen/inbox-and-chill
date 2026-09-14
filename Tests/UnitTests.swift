@@ -4145,7 +4145,12 @@ struct ConnectorSetupStepsTests {
         for descriptor in ConnectorCatalog.all {
             let onScreen =
                 ([descriptor.setupCostLabel, descriptor.sourceNote]
-                    + descriptor.setupSteps + descriptor.fields.map(\.help))
+                    + descriptor.setupSteps + descriptor.fields.map(\.help)
+                    // A section's note is on screen like any other copy, and
+                    // counted once however many fields share the section —
+                    // otherwise moving a sentence out of a field's `help` and
+                    // into its group would quietly escape the cap.
+                    + Array(Set(descriptor.fields.compactMap { $0.section?.note })))
                 .joined(separator: " ")
             let words = onScreen.split(whereSeparator: \.isWhitespace).count
             #expect(
@@ -4163,7 +4168,12 @@ struct ConnectorSetupStepsTests {
         for descriptor in ConnectorCatalog.all {
             let onScreen =
                 ([descriptor.setupCostLabel, descriptor.sourceNote]
-                    + descriptor.setupSteps + descriptor.fields.map(\.help))
+                    + descriptor.setupSteps + descriptor.fields.map(\.help)
+                    // A section's note is on screen like any other copy, and
+                    // counted once however many fields share the section —
+                    // otherwise moving a sentence out of a field's `help` and
+                    // into its group would quietly escape the cap.
+                    + Array(Set(descriptor.fields.compactMap { $0.section?.note })))
                 .joined(separator: " ")
             #expect(
                 !onScreen.contains("Keychain"),
