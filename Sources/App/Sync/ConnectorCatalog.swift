@@ -24,7 +24,24 @@ struct ConnectorKindDescriptor: Sendable, Identifiable {
         /// reads as being about the checkboxes. Fields with no section keep
         /// today's single group, so no other kind's layout moves. Sections
         /// render in the order they first appear in `fields`.
-        var section: String? = nil
+        var section: FieldSection? = nil
+    }
+
+    /// A titled group of fields in the editor, with the one line of
+    /// explanation the group as a whole needs.
+    ///
+    /// The `note` lives here rather than on the first field's `help` for a
+    /// reason worth keeping: as a field's help it renders *under that
+    /// field's checkbox*, so Linear's group explanation read as though it
+    /// described "Mentions" (reported 2026-09-14, with a screenshot). Copy
+    /// about a group belongs to the group — the same rule the sheet already
+    /// applies to "Stored in your Keychain".
+    struct FieldSection: Sendable, Hashable {
+        var title: String
+        /// Rendered under the section's title, above its first row — not as
+        /// a footer. A footer below seventeen checkboxes is as far from what
+        /// it explains as the field help was.
+        var note: String = ""
     }
 
     var id: String  // kind string used in SourceConfig.kind
@@ -159,9 +176,10 @@ enum ConnectorCatalog {
     /// them fire rarely**. A checkbox that appears only once its category has
     /// first arrived reads as a bug.
     ///
-    /// Labels only, no `help` past the first: `editorCopyStaysShort` counts
-    /// `help` and not `label`, and seventeen explanations would be exactly the
-    /// copy-volume problem that cut this screen from 2,018 words to 975.
+    /// Labels only, no per-field `help` at all: the one line of explanation
+    /// belongs to the section (see `FieldSection.note`), and seventeen
+    /// explanations would be exactly the copy-volume problem that cut this
+    /// screen from 2,018 words to 975.
     private static let linearCategoryFields: [ConnectorKindDescriptor.Field] = {
         let categories: [(String, String)] = [
             // Someone wants you specifically.
@@ -186,14 +204,15 @@ enum ConnectorCatalog {
             ("feed", "Pulse summaries"),
             ("subscriptions", "Issues added to a view or board"),
         ]
-        return categories.enumerated().map { index, category in
+        let section = ConnectorKindDescriptor.FieldSection(
+            title: "Notifications",
+            note:
+                "Untick a category to keep it out of the queue. These are Linear's own groupings — anything it adds later arrives until you turn it off."
+        )
+        return categories.map { category in
             .init(
                 key: "\(linearCategoryPrefix)\(category.0)", label: category.1,
-                isSecret: false,
-                help: index == 0
-                    ? "Untick a category to keep it out of the queue. These are Linear's own groupings; a kind it adds later arrives until you turn it off."
-                    : "",
-                isToggle: true, defaultOn: true, section: "Notifications")
+                isSecret: false, isToggle: true, defaultOn: true, section: section)
         }
     }()
 

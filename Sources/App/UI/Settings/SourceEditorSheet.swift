@@ -158,10 +158,25 @@ struct SourceEditorSheet: View {
                     }
                 }
 
-                ForEach(sectionedFieldGroups, id: \.title) { group in
-                    Section(group.title) {
+                ForEach(sectionedFieldGroups, id: \.section) { group in
+                    Section {
                         ForEach(group.fields) { field in
                             fieldRow(for: field)
+                        }
+                    } header: {
+                        // The note sits with the title, above the rows. As a
+                        // footer it would be seventeen checkboxes away from
+                        // what it explains; as the first field's `help` it
+                        // read as describing that one checkbox.
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(group.section.title)
+                            if !group.section.note.isEmpty {
+                                Text(Self.formatted(group.section.note))
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .textCase(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                 }
@@ -288,22 +303,23 @@ struct SourceEditorSheet: View {
     // MARK: Generic fields
 
     private struct FieldGroup {
-        var title: String
+        var section: ConnectorKindDescriptor.FieldSection
         var fields: [ConnectorKindDescriptor.Field]
     }
 
-    /// Fields that asked for a section of their own, grouped by title in the
-    /// order the titles first appear — `Dictionary(grouping:)` would order
-    /// them by hash, so the sections would shuffle between launches.
+    /// Fields that asked for a section of their own, grouped in the order the
+    /// sections first appear — `Dictionary(grouping:)` would order them by
+    /// hash, so the sections would shuffle between launches.
     private var sectionedFieldGroups: [FieldGroup] {
-        var order: [String] = []
-        var byTitle: [String: [ConnectorKindDescriptor.Field]] = [:]
+        var order: [ConnectorKindDescriptor.FieldSection] = []
+        var bySection: [ConnectorKindDescriptor.FieldSection: [ConnectorKindDescriptor.Field]] =
+            [:]
         for field in descriptor.fields {
-            guard let title = field.section else { continue }
-            if byTitle[title] == nil { order.append(title) }
-            byTitle[title, default: []].append(field)
+            guard let section = field.section else { continue }
+            if bySection[section] == nil { order.append(section) }
+            bySection[section, default: []].append(field)
         }
-        return order.map { FieldGroup(title: $0, fields: byTitle[$0] ?? []) }
+        return order.map { FieldGroup(section: $0, fields: bySection[$0] ?? []) }
     }
 
     @ViewBuilder

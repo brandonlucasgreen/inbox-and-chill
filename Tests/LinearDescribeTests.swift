@@ -76,10 +76,19 @@ struct LinearCategoryFilterTests {
     }
 
     /// Seventeen explanations would be the copy-volume problem that took this
-    /// screen from 2,018 words to 975. The group gets one line; the rest are
-    /// labels.
-    @Test func onlyOneCheckboxCarriesHelp() {
-        #expect(categoryFields.filter { !$0.help.isEmpty }.count == 1)
+    /// screen from 2,018 words to 975 — and the one line there *is* belongs to
+    /// the section, not to a checkbox.
+    ///
+    /// Regression guard for a real one: the note shipped as the first field's
+    /// `help` and rendered underneath "Mentions", reading as though it
+    /// described that single category (reported with a screenshot,
+    /// 2026-09-14).
+    @Test func theGroupExplainsItselfAndNoCheckboxDoes() {
+        #expect(categoryFields.allSatisfy { $0.help.isEmpty })
+        let sections = Set(categoryFields.compactMap(\.section))
+        #expect(sections.count == 1)
+        #expect(sections.first?.title == "Notifications")
+        #expect(sections.first?.note.isEmpty == false)
     }
 
     // MARK: Settings → excluded set
