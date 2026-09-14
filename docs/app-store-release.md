@@ -102,8 +102,9 @@ Each step needs the one before it. Times are Apple's, not ours.
    - Leave both in *Ready to Submit* and tick both on the version page
      (step 7, "In-App Purchases and Subscriptions") so they review with the
      app. A product cannot be approved on its own before the first version.
-6. **Archive and upload** — bump `MARKETING_VERSION` (the pending 1.0.0
-   bump is the natural moment) and `CURRENT_PROJECT_VERSION` on `main`, then
+6. **Archive and upload** — bump `MARKETING_VERSION` to **1.0.0** and
+   `CURRENT_PROJECT_VERSION` to **13** on `main` (0.7.0 shipped direct on
+   build 12, and a build number cannot be reused), then
    in Xcode: scheme **InboxAndChill-AppStore**, Product › Archive, Window ›
    Organizer › Distribute App › App Store Connect › Upload, *Automatically
    manage signing*, dSYM included (the store crash pipeline is MetricKit +

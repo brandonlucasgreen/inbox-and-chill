@@ -133,7 +133,7 @@ Requires macOS 15 or later.
 
 ### Build
 
-Select the processed 1.0.0 (12) upload. Export compliance is answered by
+Select the processed 1.0.0 (13) upload. Export compliance is answered by
 `ITSAppUsesNonExemptEncryption = false` in the plist; if the form still
 asks, the app uses only the standard HTTPS the OS provides, which is exempt.
 
