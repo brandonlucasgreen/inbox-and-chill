@@ -3,6 +3,16 @@
     <channel>
         <title>Inbox &amp; Chill</title>
         <item>
+            <title>0.7.0</title>
+            <pubDate>Mon, 14 Sep 2026 19:41:02 -0400</pubDate>
+            <link>https://github.com/brandonlucasgreen/inbox-and-chill</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/brandonlucasgreen/inbox-and-chill/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>0.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/brandonlucasgreen/inbox-and-chill/releases/download/v0.7.0/InboxAndChill.zip" length="6235994" type="application/octet-stream" sparkle:edSignature="RRQlLXNiu7tFFRmchqHWCyNkR8Ym9ftv8Uy69kBVr2UrP+fsoK70M3eE5S2UG8BuS3UoFNme5QtIZFl6ErWvAQ=="/>
+        </item>
+        <item>
             <title>0.6.0</title>
             <pubDate>Thu, 03 Sep 2026 20:44:12 -0400</pubDate>
             <link>https://github.com/brandonlucasgreen/inbox-and-chill</link>
