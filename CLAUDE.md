@@ -461,6 +461,36 @@ the connector 5s later. Two failures have come from this:
 | `todoist` | REST poll 120s | **completesTask**, remoteTruth, providesContext | Todoist, via a personal API token. Same to-do semantics as `reminders` — `E` dismisses locally, `C` closes in Todoist. **API v1 only** (`api.todoist.com/api/v1`); REST v2 and Sync v9 are gone. Undo is honestly lossy on a repeating task. See below. |
 | `asana` | REST poll 120s | **completesTask**, remoteTruth, providesContext | Asana, via a personal access token. **A to-do source because Asana's Inbox is not in its API** (no notifications endpoint in its OpenAPI, 2026-09-04): the queue is tasks assigned to you, one request per workspace. No priority and no recurrence on the wire, so the external id is the bare gid and undo is *not* lossy. A chosen project is **everyone's** open tasks in it — the spec allows `project` or `assignee`+`workspace`, never both. Built with no live account. See below. |
 
+### Slack's manifest must carry write scopes, and the test must match lines
+
+**`conversations.mark` needs `channels:write` / `groups:write` / `im:write` /
+`mpim:write`, and the manifest shipped with none of them until 2026-09-18.**
+So `E` on a Slack row had never once marked anything read, for anyone, since
+the connector was written — the row leaves the queue locally before the write
+is attempted, so the only symptom was "dismissed here, still bold in Slack".
+Found in `diagnostics.log`, which had recorded
+`Slack conversations.mark: missing_scope.` three times.
+
+Two things follow, and the second is the more general:
+
+- **A scope change means a new token.** Adding scopes obliges every user to
+  recreate the app from the manifest, reinstall it, and paste a fresh
+  `xoxp-`. Nothing in the app can do that step, so `markScopeAdvice` says it
+  outright rather than reporting the raw code.
+- **Never assert a scope with `contains`.** `slackManifestCoversTheFeatures`
+  had checked `manifest.contains("im:history")` since it was written, and
+  `im:history` is a substring of `mpim:history` — so the guard passed with the
+  scope deleted. It now parses the `- ` entries and compares members. Proved
+  by deleting `im:write` and expecting red: the first version stayed green.
+  **A test written to close a bug is unverified until you reintroduce the
+  bug.**
+
+And `conversations.mark` moves the read cursor **backwards** as willingly as
+forwards, so dismissing a stale mention in a channel you have since caught up
+on would re-unread everything after it. `markWouldAdvanceCursor` declines to
+call in that case; `last_read` is cached in `clearRead`, which is the one
+funnel both read signals already pass through, so the guard costs no request.
+
 ### GitLab, and the first connector built without an account
 
 `GET /api/v4/todos` is the authenticated user's To-Do list, so `gitlab` is an
