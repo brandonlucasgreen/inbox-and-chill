@@ -43,6 +43,15 @@ oauth_config:
       - im:history
       - mpim:read          # group DMs
       - mpim:history
+      - channels:write     # dismissing a row marks it read in Slack, via
+                           # conversations.mark. One write scope per
+                           # conversation type and Slack checks the one that
+                           # matches the channel, so a missing one fails only
+                           # that kind of row — which is why all four are here
+                           # even though DMs are the common case.
+      - groups:write
+      - im:write
+      - mpim:write
       - users:read         # display names for DM titles
       - reactions:read     # emoji-save gesture (reaction events)
       - reactions:write    # un-save = remove my own reaction

@@ -84,6 +84,9 @@ actor SlackConnector: Connector {
     /// Newest message ts we've seen per channel — what `conversations.mark`
     /// marks up to, and what read-state comparisons measure against.
     private var latestTS: [String: String] = [:]
+    /// Slack's own read cursor per channel, as last observed. Only used to
+    /// stop `markDone` moving that cursor *backwards*; see the mention case.
+    private var lastReadTS: [String: String] = [:]
 
     /// How often to re-check read state for channels holding items.
     private static let readStateInterval: Duration = .seconds(90)
@@ -174,13 +177,25 @@ actor SlackConnector: Connector {
                     errorDescription:
                         "Slack: no known message in \(ref.channel) to mark read.")
             }
-            _ = try await api.call("conversations.mark", ["channel": ref.channel, "ts": ts])
+            try await markRead(api: api, channel: ref.channel, ts: ts)
             unreadDMs.removeValue(forKey: ref.channel)
 
         case .mention(let ts):
             // `conversations.mark` moves last_read to exactly this message, so
             // anything newer in the channel stays unread.
-            _ = try await api.call("conversations.mark", ["channel": ref.channel, "ts": ts])
+            //
+            // It moves the cursor *backwards* just as willingly, which is the
+            // trap: dismissing a week-old mention in a channel you have since
+            // caught up on would mark everything after it unread again. So
+            // when the cursor is already past this message there is nothing
+            // to mark — clearing the row locally is the whole verb.
+            guard Self.markWouldAdvanceCursor(
+                messageTS: ts, lastRead: lastReadTS[ref.channel])
+            else {
+                mentions[ref.channel]?.removeValue(forKey: ts)
+                return
+            }
+            try await markRead(api: api, channel: ref.channel, ts: ts)
             mentions[ref.channel]?.removeValue(forKey: ts)
 
         case .save(let ts):
@@ -196,6 +211,38 @@ actor SlackConnector: Connector {
 
         case .watch:
             break  // Cleared above; it needs no Slack call.
+        }
+    }
+
+    /// Whether marking `messageTS` read would move Slack's cursor *forward*.
+    ///
+    /// `conversations.mark` sets `last_read` to whatever ts it is given, in
+    /// either direction, so marking an old message re-unreads everything
+    /// after it. An unknown cursor answers true: never having observed a read
+    /// state is not evidence of having passed this message.
+    nonisolated static func markWouldAdvanceCursor(
+        messageTS: String, lastRead: String?
+    ) -> Bool {
+        guard let lastRead else { return true }
+        return SlackTS.isNewer(messageTS, than: lastRead)
+    }
+
+    /// `conversations.mark`, with a refusal the user can act on.
+    ///
+    /// Only the mark calls route through here: `reactions.remove` is refused
+    /// over a different scope, and naming the wrong one is worse than saying
+    /// nothing.
+    private func markRead(api: SlackAPI, channel: String, ts: String) async throws {
+        do {
+            _ = try await api.call("conversations.mark", ["channel": channel, "ts": ts])
+        } catch let error as SlackError where error.slackCode != nil {
+            // Only an `ok: false` carries a code. A transport or HTTP failure
+            // arrives with none and a message that already says more than any
+            // advice could — including the response body — so it goes through
+            // untouched rather than being flattened into "refused ()".
+            throw SlackError(
+                errorDescription: Self.markScopeAdvice(code: error.slackCode!),
+                slackCode: error.slackCode)
         }
     }
 
@@ -963,6 +1010,9 @@ actor SlackConnector: Connector {
         emit: @escaping @Sendable (ConnectorEvent) -> Void
     ) {
         var cleared: [String] = []
+        // Both callers (the 90s reconcile and a `*_marked` event) land here,
+        // so this is the one place that sees every read cursor we learn.
+        if let readTS { lastReadTS[channel] = readTS }
 
         if unreadDMs[channel] != nil {
             let caughtUp =

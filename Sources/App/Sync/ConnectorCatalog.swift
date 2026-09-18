@@ -564,7 +564,7 @@ enum ConnectorCatalog {
     #endif
 
     /// The Slack app manifest, offered as a Copy button in the source
-    /// editor. Setting twelve user scopes and six event subscriptions by
+    /// editor. Setting sixteen user scopes and six event subscriptions by
     /// hand is the step that makes people give up — and get wrong.
     ///
     /// Derived mechanically from `docs/slack-app-manifest.yml`, which is the
@@ -589,6 +589,10 @@ enum ConnectorCatalog {
               - im:history
               - mpim:read
               - mpim:history
+              - channels:write
+              - groups:write
+              - im:write
+              - mpim:write
               - users:read
               - reactions:read
               - reactions:write

@@ -45,6 +45,29 @@ extension SlackConnector {
         }
     }
 
+    /// Why `conversations.mark` was refused, and what to do about it.
+    ///
+    /// Its own advice because the consequence is the one the user cannot see:
+    /// the row has already left the queue locally by the time the write is
+    /// attempted, so without this the queue and Slack silently disagree.
+    /// Shipped that way until 2026-09-18 — the manifest never carried a
+    /// single write scope, so this path had never once succeeded.
+    nonisolated static func markScopeAdvice(code: String) -> String {
+        switch code {
+        case "missing_scope", "not_allowed_token_type":
+            return """
+                Slack: marking a row read needs the `im:write`, `mpim:write`, \
+                `channels:write` and `groups:write` scopes, which this token \
+                doesn't have (\(code)). Recreate the app from the manifest in \
+                this source's setup, reinstall it to your workspace, then \
+                paste the new user token here. Rows still clear in the queue \
+                meanwhile; it's Slack that won't hear about them.
+                """
+        default:
+            return "Slack refused to mark the row read (\(code)). Re-check the user token."
+        }
+    }
+
     /// Splits the settings string into muted channel names.
     ///
     /// Accepts what a person actually types or pastes: `#random`, `random`,
