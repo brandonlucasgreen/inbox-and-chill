@@ -4225,18 +4225,31 @@ struct ConnectorSetupStepsTests {
     @Test("The Slack manifest still grants what the connector depends on")
     func slackManifestCoversTheFeatures() {
         let manifest = ConnectorCatalog.slackAppManifest
+        // Match whole list entries, never `contains`: `im:write` is a
+        // substring of `mpim:write` (as `im:history` is of `mpim:history`),
+        // so a substring check passes with the scope deleted — it did, until
+        // a control run on 2026-09-18 deleted one and the test stayed green.
+        let granted = Set(
+            manifest.split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { $0.hasPrefix("- ") }
+                .map { String($0.dropFirst(2)) })
         // Each of these is load-bearing; the comment is what breaks without it.
         let required = [
             "im:history",       // DM unreads
             "channels:history", // channel mentions
             "reactions:read",   // emoji-save gesture
             "reactions:write",  // un-save removes the reaction
+            "im:write",         // `E` marks a DM read in Slack
+            "mpim:write",       // …and a group DM
+            "channels:write",   // …and moves a public channel's read cursor
+            "groups:write",     // …and a private one's
             "users:read",       // display names instead of raw ids
             "search:read",      // Keyword Watch — the only path into a
                                 // channel you are not in
         ]
         for scope in required {
-            #expect(manifest.contains(scope), "manifest is missing \(scope)")
+            #expect(granted.contains(scope), "manifest is missing \(scope)")
         }
         #expect(manifest.contains("socket_mode_enabled: true"))
         // RTM-era event types Slack's validator rejects outright.

@@ -383,6 +383,46 @@ struct SlackKeywordWatchTests {
         #expect(SlackConnector.searchScopeAdvice(code: "weird_new_code").contains("weird_new_code"))
     }
 
+    // MARK: Marking read
+
+    /// The manifest carried no write scope at all until 2026-09-18, so every
+    /// `conversations.mark` this connector ever made was refused — silently,
+    /// because the row had already left the queue by then. The advice has to
+    /// name a scope and the reinstall, like its two siblings.
+    @Test func aRefusedMarkNamesTheScopeAndTheReinstall() {
+        let advice = SlackConnector.markScopeAdvice(code: "missing_scope")
+        #expect(advice.contains("im:write"))
+        #expect(advice.contains("channels:write"))
+        #expect(advice.contains("reinstall"))
+        #expect(advice.contains("missing_scope"))
+    }
+
+    @Test func anUnrecognisedMarkRejectionStillSaysWhatSlackReturned() {
+        #expect(SlackConnector.markScopeAdvice(code: "odd_code").contains("odd_code"))
+    }
+
+    /// `conversations.mark` takes the cursor wherever it is pointed, backwards
+    /// included — so dismissing a stale mention in a channel you have since
+    /// read would mark everything after it unread again.
+    @Test func markingNeverWalksTheReadCursorBackwards() {
+        // Mention is newer than the cursor: a real catch-up, worth the call.
+        #expect(
+            SlackConnector.markWouldAdvanceCursor(
+                messageTS: "1760000200.000100", lastRead: "1760000100.000100"))
+        // Already read past it — marking would *un*read the newer messages.
+        #expect(
+            !SlackConnector.markWouldAdvanceCursor(
+                messageTS: "1760000100.000100", lastRead: "1760000200.000100"))
+        // Exactly at the cursor: nothing to move.
+        #expect(
+            !SlackConnector.markWouldAdvanceCursor(
+                messageTS: "1760000100.000100", lastRead: "1760000100.000100"))
+        // Never observed a cursor — absence of evidence is not evidence.
+        #expect(
+            SlackConnector.markWouldAdvanceCursor(
+                messageTS: "1760000100.000100", lastRead: nil))
+    }
+
     /// Slack hands back a raw id as the channel "name" for DMs, which would
     /// otherwise render as `“brandon” in #U4NUMLRJQ`.
     @Test func directMessagesAreDescribedRatherThanPrintedAsAnID() {
