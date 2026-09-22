@@ -37,25 +37,30 @@ enum Licensing {
     /// free download, `trialDays` of full use, then a one-time in-app
     /// purchase to keep syncing (guideline 3.1.1; `docs/app-store-release.md`).
     ///
-    /// **Direct build: off**, since 2026-08-23 and still Brandon's call. A
-    /// handful of people run the direct build for free, and shipping them a
-    /// countdown that pauses their syncing would break a working app for no
-    /// reason. While off the direct build behaves **exactly as it did before
-    /// licensing existed**: no countdown, no notice, no License section, no
-    /// call to Lemon Squeezy — and, most importantly, **no trial start date
-    /// is written**. The clock lives in the Keychain and survives reinstalls
-    /// by design, so a disabled build that stamped it would have every alpha
-    /// user *instantly expired* the day the flag flipped.
+    /// **Direct build: on since 2026-09-13** (Brandon: *"I am almost ready
+    /// to release it publicly"*). It was off from 2026-08-23 while a handful
+    /// of people ran the direct build for free; the first build carrying
+    /// `true` starts **their** 14 days on its first launch, because the
+    /// switched-off controller deliberately never wrote a trial start date
+    /// (the clock lives in the Keychain and survives reinstalls, so a
+    /// disabled build that stamped it would have had every alpha user
+    /// instantly expired the day the flag flipped). Anyone who already
+    /// activated a key reads Licensed and sees no countdown.
     ///
-    /// **To turn the direct build on:** make the `#else` branch `true`. Then
-    /// check three things the unit tests cannot: an existing install gets a
-    /// fresh 14 days (its Keychain has no start date yet), a licensed install
-    /// still reads Licensed, and the expiry notice appears
-    /// (`INCHILL_LICENSE_STATE=expired` on a Debug build).
+    /// **To turn the direct build off again:** make the `#else` branch
+    /// `false` and flip `mechanicIsOn` in `Tests/LicensingTests.swift` with
+    /// it. While off the direct build behaves exactly as it did before
+    /// licensing existed: no countdown, no notice, no License section, no
+    /// call to Lemon Squeezy, and no trial start date written.
+    ///
+    /// Three things to check on a real install that the unit tests cannot:
+    /// an existing install gets a fresh 14 days (its Keychain has no start
+    /// date yet), a licensed install still reads Licensed, and the expiry
+    /// notice appears (`INCHILL_LICENSE_STATE=expired` on a Debug build).
     #if APP_STORE
         static let isEnforced = true
     #else
-        static let isEnforced = false
+        static let isEnforced = true
     #endif
 
     static let trialDays = 14

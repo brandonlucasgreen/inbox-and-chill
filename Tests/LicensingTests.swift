@@ -90,9 +90,9 @@ struct TrialMathTests {
         #expect(!Licensing.allowsSync(.notStarted, enforced: true))
     }
 
-    /// The mechanic is switched off for the alpha. Nothing may pause syncing
-    /// while it is — not even an expired clock, which is the state an alpha
-    /// user would land in if a start date ever got stamped by mistake.
+    /// The switched-off mode, kept pinned even though both builds now ship
+    /// enforced: nothing may pause syncing while the mechanic is off — not
+    /// even an expired clock.
     @Test func nothingPausesSync_whenNotEnforced() {
         for state: LicenseState in [
             .trialing(daysLeft: 1), .licensed, .expired, .notStarted,
@@ -101,12 +101,14 @@ struct TrialMathTests {
         }
     }
 
-    /// A guard on the shipped value, so turning the mechanic on is a
+    /// A guard on the shipped value, so changing the mechanic's switch is a
     /// deliberate act that trips a red test rather than something that can
-    /// ride along in an unrelated change. Flip both together.
-    @Test func mechanicIsCurrentlyOff() {
-        #expect(Licensing.isEnforced == false)
-        #expect(LicenseState.expired.allowsSync)
+    /// ride along in an unrelated change. On since 2026-09-13, in both
+    /// builds. Flip both together.
+    @Test func mechanicIsOn() {
+        #expect(Licensing.isEnforced == true)
+        #expect(!LicenseState.expired.allowsSync)
+        #expect(LicenseState.trialing(daysLeft: 1).allowsSync)
     }
 
     @Test func datesRoundTripThroughKeychainEncoding() {
