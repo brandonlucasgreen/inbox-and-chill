@@ -10,7 +10,16 @@ means which cause.
 
 ---
 
-## Where things stand (2026-09-03, evening)
+## Where things stand (2026-09-22)
+
+**1.0.0 is the first paid release**, and it ships direct only — the Mac App
+Store build is paused. It is the first release with `Licensing.isEnforced`
+on (#64), so every install that updates to it starts its 14-day trial on
+first launch. 1.0.0 ships `CURRENT_PROJECT_VERSION` **13**; 0.7.0 shipped
+**12**. The site's launch copy is its own PR in `inboxandchill.app` (#4),
+merged by hand once this release is public.
+
+## Before that (2026-09-03, evening)
 
 **0.6.0 is a feature release**: auto-grouping (#43) folds one source's rows
 by channel, issue or project, repository, Sentry project, ntfy topic or mail
