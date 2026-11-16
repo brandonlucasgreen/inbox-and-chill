@@ -36,9 +36,11 @@ holds the decision.
 - **What "expired" means is unchanged from the direct build**: syncing
   pauses, loudly (`LicenseNotice` in the panel and main window, red); the
   queue, archive, triage and settings all keep working. Nothing is deleted.
-- **The direct build runs the same mechanic through Lemon Squeezy.**
-  `Licensing.isEnforced` is `true` in both builds since 2026-09-13; before
-  that the direct build had Lemon Squeezy wired and switched off.
+- **Superseded 2026-11-16: the App Store release was scrapped** before it
+  was submitted, and both builds are free (`Licensing.isEnforced` is
+  `false`). The store target still builds; its Purchase section became an
+  optional "Support" purchase that unlocks nothing and starts no trial.
+  The trial mechanics described in this runbook are dormant.
 
 ## 2. Paperwork, in dependency order (Brandon, on the Mac)
 

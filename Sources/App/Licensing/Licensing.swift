@@ -33,35 +33,34 @@ enum LicenseState: Equatable {
 enum Licensing {
     /// **The master switch for the whole trial/purchase mechanic.**
     ///
-    /// **Store build: on.** The App Store build is the one being sold: a
-    /// free download, `trialDays` of full use, then a one-time in-app
-    /// purchase to keep syncing (guideline 3.1.1; `docs/app-store-release.md`).
+    /// **Off in both builds since 2026-11-16.**
     ///
-    /// **Direct build: on since 2026-09-13** (Brandon: *"I am almost ready
-    /// to release it publicly"*). It was off from 2026-08-23 while a handful
-    /// of people ran the direct build for free; the first build carrying
-    /// `true` starts **their** 14 days on its first launch, because the
-    /// switched-off controller deliberately never wrote a trial start date
-    /// (the clock lives in the Keychain and survives reinstalls, so a
-    /// disabled build that stamped it would have had every alpha user
-    /// instantly expired the day the flag flipped). Anyone who already
-    /// activated a key reads Licensed and sees no countdown.
+    /// **Store build:** the App Store release was scrapped before it was
+    /// submitted (Brandon, 2026-11-16), but the target still builds in CI.
+    /// It is free, with the one-time purchase kept as an optional way to
+    /// support the app: `PurchaseSection` reads this flag and becomes a
+    /// "Support" section that unlocks nothing. There is no trial to start.
     ///
-    /// **To turn the direct build off again:** make the `#else` branch
-    /// `false` and flip `mechanicIsOn` in `Tests/LicensingTests.swift` with
-    /// it. While off the direct build behaves exactly as it did before
-    /// licensing existed: no countdown, no notice, no License section, no
-    /// call to Lemon Squeezy, and no trial start date written.
+    /// **Direct build: — the app is free, with an
+    /// optional Ko-fi donation** (Brandon: *"Let's go with ko-fi - free with
+    /// donation"*). Lemon Squeezy announced it stops processing payments on
+    /// 2027-03-31, and its successor (Stripe Managed Payments) issues no
+    /// license keys, so keeping the paywall meant rebuilding checkout and key
+    /// fulfillment for an app that had made no sales. It was on from
+    /// 2026-09-13 (1.0.0) until this change, and off before that.
     ///
-    /// Three things to check on a real install that the unit tests cannot:
-    /// an existing install gets a fresh 14 days (its Keychain has no start
-    /// date yet), a licensed install still reads Licensed, and the expiry
-    /// notice appears (`INCHILL_LICENSE_STATE=expired` on a Debug build).
-    #if APP_STORE
-        static let isEnforced = true
-    #else
-        static let isEnforced = true
-    #endif
+    /// While off the direct build behaves exactly as it did before licensing
+    /// existed: no countdown, no notice, no License section, no call to
+    /// Lemon Squeezy, and no trial start date written. An install whose trial
+    /// had already expired syncs again on its first launch of an unenforced
+    /// build — `allowsSync` ignores the state when the flag is off.
+    ///
+    /// **Turning it back on is not just this line.** Every install that ran
+    /// 1.0.x has a trial start date in its Keychain, and that date survives
+    /// reinstalls — so re-enabling would put those users straight into
+    /// `.expired`. It would also need a checkout that still exists:
+    /// `Licensing/LemonSqueezy/` talks to a vendor that is shutting down.
+    static let isEnforced = false
 
     static let trialDays = 14
 
