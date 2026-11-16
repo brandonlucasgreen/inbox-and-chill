@@ -148,7 +148,7 @@ Each step needs the one before it. Times are Apple's, not ours.
 | Where | Compiled into | Job |
 |---|---|---|
 | `Licensing/*.swift` | both | `LicenseState`, trial math, `TrialNudge`, `LicenseNotice`, `AppState+License` — everything that does not care who takes the money |
-| `Licensing/LemonSqueezy/` | direct only | `LicenseController` over a license key; `LicenseSection` |
+| `Licensing/Direct/` | direct only | An always-licensed `LicenseController` stub. Was `Licensing/LemonSqueezy/` (license keys) until the direct build went free in 1.1.0. |
 | `Licensing/AppStore/` | store only | `LicenseController` over StoreKit 2; `PurchaseSection` |
 
 Same class name in both provider folders, same surface (`state`, `problem`,
@@ -221,8 +221,9 @@ the tests never run against the store target (CLAUDE.md rule 6).
   `scripts/reset-first-run.sh` wipes the whole service too.
 - **The regression guards**: `scripts/verify-bundle.sh --app-store` now
   fails if the product id literal is missing from the store binary (the
-  purchase path was not compiled in) or if `Enter License Key` is present
-  (the direct build's button leaked past its `#if`). Both run in CI on every
+  purchase path was not compiled in) or if the direct build's Ko-fi link
+  leaked past its `#if` (the `Enter License Key` check it replaced went with
+  the Lemon Squeezy code after 1.1.0). Both run in CI on every
   PR via `scripts/build-app-store.sh`.
 
 ## 4. Not verified, and how each would be

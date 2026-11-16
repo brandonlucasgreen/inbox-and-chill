@@ -352,7 +352,7 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   file is compiled into *both* targets and its `#else` branch is where the
   no-op stubs live — an `#else` in an excluded file would never compile.
   The excluded folders are `Connectors/Local`, `Connectors/Mail`,
-  `Journal`, `Licensing/LemonSqueezy`; a settings view that belongs to one
+  `Journal`, `Licensing/Direct`; a settings view that belongs to one
   of them lives *in* it (`Connectors/Mail/MailAccessView.swift`), not in
   `UI/Settings`. Adding a feature the sandbox cannot have? Put it in a
   folder, not in `AppState.swift`.
@@ -360,7 +360,7 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   (since 2026-09-09, `docs/app-store-release.md`). `Licensing/` is shared
   — state, trial math, `LicenseNotice`, the nudge, `AppState+License` —
   and each target compiles exactly one `LicenseController`:
-  `Licensing/LemonSqueezy/` (key + checkout URL; direct target only) or
+  `Licensing/Direct/` (an always-licensed stub; direct target only) or
   `Licensing/AppStore/` (StoreKit 2; store target only, excluded from the
   direct target in `project.yml`). Same class name, same surface, so the
   shared files carry no `#if` for it. **The app is free since
@@ -368,7 +368,9 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   Squeezy stops processing on 2027-03-31 and its successor issues no
   license keys, so Brandon chose free with a Ko-fi link in About
   (`SupportContact.donateURL`, direct build only — 3.1.1) over rebuilding
-  checkout. `Licensing/LemonSqueezy/` is dormant, not deleted. **The App
+  checkout. The Lemon Squeezy controller, `LicenseSection` and their
+  tests were **deleted** after 1.1.0 shipped; the direct build's
+  `LicenseController` is now a stub that is always `.licensed`. **The App
   Store release was scrapped** before submission (same day); its target
   still builds, free, with `PurchaseSection` turned into an optional
   "Support" purchase that unlocks nothing. **Re-enabling is not a one-line flip**: every 1.0.x install
@@ -379,7 +381,7 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   Free Trial, which buys the $0 "14-day Trial" product and falls back to a
   local Keychain stamp when it cannot (Brandon, 2026-09-10). `scripts/verify-bundle.sh
   --app-store` fails if the store binary lacks the product id literal or
-  contains "Enter License Key".
+  contains the Ko-fi link or the Sparkle feed URL.
   `UpdateController` is the other shape — one file, Sparkle behind
   `#if !APP_STORE`, a stub in the `#else` — because six shared files read it.
   Gate direction is always `#if !APP_STORE` around the rich code: the

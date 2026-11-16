@@ -215,11 +215,13 @@ struct TrialNudgeTests {
         #expect(TrialNudge.title(daysLeft: 3) == "Inbox & Chill trial — 3 days left")
         #expect(TrialNudge.title(daysLeft: 1) == "Inbox & Chill trial — 1 day left")
         #expect(TrialNudge.title(daysLeft: 0).contains("today"))
-        #expect(TrialNudge.body(price: Licensing.price).contains(Licensing.price))
-        #expect(!TrialNudge.body(price: Licensing.price).lowercased().contains("expired"))
+        #expect(TrialNudge.body(price: "$15").contains("$15"))
+        #expect(!TrialNudge.body(price: "$15").lowercased().contains("expired"))
         // The store build's price arrives from StoreKit and may be missing;
         // the sentence must still be one.
-        #expect(TrialNudge.body(price: nil).hasPrefix("After that, syncing pauses until you buy the app "))
+        #expect(TrialNudge.body(price: nil).hasPrefix("After that, syncing pauses until you buy the app. "))
+        // The direct build's "or enter a key" went with its Lemon Squeezy code.
+        #expect(!TrialNudge.body(price: nil).contains("key"))
     }
 }
 

@@ -309,14 +309,12 @@ else
   fi
 
   # Weak evidence, kept because a URL literal is the one string shape that
-  # survives optimisation: the Lemon Squeezy checkout and the Sparkle feed
-  # are 3.1.1 / 2.4.5(vii) rejections if they are in the binary at all.
+  # survives optimisation: the Sparkle feed is a 2.4.5(vii) rejection if it
+  # is in the binary at all, and so is the direct build's Ko-fi link (3.1.1).
   # (Absence proves little in general — CLAUDE.md rule 1 — but presence
-  # here is a real finding.)
-  # "Enter License Key" is LicenseNotice's direct-build button: a store user
-  # must never read the words (2.4.5(vi)), and the button is behind an #if
-  # that nothing but this check would notice going wrong.
-  for LITERAL in "lemonsqueezy.com" "brandonlucasgreen/inbox-and-chill/main/appcast.xml" "Enter License Key"; do
+  # here is a real finding.) The Lemon Squeezy checkout and its "Enter
+  # License Key" button used to be checked here too; that code was deleted.
+  for LITERAL in "brandonlucasgreen/inbox-and-chill/main/appcast.xml" "ko-fi.com"; do
     HITS=$(strings -a "$BINARY" | grep -c "$LITERAL" || true)
     if [ "$HITS" = "0" ]; then
       note "strings: no \"$LITERAL\""

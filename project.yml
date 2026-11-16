@@ -57,7 +57,7 @@ targets:
         # into Resources/ and the plist key would point at nothing.
         #
         # Licensing/AppStore is the store build's StoreKit checkout; it
-        # defines a LicenseController like Licensing/LemonSqueezy does, so a
+        # defines a LicenseController like Licensing/Direct does, so a
         # target compiles exactly one of the two folders.
         excludes: ["Resources/Fonts", "Licensing/AppStore"]
       - path: Sources/App/Resources/Fonts
@@ -307,11 +307,11 @@ targets:
           # it carries the `#else` no-op stubs AppState's call sites compile
           # against. Licensing is NOT cut: the shared trial code compiles
           # here too, and Licensing/AppStore supplies the StoreKit
-          # LicenseController where the direct build has Lemon Squeezy's.
+          # LicenseController where the direct build has its free stub.
           - "Connectors/Local"      # inchill listener, agent hooks, session jump
           - "Connectors/Mail"       # AppleScript into Mail: compose-only under the sandbox
           - "Journal"               # user-typed vault path; iCloud needs Full Disk Access
-          - "Licensing/LemonSqueezy" # license keys are a 2.4.5(vi) rejection; the store is the checkout
+          - "Licensing/Direct"      # the direct build's always-licensed stub; the store build has StoreKit
       - path: Sources/App/Journal/AppState+Journal.swift
       - path: Sources/App/Resources/Fonts
         type: folder

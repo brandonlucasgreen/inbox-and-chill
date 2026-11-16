@@ -2,12 +2,12 @@ import Foundation
 
 /// Where the app stands with the trial and the purchase, as one value the UI
 /// can switch over. Derived, never stored — the stored facts are the trial
-/// start date and whatever proves a purchase (a Lemon Squeezy key in the
-/// direct build, an App Store entitlement in the store build), and
+/// start date and whatever proves a purchase (an App Store entitlement; the
+/// direct build is free and has nothing to prove), and
 /// `Licensing.state` recomputes this from them whenever anything changes.
 enum LicenseState: Equatable {
     /// The store build before the user presses Start Free Trial. The direct
-    /// build never produces it: its trial starts on first launch.
+    /// build never produces it: its controller is always `.licensed`.
     case notStarted
     case trialing(daysLeft: Int)
     case expired
@@ -28,7 +28,8 @@ enum LicenseState: Equatable {
 /// Trial math — the pure half of licensing, shared by both builds and kept
 /// free of Keychain, StoreKit and URLSession so every branch is testable
 /// (rule 6). The I/O lives in one `LicenseController` per build:
-/// `LemonSqueezy/` for the direct build, `AppStore/` for the store build.
+/// `Direct/` (an always-licensed stub) for the direct build, `AppStore/`
+/// for the store build.
 /// Same class name, same surface, and each target compiles exactly one.
 enum Licensing {
     /// **The master switch for the whole trial/purchase mechanic.**
@@ -49,17 +50,18 @@ enum Licensing {
     /// fulfillment for an app that had made no sales. It was on from
     /// 2026-09-13 (1.0.0) until this change, and off before that.
     ///
-    /// While off the direct build behaves exactly as it did before licensing
-    /// existed: no countdown, no notice, no License section, no call to
-    /// Lemon Squeezy, and no trial start date written. An install whose trial
+    /// While off, nothing about licensing shows: no countdown, no notice, and
+    /// no trial start date written. The direct build has no license code
+    /// left at all — its Lemon Squeezy controller was deleted after 1.1.0,
+    /// and `Licensing/Direct/` is a stub. An install whose trial
     /// had already expired syncs again on its first launch of an unenforced
     /// build — `allowsSync` ignores the state when the flag is off.
     ///
     /// **Turning it back on is not just this line.** Every install that ran
     /// 1.0.x has a trial start date in its Keychain, and that date survives
     /// reinstalls — so re-enabling would put those users straight into
-    /// `.expired`. It would also need a checkout that still exists:
-    /// `Licensing/LemonSqueezy/` talks to a vendor that is shutting down.
+    /// `.expired`. The direct build would also need a new checkout and
+    /// license controller written from scratch.
     static let isEnforced = false
 
     static let trialDays = 14

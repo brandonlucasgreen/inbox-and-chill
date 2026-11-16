@@ -5,9 +5,10 @@ import StoreKit
 /// The **App Store build's** `LicenseController`: owns the trial and the one
 /// real purchase. Reads and writes the Keychain, talks to StoreKit 2, and
 /// publishes one `LicenseState` for the UI plus a callback for `AppState` to
-/// start or stop syncing on — the same surface the direct build's Lemon
-/// Squeezy controller has, so `AppState`, `LicenseNotice`, the welcome and
-/// the trial nudge compile unchanged against either.
+/// start or stop syncing on — the same surface as the direct build's
+/// always-licensed stub (`Licensing/Direct/`), so `AppState`,
+/// `LicenseNotice`, the welcome and the trial nudge compile unchanged
+/// against either.
 ///
 /// The math is in `Licensing` (pure, tested); this class is the I/O around
 /// it. Four rules shape it:

@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Purchase state, Start Free Trial, the Buy button and Restore — the store
-/// build's answer to the direct build's `LicenseSection`. This is where the
+/// Purchase state, Start Free Trial, the Buy button and Restore. The direct
+/// build has no counterpart (it is free; its Ko-fi link is in About). This is where the
 /// trial's state is always readable and where the one purchase happens. Restore is required by guideline 3.1.1 and is the only control
 /// here that shows a sign-in sheet.
 ///
