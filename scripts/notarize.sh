@@ -46,6 +46,35 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# --- Apple refusing on account grounds -------------------------------------
+# Apple answers HTTP 403 "A required agreement is missing or has expired" when
+# the team has an updated Program License Agreement waiting to be accepted.
+# The credentials are fine and nothing here can fix it; only the account
+# holder can, on the web. This cost three release attempts on 2026-11-16,
+# because the check below discarded notarytool's output and reported the 403
+# as unreadable credentials. Two more facts from that day: after accepting,
+# Apple kept refusing for about 20 minutes, and it was not consistent about
+# it — `history` succeeded while a DMG submission minutes later still 403'd.
+is_agreement_refusal() {
+  grep -q -e "required agreement" -e "HTTP status code: 403" "$1" 2>/dev/null
+}
+
+explain_agreement_refusal() {
+  cat >&2 <<'EOF'
+
+Apple refused because a developer agreement needs accepting (HTTP 403,
+"A required agreement is missing or has expired"). The notary credentials
+are fine; this is about the account, and only the account holder can fix it:
+
+  developer.apple.com -> Account -> review and accept the pending agreement
+  (App Store Connect -> Business shows any others)
+
+After accepting, Apple can keep refusing for up to ~20 minutes, and not
+consistently: one request may pass while the next is still refused. Wait,
+then run this again. Nothing is published until notarization succeeds.
+EOF
+}
+
 # --- Credentials, checked before spending a build -------------------------
 # Skipped for --preflight-only so a build can be checked for submittability
 # without any credentials in play.
@@ -56,17 +85,31 @@ done
 # it is unavailable. That message has twice been read as "the credentials were
 # deleted" when they were sitting there the whole time. So: retry once, and if
 # it still fails, say what is actually known rather than asserting deletion.
+#
+# notarytool's own output is kept, not discarded: every failure it can report
+# here used to come out as the same "could not read credentials" paragraph,
+# which was wrong at least once (the 403 above).
 CREDS_OK=0
+CHECK_OUT=$(mktemp)
 if [ "$PREFLIGHT_ONLY" -eq 0 ]; then
   for attempt in 1 2; do
-    if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+    if xcrun notarytool history --keychain-profile "$PROFILE" >"$CHECK_OUT" 2>&1; then
       CREDS_OK=1; break
     fi
-    [ "$attempt" -eq 1 ] && sleep 2
+    # An account refusal will not clear in two seconds; say so now.
+    if is_agreement_refusal "$CHECK_OUT"; then break; fi
+    if [ "$attempt" -eq 1 ]; then sleep 2; fi
   done
 fi
 
 if [ "$PREFLIGHT_ONLY" -eq 0 ] && [ "$CREDS_OK" -eq 0 ]; then
+  echo "notarytool said: $(grep -m1 -i "error" "$CHECK_OUT" || head -n1 "$CHECK_OUT")" >&2
+  if is_agreement_refusal "$CHECK_OUT"; then
+    explain_agreement_refusal
+    rm -f "$CHECK_OUT"
+    exit 1
+  fi
+  rm -f "$CHECK_OUT"
   cat >&2 <<EOF
 Could not read notarization credentials for the profile "$PROFILE".
 
@@ -109,6 +152,7 @@ NOTARY_PROFILE if you already use a different one.
 EOF
   exit 1
 fi
+rm -f "$CHECK_OUT"
 
 # --- Build ----------------------------------------------------------------
 if [ -z "$APP" ]; then
@@ -269,6 +313,10 @@ set -e
 ID=$(awk '/^  id: /{print $2; exit}' "$SUBMIT_OUT")
 if [ "$SUBMIT_RC" -ne 0 ] || ! grep -q "status: Accepted" "$SUBMIT_OUT"; then
   echo "==> Notarization did not succeed." >&2
+  if is_agreement_refusal "$SUBMIT_OUT"; then
+    explain_agreement_refusal
+    exit 1
+  fi
   # The submission log is the only place that says *why*. "Invalid" on its
   # own is useless, so always fetch it.
   [ -n "$ID" ] && xcrun notarytool log "$ID" --keychain-profile "$PROFILE" >&2 || true
@@ -377,6 +425,12 @@ if [ "$SKIP_DMG" -eq 0 ]; then
   DMG_ID=$(awk '/^  id: /{print $2; exit}' "$DMG_OUT")
   if [ "$DMG_RC" -ne 0 ] || ! grep -q "status: Accepted" "$DMG_OUT"; then
     echo "==> The DMG was not notarized." >&2
+    # Seen 2026-11-16: the app was accepted and the DMG, minutes later, was
+    # refused with the 403 — Apple's agreement check had not settled.
+    if is_agreement_refusal "$DMG_OUT"; then
+      explain_agreement_refusal
+      exit 1
+    fi
     [ -n "$DMG_ID" ] && xcrun notarytool log "$DMG_ID" --keychain-profile "$PROFILE" >&2 || true
     exit 1
   fi
