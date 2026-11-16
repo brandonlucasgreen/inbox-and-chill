@@ -64,8 +64,8 @@ enum SettingsTab: Hashable, Sendable {
     case general, notifications, sources, diagnostics, about
 }
 
-/// The app itself: how you summon it, whether it starts with the Mac, how it
-/// updates, and what you paid for it.
+/// The app itself: how you summon it, whether it starts with the Mac, and how
+/// it updates.
 struct GeneralPane: View {
     @Environment(AppState.self) private var appState
 
@@ -91,11 +91,10 @@ struct GeneralPane: View {
                 LicenseSection()
             }
             #else
-            // The store is the checkout: trial state, Buy and Restore. Always
-            // shown, since `Licensing.isEnforced` is always on in this build.
-            if Licensing.isEnforced {
-                PurchaseSection()
-            }
+            // The store is the checkout. With the mechanic off this is the
+            // optional "Support" purchase; it is shown either way, so a
+            // past buyer can always reach Restore.
+            PurchaseSection()
             // The store build has no Notifications tab; its two sections
             // sit here instead. See the shell's doc comment.
             NotificationSections()

@@ -17,7 +17,8 @@ Squeezy stops processing payments on 2027-03-31, so the first release
 after this change has to ship **before then**: anyone on 1.0.x whose trial
 ran out has a Buy button pointing at a checkout that will stop working, and
 this release is what lets them sync again. `Licensing.isEnforced` is
-`false` in the direct build; the store build is unchanged.
+`false` in both builds. The App Store release was scrapped; its target
+still builds, free, with an optional purchase.
 
 ## Before that (2026-09-22)
 

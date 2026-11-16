@@ -33,11 +33,15 @@ enum LicenseState: Equatable {
 enum Licensing {
     /// **The master switch for the whole trial/purchase mechanic.**
     ///
-    /// **Store build: on.** The App Store build is the one being sold: a
-    /// free download, `trialDays` of full use, then a one-time in-app
-    /// purchase to keep syncing (guideline 3.1.1; `docs/app-store-release.md`).
+    /// **Off in both builds since 2026-11-16.**
     ///
-    /// **Direct build: off since 2026-11-16 — the app is free, with an
+    /// **Store build:** the App Store release was scrapped before it was
+    /// submitted (Brandon, 2026-11-16), but the target still builds in CI.
+    /// It is free, with the one-time purchase kept as an optional way to
+    /// support the app: `PurchaseSection` reads this flag and becomes a
+    /// "Support" section that unlocks nothing. There is no trial to start.
+    ///
+    /// **Direct build: — the app is free, with an
     /// optional Ko-fi donation** (Brandon: *"Let's go with ko-fi - free with
     /// donation"*). Lemon Squeezy announced it stops processing payments on
     /// 2027-03-31, and its successor (Stripe Managed Payments) issues no
@@ -56,11 +60,7 @@ enum Licensing {
     /// reinstalls — so re-enabling would put those users straight into
     /// `.expired`. It would also need a checkout that still exists:
     /// `Licensing/LemonSqueezy/` talks to a vendor that is shutting down.
-    #if APP_STORE
-        static let isEnforced = true
-    #else
-        static let isEnforced = false
-    #endif
+    static let isEnforced = false
 
     static let trialDays = 14
 

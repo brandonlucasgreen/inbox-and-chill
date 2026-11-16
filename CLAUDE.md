@@ -363,15 +363,17 @@ Follow `NtfyConnector.item(from:)`, `JournalWriter.line(for:)`,
   `Licensing/LemonSqueezy/` (key + checkout URL; direct target only) or
   `Licensing/AppStore/` (StoreKit 2; store target only, excluded from the
   direct target in `project.yml`). Same class name, same surface, so the
-  shared files carry no `#if` for it. **The direct build is free since
-  2026-11-16** (`Licensing.isEnforced` is `false` there, `true` in the
-  store build): Lemon Squeezy stops processing on 2027-03-31 and its
-  successor issues no license keys, so Brandon chose free with a Ko-fi
-  link in About (`SupportContact.donateURL`, direct build only — 3.1.1)
-  over rebuilding checkout. `Licensing/LemonSqueezy/` is dormant, not
-  deleted. **Re-enabling is not a one-line flip**: every 1.0.x install
+  shared files carry no `#if` for it. **The app is free since
+  2026-11-16** (`Licensing.isEnforced` is `false` in both builds): Lemon
+  Squeezy stops processing on 2027-03-31 and its successor issues no
+  license keys, so Brandon chose free with a Ko-fi link in About
+  (`SupportContact.donateURL`, direct build only — 3.1.1) over rebuilding
+  checkout. `Licensing/LemonSqueezy/` is dormant, not deleted. **The App
+  Store release was scrapped** before submission (same day); its target
+  still builds, free, with `PurchaseSection` turned into an optional
+  "Support" purchase that unlocks nothing. **Re-enabling is not a one-line flip**: every 1.0.x install
   has a trial start in its Keychain and would land in `.expired`.
-  `mechanicMatchesTheBuild` in `Tests/LicensingTests.swift` pins both values. **The store trial starts on a
+  `mechanicIsOff` in `Tests/LicensingTests.swift` pins the value. **The store trial starts on a
   press, not on launch** — `LicenseState.notStarted` pauses syncing and
   the welcome's first screen, the notice bar and Settings all carry Start
   Free Trial, which buys the $0 "14-day Trial" product and falls back to a

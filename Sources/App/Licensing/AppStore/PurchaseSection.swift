@@ -4,16 +4,24 @@ import SwiftUI
 /// build's answer to the direct build's `LicenseSection`. This is where the
 /// trial's state is always readable and where the one purchase happens. Restore is required by guideline 3.1.1 and is the only control
 /// here that shows a sign-in sheet.
+///
+/// **With `Licensing.isEnforced` off (since 2026-11-16) it is "Support":**
+/// the app is free, there is no trial, and the same one-time purchase is
+/// offered as an optional way to support it. It unlocks nothing.
 struct PurchaseSection: View {
     @Environment(AppState.self) private var appState
 
     private var license: LicenseController { appState.license }
 
     var body: some View {
-        Section("Purchase") {
-            stateLine
+        Section(Licensing.isEnforced ? "Purchase" : "Support") {
+            if Licensing.isEnforced {
+                stateLine
+            } else {
+                supportLine
+            }
 
-            if license.canStartTrial {
+            if Licensing.isEnforced, license.canStartTrial {
                 LabeledContent("Free trial") {
                     Button(FirstRun.startTrialButton) {
                         Task { await license.startTrial() }
@@ -22,7 +30,7 @@ struct PurchaseSection: View {
                 }
             }
             if license.state != .licensed {
-                LabeledContent("One-time purchase") {
+                LabeledContent(Licensing.isEnforced ? "One-time purchase" : "Optional purchase") {
                     Button(buyLabel) {
                         Task { await license.purchase() }
                     }
@@ -70,6 +78,21 @@ struct PurchaseSection: View {
         if license.isPurchasing { return "Buying…" }
         if let price = license.priceLabel { return "Buy — \(price)" }
         return "Buy"
+    }
+
+    /// The free app's line: either thanks, or what the purchase is for.
+    @ViewBuilder private var supportLine: some View {
+        if license.state == .licensed {
+            LabeledContent("Status") {
+                Text("Purchased — thank you")
+            }
+        } else {
+            Text(
+                "Inbox & Chill is free. If it saves you some time, the one-time purchase is an optional way to support it. It doesn't unlock anything."
+            )
+            .font(.system(size: 13))
+            .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder private var stateLine: some View {
