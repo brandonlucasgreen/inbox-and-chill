@@ -12,7 +12,8 @@ means which cause.
 
 ## Where things stand (2026-11-16)
 
-**The direct build is free again**, with a Ko-fi link in About. Lemon
+**1.1.0 (build 14) is the release that makes it free.** The direct build is
+free again, with a Ko-fi link in About. Lemon
 Squeezy stops processing payments on 2027-03-31, so the first release
 after this change has to ship **before then**: anyone on 1.0.x whose trial
 ran out has a Buy button pointing at a checkout that will stop working, and
