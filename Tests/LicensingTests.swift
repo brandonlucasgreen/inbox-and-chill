@@ -103,11 +103,18 @@ struct TrialMathTests {
 
     /// A guard on the shipped value, so changing the mechanic's switch is a
     /// deliberate act that trips a red test rather than something that can
-    /// ride along in an unrelated change. On since 2026-09-13, in both
-    /// builds. Flip both together.
-    @Test func mechanicIsOn() {
-        #expect(Licensing.isEnforced == true)
-        #expect(!LicenseState.expired.allowsSync)
+    /// ride along in an unrelated change. The store build sells the app; the
+    /// direct build has been free (Ko-fi donations) since 2026-11-16.
+    @Test func mechanicMatchesTheBuild() {
+        #if APP_STORE
+            #expect(Licensing.isEnforced == true)
+            #expect(!LicenseState.expired.allowsSync)
+        #else
+            #expect(Licensing.isEnforced == false)
+            // The point of the switch: an install whose 1.0.x trial already
+            // ran out must sync again once it updates.
+            #expect(LicenseState.expired.allowsSync)
+        #endif
         #expect(LicenseState.trialing(daysLeft: 1).allowsSync)
     }
 

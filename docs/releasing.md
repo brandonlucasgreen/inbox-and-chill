@@ -10,7 +10,16 @@ means which cause.
 
 ---
 
-## Where things stand (2026-09-22)
+## Where things stand (2026-11-16)
+
+**The direct build is free again**, with a Ko-fi link in About. Lemon
+Squeezy stops processing payments on 2027-03-31, so the first release
+after this change has to ship **before then**: anyone on 1.0.x whose trial
+ran out has a Buy button pointing at a checkout that will stop working, and
+this release is what lets them sync again. `Licensing.isEnforced` is
+`false` in the direct build; the store build is unchanged.
+
+## Before that (2026-09-22)
 
 **1.0.0 is the first paid release**, and it ships direct only — the Mac App
 Store build is paused. It is the first release with `Licensing.isEnforced`
@@ -55,13 +64,13 @@ Check Now on 2026-08-26. `UpdateController.checkInterval` is still 86,400 —
 once a day — so "no update came through" usually means the check has not run
 yet, not that the release is broken.
 
-**The trial is live (since 2026-09-13).** `Licensing.isEnforced` is `true`, so
-a shipped build starts a 14-day trial on its first launch, shows the License
-section in Settings, and pauses syncing when the trial ends until a Lemon
-Squeezy key is activated. Every install that ran a build from before the flip
-has no trial start date in its Keychain yet, so the first enforced build it
-runs starts its 14 days then — nobody upgrades into an expired trial. Turning
-it off again is its own decision, not part of cutting a release.
+**The trial was live from 2026-09-13 to 2026-11-16, and is now off in the
+direct build** (see the top of this file). While it was on, a shipped build
+started a 14-day trial on first launch and paused syncing at the end of it
+until a Lemon Squeezy key was activated. Those trial start dates are still
+in users' Keychains, so turning the mechanic back on would put every 1.0.x
+install straight into an expired trial — that would be a product decision
+with its own migration, not part of cutting a release.
 
 ---
 

@@ -10,4 +10,10 @@ enum SupportContact {
     static let email = "help@bgreen.lol"
 
     static var mailtoURL: URL? { URL(string: "mailto:\(email)") }
+
+    #if !APP_STORE
+    /// Brandon's Ko-fi page — the direct build is free, and this is how
+    /// someone chips in. Never compiled into the store build (3.1.1).
+    static let donateURL = URL(string: "https://ko-fi.com/bgreenlol")!
+    #endif
 }

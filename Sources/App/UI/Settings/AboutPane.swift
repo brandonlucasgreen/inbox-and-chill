@@ -53,6 +53,26 @@ struct AboutPane: View {
                 }
             }
 
+            // Direct build only. The App Store build is sold through the
+            // store, and guideline 3.1.1 bars an app from pointing at an
+            // outside way to pay — a donation link included.
+            #if !APP_STORE
+            Section("Support") {
+                Text(
+                    "Inbox & Chill is free. If it saves you some time, a coffee on Ko-fi helps me keep building it."
+                )
+                .font(.system(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
+
+                Link(destination: SupportContact.donateURL) {
+                    Label("Support on Ko-fi", systemImage: "heart")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top, 2)
+            }
+            #endif
+
             Section("Thanks") {
                 LabeledContent("Keyboard shortcut recording") {
                     Link(

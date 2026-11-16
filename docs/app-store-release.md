@@ -36,9 +36,10 @@ holds the decision.
 - **What "expired" means is unchanged from the direct build**: syncing
   pauses, loudly (`LicenseNotice` in the panel and main window, red); the
   queue, archive, triage and settings all keep working. Nothing is deleted.
-- **The direct build runs the same mechanic through Lemon Squeezy.**
-  `Licensing.isEnforced` is `true` in both builds since 2026-09-13; before
-  that the direct build had Lemon Squeezy wired and switched off.
+- **The direct build is free since 2026-11-16** (Ko-fi donations; Lemon
+  Squeezy is shutting down). It ran the same mechanic through Lemon Squeezy
+  from 2026-09-13 to then. Whether the store build stays paid while the
+  direct one is free is an open question for Brandon.
 
 ## 2. Paperwork, in dependency order (Brandon, on the Mac)
 
