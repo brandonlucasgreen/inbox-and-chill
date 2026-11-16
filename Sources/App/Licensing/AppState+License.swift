@@ -6,7 +6,7 @@ import UserNotifications
 /// system banners the trial sends on its way out.
 ///
 /// Compiled into **both** targets against whichever `LicenseController` the
-/// target has — `LemonSqueezy/` in the direct build, `AppStore/` in the
+/// target has — the `Direct/` stub in the direct build, `AppStore/` in the
 /// store build (`docs/app-store-release.md`). Both expose the same `state`,
 /// `priceLabel` and callbacks, which is all this file reads. `AppState`
 /// keeps only the stored `license` property, which an extension cannot hold.
@@ -120,12 +120,6 @@ enum TrialNudge {
     /// build) and may not have loaded yet, so the sentence works without it.
     nonisolated static func body(price: String?) -> String {
         let cost = price.map { "buy the app (\($0))" } ?? "buy the app"
-        #if !APP_STORE
-            return
-                "After that, syncing pauses until you \(cost) or enter a key. Your queue and settings stay put."
-        #else
-            return
-                "After that, syncing pauses until you \(cost). Your queue and settings stay put."
-        #endif
+        return "After that, syncing pauses until you \(cost). Your queue and settings stay put."
     }
 }

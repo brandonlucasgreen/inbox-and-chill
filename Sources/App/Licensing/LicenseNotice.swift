@@ -84,17 +84,10 @@ struct LicenseNotice: View {
     }
 
     @ViewBuilder private var purchaseButtons: some View {
-                #if !APP_STORE
-                    if let url = Licensing.purchaseURL {
-                        Link("Buy — \(Licensing.price)", destination: url)
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    Button("Enter License Key") {
-                        openSettings()
-                        WindowActivation.focusSettings()
-                    }
-                    .font(.system(size: 11))
-                #else
+                // The direct build is free and has no checkout (its Lemon
+                // Squeezy key flow was deleted in 1.1.x), so only the store
+                // build has buttons here — and only if it is ever enforced.
+                #if APP_STORE
                     // The store is the checkout: Buy runs StoreKit's own
                     // sheet. Until the price has loaded the button leads to
                     // Settings, where `PurchaseSection` says why it hasn't.

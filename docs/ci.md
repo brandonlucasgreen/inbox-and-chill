@@ -61,7 +61,7 @@ ends by running `scripts/verify-bundle.sh --app-store` on the result:
 | The `apple-events` entitlement is **absent** | Nothing in the store build sends Apple events; the sandbox makes Mail compose-only regardless. |
 | `SUFeedURL`, `SUPublicEDKey`, `NSAppleEventsUsageDescription` are **absent** from the plist | Their presence means the target's plist regressed toward the direct build's. |
 | No `Sparkle.framework`, no `MacOS/inchill`, one executable, no nested bundles | Every executable in a store bundle needs the sandbox entitlement; these are exactly the ones this build must not carry. |
-| `lemonsqueezy.com` and the appcast URL are not in the binary | A URL literal survives optimisation, so this is the one `strings` check worth having: either is a rejection (3.1.1, 2.4.5(vii)). |
+| `ko-fi.com` and the appcast URL are not in the binary | A URL literal survives optimisation, so this is the one `strings` check worth having: either is a rejection (3.1.1, 2.4.5(vii)). The `lemonsqueezy.com` check it replaced went with that code after 1.1.0. |
 | `PrivacyInfo.xcprivacy`, `LSApplicationCategoryType`, `ITSAppUsesNonExemptEncryption` | Required for an upload; the rejection arrives by e-mail after the fact. Both builds carry them, so both flavours of the audit check them. |
 
 The store target builds into its own derived data (`build/AppStore`),

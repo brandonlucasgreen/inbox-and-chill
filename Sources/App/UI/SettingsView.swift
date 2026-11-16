@@ -85,11 +85,6 @@ struct GeneralPane: View {
             // (Brandon, 2026-09-08, on seeing exactly that toggle.)
             #if !APP_STORE
             UpdatesSection()
-            // Hidden while the mechanic is off, so an alpha build shows no
-            // trace of a product that isn't for sale yet.
-            if Licensing.isEnforced {
-                LicenseSection()
-            }
             #else
             // The store is the checkout. With the mechanic off this is the
             // optional "Support" purchase; it is shown either way, so a

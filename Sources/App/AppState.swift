@@ -14,8 +14,9 @@ final class AppState {
     let store: Store
     /// Stored here because a stored property cannot live in an extension;
     /// everything else about licensing is in `Licensing/AppState+License.swift`.
-    /// One class of this name per build: Lemon Squeezy in the direct build,
-    /// StoreKit in the App Store build (`Licensing/LemonSqueezy`, `Licensing/AppStore`).
+    /// One class of this name per build: an always-licensed stub in the
+    /// direct build, StoreKit in the App Store build (`Licensing/Direct`,
+    /// `Licensing/AppStore`).
     let license: LicenseController
     private(set) var engine: SyncEngine!
 
