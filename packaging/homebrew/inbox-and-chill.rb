@@ -4,8 +4,8 @@
 #
 # Edit this file, never the copy in the tap.
 cask "inbox-and-chill" do
-  version "1.0.0"
-  sha256 "9e1fe5b0213bb043c467073dcd8c9edca4ff328f8fc8991b717cce585e32da46"
+  version "1.1.0"
+  sha256 "3c749e084555725e20bddf8fa2e8a2834d16b0ec864879b9994269bf8aa05c6a"
 
   # The DMG's filename carries no version, so the *asset* link is stable across
   # releases; the tag in the path still pins this cask to the release it names,
