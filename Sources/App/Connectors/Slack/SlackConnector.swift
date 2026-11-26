@@ -8,6 +8,9 @@ import os
 ///
 /// - `dm` — an unread DM or group DM, one item per conversation (not per
 ///   message), cleared when Slack's own read-state says you've caught up.
+///   When the newest message quotes a channel message (a kudos bot's
+///   "you received a taco"), the row opens that message instead; see
+///   `SlackQuotedMessage.swift`.
 /// - `mention` — a `<@you>` in a channel, one item per message.
 /// - `emoji_save` — you reacted with the configured save emoji (default
 ///   📌 `:pushpin:`), Slack's Saved-for-Later having no API at all.
@@ -87,6 +90,19 @@ actor SlackConnector: Connector {
     /// Slack's own read cursor per channel, as last observed. Only used to
     /// stop `markDone` moving that cursor *backwards*; see the mention case.
     private var lastReadTS: [String: String] = [:]
+    /// Where a quoting DM opens, keyed by `<dm channel>:<dm ts>`, so a
+    /// re-seed does not search again. Hits only: a miss is searched again
+    /// the next time the row is built.
+    private var quotedOriginals: [String: QuotedOriginal] = [:]
+    /// Set when Slack refuses the quote search in a way retrying can't fix.
+    /// Separate from `searchDisabled`, which belongs to the keyword watch and
+    /// is what makes it explain itself.
+    private var quoteSearchRefused = false
+
+    /// How long a just-arrived quoting DM waits before its one retry. A
+    /// kudos bot DMs within a second of the message it quotes, which can be
+    /// before Slack's search has indexed that message.
+    private static let quoteRetryDelay: Duration = .seconds(10)
 
     /// How often to re-check read state for channels holding items.
     private static let readStateInterval: Duration = .seconds(90)
@@ -910,10 +926,17 @@ actor SlackConnector: Connector {
                 }
                 return
             }
-            let item = await makeDMItem(
-                channelID: channel, isMPIM: channelType == "mpim", text: text, ts: ts)
+            let isMPIM = channelType == "mpim"
+            let item = await makeDMItem(channelID: channel, isMPIM: isMPIM, text: text, ts: ts)
             unreadDMs[channel] = item
             emit(.upsert([item]))
+            if item.url == deepLink(channel: channel), Self.quotedMessage(in: text) != nil {
+                Task {
+                    try? await Task.sleep(for: Self.quoteRetryDelay)
+                    await self.retryQuotedOriginal(
+                        channel: channel, isMPIM: isMPIM, text: text, ts: ts, emit: emit)
+                }
+            }
             return
         }
 
@@ -1038,20 +1061,103 @@ actor SlackConnector: Connector {
 
     // MARK: - Item builders
 
+    /// A DM row opens the conversation, except when its newest message
+    /// quotes a channel message (a kudos bot's "You received a taco from
+    /// @alice in #deploys"): then it opens the quoted message, because the DM only
+    /// repeats it. The payload keeps the DM's own channel and ts, so `E`
+    /// still marks the DM read.
     private func makeDMItem(
         channelID: String, isMPIM: Bool, text: String?, ts: String
     ) async -> RemoteItem {
         let name = await dmName(channelID: channelID, isMPIM: isMPIM)
+        let original = await quotedOriginal(dmChannel: channelID, dmTS: ts, text: text)
         return RemoteItem(
             externalID: "dm-\(channelID)",
             kind: "dm",
             title: "DM: \(name)",
             snippet: Self.truncate(renderText(text), Self.snippetLimit),
-            url: deepLink(channel: channelID),
+            url: original?.url ?? deepLink(channel: channelID),
             actorName: isMPIM ? nil : name,
             occurredAt: SlackTS.date(ts) ?? .now,
             highSignal: true,
-            payload: Self.payload(channel: channelID, ts: ts))
+            payload: Self.payload(channel: channelID, ts: ts, permalink: original?.permalink))
+    }
+
+    private struct QuotedOriginal {
+        var url: String
+        /// The https form, for `AppState.open` when Slack isn't installed.
+        var permalink: String?
+    }
+
+    /// The quoted message a DM points at, found with `search.messages`.
+    ///
+    /// nil when the DM quotes nothing, the search fails, or no match fits,
+    /// and the row then opens the DM as before. A refusal is logged and
+    /// stops further quote searches, but sets no error on the source: the
+    /// DM row still works, and the keyword watch is what names a missing
+    /// `search:read` scope.
+    private func quotedOriginal(
+        dmChannel: String, dmTS: String, text: String?
+    ) async -> QuotedOriginal? {
+        guard let quoted = Self.quotedMessage(in: text) else { return nil }
+        let key = "\(dmChannel):\(dmTS)"
+        if let known = quotedOriginals[key] { return known }
+        guard let api, !quoteSearchRefused else { return nil }
+
+        let response: SlackJSON
+        do {
+            response = try await api.call(
+                "search.messages",
+                [
+                    "query": Self.quoteSearchQuery(quoted), "count": "20",
+                    "sort": "timestamp", "sort_dir": "desc",
+                ])
+        } catch {
+            let code = (error as? SlackError)?.slackCode ?? ""
+            if Self.permanentSearchFailures.contains(code) { quoteSearchRefused = true }
+            Self.searchLog.error(
+                """
+                quoted DM search failed: code=\(code, privacy: .public) \
+                \(error.localizedDescription, privacy: .public)
+                """)
+            return nil
+        }
+
+        guard
+            let match = Self.originalMatch(
+                among: response["messages"]["matches"].array ?? [], for: quoted,
+                notAfter: dmTS),
+            let ts = match["ts"].nonEmptyString
+        else {
+            Self.searchLog.notice(
+                """
+                quoted DM \(dmChannel, privacy: .public): no match in \
+                \(quoted.channel, privacy: .public)
+                """)
+            return nil
+        }
+        let permalink = match["permalink"].nonEmptyString
+        let original = QuotedOriginal(
+            url: permalink.flatMap { Self.nativeLink(fromPermalink: $0, teamID: teamID) }
+                ?? permalink ?? deepLink(channel: quoted.channel, message: ts),
+            permalink: permalink)
+        quotedOriginals[key] = original
+        return original
+    }
+
+    /// The one retry for a quoting DM whose search missed on arrival. It
+    /// only acts while the row still shows that message: a newer DM has
+    /// had its own search, and a read one has left the queue.
+    private func retryQuotedOriginal(
+        channel: String, isMPIM: Bool, text: String?, ts: String,
+        emit: @escaping @Sendable (ConnectorEvent) -> Void
+    ) async {
+        guard let current = unreadDMs[channel], latestTS[channel] == ts else { return }
+        let item = await makeDMItem(channelID: channel, isMPIM: isMPIM, text: text, ts: ts)
+        guard item.url != current.url, latestTS[channel] == ts, unreadDMs[channel] != nil
+        else { return }
+        unreadDMs[channel] = item
+        emit(.upsert([item]))
     }
 
     private func makeMentionItem(
